@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portfolio 2.0 — Cinematic POC</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/styles/main.css" />
+  </head>
+  <body>
+    <div id="scroll-root" class="scroll-root" aria-hidden="true"></div>
+
+    <div id="viewport" class="viewport">
+      <canvas id="scene-canvas" aria-label="Cinematic 3D portfolio scene"></canvas>
+
+      <div class="hud" aria-live="polite">
+        <p class="hud__eyebrow">Portfolio 2.0 · Proof of concept</p>
+        <h1 class="hud__title" id="vignette-title">Arrival</h1>
+        <p class="hud__subtitle" id="vignette-subtitle">
+          Camera settles into the first vignette on load.
+        </p>
+        <div class="hud__progress" aria-hidden="true">
+          <span class="hud__progress-fill" id="scroll-progress"></span>
+        </div>
+        <p class="hud__hint">Scroll or swipe to rotate through vignettes</p>
+      </div>
+
+      <div class="terminal-panel" id="terminal-panel" hidden>
+        <div class="terminal-panel__chrome">
+          <span class="terminal-panel__dot"></span>
+          <span class="terminal-panel__dot"></span>
+          <span class="terminal-panel__dot"></span>
+          <span class="terminal-panel__label">origin.sh</span>
+        </div>
+        <pre class="terminal-panel__body" id="terminal-output"></pre>
+        <button type="button" class="terminal-panel__run" id="terminal-run">
+          Run sequence
+        </button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

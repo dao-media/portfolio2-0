@@ -1,0 +1,18 @@
+{
+  "name": "portfolio2-0",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Portfolio 2.0 — cinematic scroll-driven Three.js proof of concept",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^6.3.5"
+  },
+  "dependencies": {
+    "three": "^0.172.0"
+  }
+}
