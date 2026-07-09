@@ -1,6 +1,7 @@
 node_modules
 dist
 .cache
+public/assets/models
 .DS_Store
 *.local
 .env
