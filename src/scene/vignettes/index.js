@@ -1,56 +1,5 @@
 import * as THREE from "three";
-import { createLabelSprite } from "../math.js";
-
-export class BaseVignette {
-  /**
-   * @param {object} meta
-   * @param {string} meta.id
-   * @param {string} meta.title
-   * @param {string} meta.subtitle
-   * @param {number} meta.orbitAngle
-   */
-  constructor(meta) {
-    this.meta = meta;
-    this.group = new THREE.Group();
-    this.group.name = meta.id;
-    this.interactives = [];
-    this._hovered = null;
-  }
-
-  mount(scene) {
-    scene.add(this.group);
-  }
-
-  dispose() {
-    this.group.removeFromParent();
-  }
-
-  update() {}
-
-  setActive() {}
-
-  setInactive() {}
-
-  getFocusPoint() {
-    return new THREE.Vector3(0, 0.8, 0);
-  }
-
-  getCameraBasePosition() {
-    return new THREE.Vector3(0, 1.35, 4.2);
-  }
-
-  handlePointerDown() {
-    return false;
-  }
-
-  handlePointerUp() {
-    return false;
-  }
-
-  handlePointerMove() {
-    return false;
-  }
-}
+import { BaseVignette, createLabelSprite } from "./BaseVignette.js";
 
 export class PortalVignette extends BaseVignette {
   constructor(meta) {
@@ -96,88 +45,6 @@ export class PortalVignette extends BaseVignette {
     const pulse = 1 + Math.sin(time * 1.4) * 0.03;
     this.group.children[0].scale.setScalar(pulse);
     this.group.children[1].rotation.z = time * 0.18;
-  }
-}
-
-export class WorkbenchVignette extends BaseVignette {
-  /**
-   * @param {object} meta
-   * @param {{ showTerminal: () => void }} hooks
-   */
-  constructor(meta, hooks) {
-    super(meta);
-    this.hooks = hooks;
-
-    const desk = new THREE.Mesh(
-      new THREE.BoxGeometry(3.2, 0.18, 1.8),
-      new THREE.MeshStandardMaterial({ color: 0x2a2118, roughness: 0.92 })
-    );
-    desk.position.y = 0.55;
-    this.group.add(desk);
-
-    const monitor = new THREE.Mesh(
-      new THREE.BoxGeometry(1.35, 1.02, 0.12),
-      new THREE.MeshStandardMaterial({ color: 0xd8d2c4, roughness: 0.55, metalness: 0.08 })
-    );
-    monitor.position.set(-0.35, 1.35, -0.15);
-    this.group.add(monitor);
-
-    const screen = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.05, 0.72),
-      new THREE.MeshStandardMaterial({
-        color: 0x0b140d,
-        emissive: 0x1d5d24,
-        emissiveIntensity: 0.55,
-        roughness: 0.35
-      })
-    );
-    screen.position.set(-0.35, 1.35, -0.08);
-    screen.userData.interactive = true;
-    screen.userData.action = "terminal";
-    this.group.add(screen);
-    this.interactives.push(screen);
-
-    const tower = new THREE.Mesh(
-      new THREE.BoxGeometry(0.42, 1.05, 0.42),
-      new THREE.MeshStandardMaterial({ color: 0xe7e1d3, roughness: 0.62 })
-    );
-    tower.position.set(0.95, 1.02, 0.05);
-    this.group.add(tower);
-
-    const keyboard = new THREE.Mesh(
-      new THREE.BoxGeometry(0.95, 0.05, 0.34),
-      new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.8 })
-    );
-    keyboard.position.set(-0.2, 0.68, 0.42);
-    this.group.add(keyboard);
-
-    const label = createLabelSprite("Retro Workbench", { scale: 1.05 });
-    label.position.set(0, 2.25, 0);
-    this.group.add(label);
-  }
-
-  getFocusPoint() {
-    return new THREE.Vector3(0.1, 1.05, 0);
-  }
-
-  getCameraBasePosition() {
-    return new THREE.Vector3(0.35, 1.45, 3.85);
-  }
-
-  setActive() {
-    this.hooks.showTerminal();
-  }
-
-  setInactive() {
-    this.hooks.hideTerminal?.();
-  }
-
-  handlePointerDown(intersection) {
-    if (intersection?.object?.userData?.action === "terminal") {
-      this.hooks.showTerminal(true);
-      return true;
-    }
-    return false;
   }
 }
 
@@ -228,3 +95,5 @@ export class GalleryVignette extends BaseVignette {
     return true;
   }
 }
+
+export { DesktopVignette } from "./DesktopVignette.js";

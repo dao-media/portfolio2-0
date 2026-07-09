@@ -2,46 +2,54 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Portfolio 2.0 — Cinematic POC</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap"
-      rel="stylesheet"
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     />
+    <title>Portfolio 2.0 — Stage Prototype</title>
     <link rel="stylesheet" href="/src/styles/main.css" />
+    <link rel="stylesheet" href="/src/styles/myspace-page.css" />
+    <link rel="stylesheet" href="/src/styles/crt-power-on.css" />
+    <link rel="stylesheet" href="/src/styles/xp-boot.css" />
   </head>
   <body>
-    <div id="scroll-root" class="scroll-root" aria-hidden="true"></div>
+    <canvas id="scene-canvas" aria-label="Cinematic 3D portfolio stage"></canvas>
 
-    <div id="viewport" class="viewport">
-      <canvas id="scene-canvas" aria-label="Cinematic 3D portfolio scene"></canvas>
-
-      <div class="hud" aria-live="polite">
-        <p class="hud__eyebrow">Portfolio 2.0 · Proof of concept</p>
-        <h1 class="hud__title" id="vignette-title">Arrival</h1>
-        <p class="hud__subtitle" id="vignette-subtitle">
-          Camera settles into the first vignette on load.
-        </p>
-        <div class="hud__progress" aria-hidden="true">
-          <span class="hud__progress-fill" id="scroll-progress"></span>
-        </div>
-        <p class="hud__hint">Scroll or swipe to rotate through vignettes</p>
+    <div class="ui">
+      <div class="wordmark"><b>Portfolio 2.0</b>&nbsp;&nbsp;Camera Choreography Prototype</div>
+      <div class="readout mono" id="readout">STAGE 000.0°</div>
+      <div class="caption" id="caption">
+        <span class="index mono" id="capIndex">01 / 03</span>
+        <span>
+          <span class="name" id="capName">Monolith</span>
+          <span class="desc" id="capDesc"></span>
+        </span>
       </div>
+      <div class="dots" id="dots" role="tablist" aria-label="Vignettes"></div>
+      <div class="hint">Scroll · Swipe · Arrow keys</div>
+    </div>
 
-      <div class="terminal-panel" id="terminal-panel" hidden>
-        <div class="terminal-panel__chrome">
-          <span class="terminal-panel__dot"></span>
-          <span class="terminal-panel__dot"></span>
-          <span class="terminal-panel__dot"></span>
-          <span class="terminal-panel__label">origin.sh</span>
-        </div>
-        <pre class="terminal-panel__body" id="terminal-output"></pre>
-        <button type="button" class="terminal-panel__run" id="terminal-run">
-          Run sequence
-        </button>
+    <div class="myspace-panel scroll-capture" id="myspace-panel" data-scroll-capture hidden>
+      <div class="myspace-panel__chrome">
+        <button type="button" class="myspace-panel__close" id="myspace-close" aria-label="Close profile">×</button>
+        <span class="myspace-panel__brand">myspace</span>
+        <span class="myspace-panel__tag">Profile</span>
       </div>
+      <div class="myspace-panel__body" id="myspace-panel-body"></div>
+    </div>
+
+    <div id="myspace-crt-host" aria-hidden="true"></div>
+
+    <div class="fader" id="fader"></div>
+
+    <div id="audio-toggle-root" class="audio-fab-root"></div>
+
+    <!-- CRT boot — captured to monitor texture before MySpace dashboard (see CrtPowerOnSequence.js) -->
+    <div id="crt-power-on-root" class="crt-power-on" hidden aria-hidden="true">
+      <div class="crt-power-on__page"></div>
+      <div class="crt-power-on__beam"></div>
+      <div class="crt-power-on__flash"></div>
+      <div class="crt-power-on__scanlines"></div>
     </div>
 
     <script type="module" src="/src/main.js"></script>

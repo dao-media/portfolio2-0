@@ -1,0 +1,337 @@
+/* XP boot — captured to CRT monitor texture (1024×768) */
+
+#xp-crt-host {
+  position: fixed;
+  left: 0;
+  top: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.001;
+  z-index: -1;
+}
+
+.xp-crt {
+  position: relative;
+  width: 1024px;
+  height: 768px;
+  overflow: hidden;
+  font-family: Tahoma, "Segoe UI", Verdana, sans-serif;
+  color: #fff;
+  background: #050505;
+}
+
+.xp-crt--fade {
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.xp-crt--blackout {
+  background: #000;
+}
+
+.xp-crt__skip {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 20;
+  padding: 2px 6px;
+  border: none;
+  background: rgba(0, 0, 0, 0.45);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.xp-phase {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.xp-phase[hidden] {
+  display: none !important;
+}
+
+/* Power gate — shown on monitor when off */
+.xp-phase--power {
+  flex-direction: column;
+  gap: 14px;
+  background: radial-gradient(circle at 50% 42%, #141414 0%, #030403 70%);
+}
+
+.xp-power-btn {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border: none;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #d4c4a8 0%, #a89272 48%, #8b7355 100%);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  pointer-events: none;
+}
+
+.xp-power-btn__ring {
+  position: absolute;
+  inset: 11px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-radius: 50%;
+}
+
+.xp-power-btn__led {
+  position: absolute;
+  left: 50%;
+  top: 17px;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
+  border-radius: 50%;
+  background: #6f6;
+  box-shadow: 0 0 8px #6f6;
+  animation: xp-led-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes xp-led-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.xp-power-label {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.28em;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* Boot screen */
+.xp-phase--boot {
+  padding: 0;
+  background: #000;
+}
+
+.xp-boot-bg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.xp-boot-bar {
+  position: absolute;
+  left: 50%;
+  top: 63%;
+  transform: translateX(-50%);
+  width: 240px;
+  height: 16px;
+  border-radius: 3px;
+  background: #1a1a1a;
+  border: 1px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.65);
+  overflow: hidden;
+  z-index: 2;
+}
+
+.xp-boot-bar__block {
+  position: absolute;
+  top: 2px;
+  width: 44px;
+  height: 10px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #7ec8ff 0%, #2a84d4 45%, #1a6eb5 100%);
+  animation: xp-bar-slide 1.6s linear infinite;
+}
+
+.xp-boot-bar__block:nth-child(1) {
+  animation-delay: 0s;
+}
+.xp-boot-bar__block:nth-child(2) {
+  animation-delay: 0.35s;
+}
+.xp-boot-bar__block:nth-child(3) {
+  animation-delay: 0.7s;
+}
+
+@keyframes xp-bar-slide {
+  0% {
+    left: -48px;
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  100% {
+    left: 244px;
+    opacity: 0;
+  }
+}
+
+/* Welcome */
+.xp-phase--welcome {
+  padding: 0;
+  background: #245edb;
+}
+
+.xp-welcome-screen {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+/* Login — XP user picker */
+.xp-phase--login {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
+  background: linear-gradient(145deg, #4f95e8 0%, #2f73d4 38%, #1a52b8 100%);
+}
+
+.xp-login-main {
+  position: relative;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  padding: 0 36px;
+}
+
+.xp-login-divider {
+  position: absolute;
+  left: 50%;
+  top: 8%;
+  bottom: 8%;
+  width: 2px;
+  margin-left: -1px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.85) 18%,
+    rgba(255, 255, 255, 0.85) 82%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.35);
+}
+
+.xp-login-left {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding-right: 28px;
+  text-align: center;
+}
+
+.xp-login-logo {
+  display: block;
+  width: min(100%, 300px);
+  height: auto;
+  mix-blend-mode: screen;
+}
+
+.xp-login-prompt {
+  margin: 0;
+  max-width: 280px;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.xp-login-users {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 28px;
+}
+
+.xp-user-tile {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  max-width: 360px;
+  padding: 8px 12px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  pointer-events: none;
+}
+
+.xp-user-tile.is-hover,
+.xp-user-tile.is-selected {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.xp-user-tile--disabled {
+  opacity: 0.42;
+  cursor: default;
+  filter: grayscale(0.85);
+}
+
+.xp-user-tile--disabled .xp-user-tile__name {
+  color: rgba(255, 255, 255, 0.52);
+}
+
+.xp-user-tile--disabled .xp-user-tile__frame {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.xp-user-tile--disabled.is-hover,
+.xp-user-tile--disabled.is-selected {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.xp-user-tile__frame {
+  display: block;
+  flex-shrink: 0;
+  padding: 2px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 4px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.xp-user-tile__avatar {
+  display: block;
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+}
+
+.xp-user-tile__name {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xp-boot-bar__block,
+  .xp-power-btn__led {
+    animation: none;
+  }
+}

@@ -11,6 +11,7 @@ export class CameraRig {
     this.introComplete = false;
     this.orbitOffset = new THREE.Vector2();
     this.orbitTarget = new THREE.Vector2();
+    this.canStartDrag = () => true;
     this._dragActive = false;
     this._pointerId = null;
     this._lastPointer = new THREE.Vector2();
@@ -18,6 +19,7 @@ export class CameraRig {
 
   attach(canvas) {
     this.canvas = canvas;
+    this.isDragging = false;
     canvas.addEventListener("pointerdown", this._onPointerDown);
     canvas.addEventListener("pointermove", this._onPointerMove);
     canvas.addEventListener("pointerup", this._onPointerUp);
@@ -33,8 +35,9 @@ export class CameraRig {
   }
 
   _onPointerDown = (event) => {
-    if (!this.introComplete) return;
+    if (!this.introComplete || !this.canStartDrag()) return;
     this._dragActive = true;
+    this.isDragging = true;
     this._pointerId = event.pointerId;
     this._lastPointer.set(event.clientX, event.clientY);
     this.canvas.setPointerCapture(event.pointerId);
@@ -53,6 +56,7 @@ export class CameraRig {
   _onPointerUp = (event) => {
     if (event.pointerId !== this._pointerId) return;
     this._dragActive = false;
+    this.isDragging = false;
     this._pointerId = null;
     this.canvas.classList.remove("is-dragging");
     try {

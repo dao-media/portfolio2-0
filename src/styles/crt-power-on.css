@@ -1,0 +1,137 @@
+/**
+ * CRT power-on boot — plays on #crt-power-on-root before the MySpace canvas intro.
+ * Captured to the monitor CanvasTexture each frame (see CrtPowerOnSequence.js).
+ */
+
+.crt-power-on {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 1024px;
+  height: 768px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #030403;
+  pointer-events: none;
+  z-index: -1;
+  isolation: isolate;
+}
+
+.crt-power-on.is-playing {
+  visibility: visible;
+}
+
+.crt-power-on__page {
+  position: absolute;
+  inset: 0;
+  background: #ece9d8;
+  clip-path: inset(50% 50% 50% 50%);
+  animation: crt-page-open 1.15s ease-out forwards;
+}
+
+.crt-power-on__beam {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 88%;
+  height: 5px;
+  margin: -2.5px 0 0 -44%;
+  background: rgba(160, 255, 130, 0.85);
+  box-shadow:
+    0 0 18px rgba(120, 255, 100, 0.55),
+    0 0 42px rgba(80, 220, 70, 0.35);
+  opacity: 0;
+  transform: scaleX(0.02);
+  animation: crt-beam 1.15s ease-out forwards;
+}
+
+.crt-power-on__flash {
+  position: absolute;
+  inset: 0;
+  background: rgba(245, 255, 235, 0.38);
+  opacity: 0;
+  animation: crt-flash 1.15s ease-out forwards;
+}
+
+.crt-power-on__scanlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.04) 0,
+    rgba(0, 0, 0, 0.04) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  box-shadow: inset 0 0 120px rgba(0, 0, 0, 0.14);
+}
+
+@keyframes crt-beam {
+  0%,
+  6% {
+    opacity: 0;
+    transform: scaleX(0.02);
+  }
+
+  7% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+
+  23% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+
+  30%,
+  100% {
+    opacity: 0;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes crt-page-open {
+  0%,
+  6% {
+    clip-path: inset(50% 50% 50% 50%);
+  }
+
+  7%,
+  23% {
+    clip-path: inset(calc(50% - 2px) 6% calc(50% - 2px) 6%);
+  }
+
+  24% {
+    clip-path: inset(calc(50% - 2px) 6% calc(50% - 2px) 6%);
+  }
+
+  45% {
+    clip-path: inset(18% 5% 18% 5%);
+  }
+
+  58% {
+    clip-path: inset(0 0 0 0);
+  }
+
+  100% {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes crt-flash {
+  0%,
+  51% {
+    opacity: 0;
+  }
+
+  58% {
+    opacity: 0.38;
+  }
+
+  82%,
+  100% {
+    opacity: 0;
+  }
+}

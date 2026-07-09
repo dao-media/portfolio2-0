@@ -3,11 +3,7 @@ import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment
 import { ScrollController } from "./ScrollController.js";
 import { CameraRig } from "./CameraRig.js";
 import { shortestAngleDelta } from "./math.js";
-import {
-  PortalVignette,
-  WorkbenchVignette,
-  GalleryVignette
-} from "./vignettes/index.js";
+import { PortalVignette, DesktopVignette, GalleryVignette } from "./vignettes/index.js";
 import { HUDController } from "../ui/HUDController.js";
 
 const VIGNETTE_META = [
@@ -18,9 +14,9 @@ const VIGNETTE_META = [
     orbitAngle: 0
   },
   {
-    id: "workbench",
-    title: "Retro Workbench",
-    subtitle: "Tap the monitor or use the terminal panel to run the origin sequence.",
+    id: "desktop",
+    title: "Retro Desktop",
+    subtitle: "Click bulletins or blog posts on the monitor — or use the MySpace admin panel.",
     orbitAngle: (Math.PI * 2) / 3
   },
   {
@@ -42,7 +38,7 @@ export class PortfolioExperience {
     this.currentIndex = 0;
     this.carouselAngle = 0;
     this.carouselTargetAngle = 0;
-    this._pointerDownHit = null;
+    this._screenHover = false;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x07080c);
@@ -87,11 +83,15 @@ export class PortfolioExperience {
     floor.receiveShadow = true;
     this.scene.add(floor);
 
+    const mySpace = this.hud.getMySpaceScreen();
     this.vignettes = [
       new PortalVignette(VIGNETTE_META[0]),
-      new WorkbenchVignette(VIGNETTE_META[1], {
-        showTerminal: (force) => this.hud.showTerminal(force),
-        hideTerminal: () => this.hud.hideTerminal()
+      new DesktopVignette(VIGNETTE_META[1], {
+        renderer: this.renderer,
+        mySpace,
+        showPanel: () => this.hud.showMySpacePanel(),
+        hidePanel: () => this.hud.hideMySpacePanel(),
+        onScreenChange: (item) => this.hud.mySpacePanel.syncFromScreen(item)
       }),
       new GalleryVignette(VIGNETTE_META[2])
     ];
@@ -105,6 +105,7 @@ export class PortfolioExperience {
     this.scene.add(this.carousel);
 
     this.cameraRig = new CameraRig(this.camera);
+    this.cameraRig.canStartDrag = () => !this._screenHover;
     this.cameraRig.attach(canvas);
     this.cameraRig.startIntro();
 
@@ -113,8 +114,9 @@ export class PortfolioExperience {
       sectionCount: this.vignettes.length
     });
 
-    canvas.addEventListener("pointerdown", this._onPointerDown);
-    canvas.addEventListener("pointerup", this._onPointerUp);
+    canvas.addEventListener("pointerdown", this._onPointerDown, { capture: true });
+    canvas.addEventListener("pointermove", this._onPointerMove, { capture: true });
+    canvas.addEventListener("pointerleave", this._onPointerLeave, { capture: true });
 
     window.addEventListener("resize", this._onResize);
     this._onResize();
@@ -156,14 +158,27 @@ export class PortfolioExperience {
   _onPointerDown = (event) => {
     if (!this.cameraRig.introComplete) return;
     this._updatePointer(event);
-    this._pointerDownHit = this._pickInteractive();
-    if (this._pointerDownHit) {
-      this.vignettes[this.currentIndex].handlePointerDown(this._pointerDownHit);
+    const hit = this._pickInteractive();
+    if (hit) {
+      event.stopImmediatePropagation();
+      this.vignettes[this.currentIndex].handlePointerDown(hit);
     }
   };
 
-  _onPointerUp = () => {
-    this._pointerDownHit = null;
+  _onPointerMove = (event) => {
+    if (!this.cameraRig.introComplete) return;
+    this._updatePointer(event);
+    const hit = this._pickInteractive();
+    const active = this.vignettes[this.currentIndex];
+    const hovering = active.handlePointerMove(hit);
+    this._screenHover = Boolean(hovering);
+    this.canvas.style.cursor = hovering ? "pointer" : this.cameraRig.isDragging ? "grabbing" : "grab";
+  };
+
+  _onPointerLeave = () => {
+    this._screenHover = false;
+    this.vignettes[this.currentIndex]?.handlePointerLeave?.();
+    this.canvas.style.cursor = "grab";
   };
 
   _animate() {

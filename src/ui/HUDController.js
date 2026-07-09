@@ -1,27 +1,30 @@
-const CLI_LINES = [
-  "$ ./origin.sh --boot",
-  "loading memory modules .......... ok",
-  "mounting curiosity drive ........ ok",
-  "scanning childhood artifacts .... 3 found",
-  "",
-  "> first computer: Pentium II tower",
-  "> first ISP: AOL (free trial disc)",
-  "> first website: hand-coded HTML",
-  "",
-  "status: ready for portfolio 2.0"
-];
+import { MySpaceScreen } from "./MySpaceScreen.js";
+import { MySpacePanel } from "./MySpacePanel.js";
 
 export class HUDController {
   constructor() {
     this.titleEl = document.getElementById("vignette-title");
     this.subtitleEl = document.getElementById("vignette-subtitle");
     this.progressEl = document.getElementById("scroll-progress");
-    this.terminalPanel = document.getElementById("terminal-panel");
-    this.terminalOutput = document.getElementById("terminal-output");
-    this.terminalRun = document.getElementById("terminal-run");
-    this._typingTimer = null;
 
-    this.terminalRun?.addEventListener("click", () => this.runTerminalSequence());
+    this.mySpaceScreen = new MySpaceScreen();
+    this.mySpacePanel = new MySpacePanel();
+
+    this.mySpaceScreen.setChangeHandler((item) => {
+      this.mySpacePanel.syncFromScreen(item);
+    });
+    this.mySpaceScreen.setPoweredOnHandler(() => {
+      this.updateMySpacePanelForVignette(this._vignetteIndex);
+    });
+    this._vignetteIndex = 0;
+
+    this.mySpacePanel.setHandlers({
+      onNavigate: (id) => {
+        if (id === null) this.mySpaceScreen.backToDashboard();
+        else this.mySpaceScreen.openItem(id);
+      },
+      onClose: () => this.hideMySpacePanel()
+    });
   }
 
   setVignette(meta) {
@@ -35,37 +38,31 @@ export class HUDController {
     }
   }
 
-  showTerminal(forceRun = false) {
-    if (!this.terminalPanel) return;
-    this.terminalPanel.hidden = false;
-    if (forceRun || !this.terminalOutput?.textContent) {
-      this.runTerminalSequence();
+  getMySpaceScreen() {
+    return this.mySpaceScreen;
+  }
+
+  showMySpacePanel() {
+    this.mySpacePanel.mirrorScreen(this.mySpaceScreen);
+    this.mySpacePanel.show();
+  }
+
+  hideMySpacePanel() {
+    this.mySpacePanel.hide();
+  }
+
+  /** Show fullscreen profile on mobile when the desktop vignette is active. */
+  updateMySpacePanelForVignette(index) {
+    this._vignetteIndex = index;
+    const isDesktop = index === 1;
+    const isMobileLayout = window.matchMedia("(max-width: 900px)").matches;
+    const poweredOn = this.mySpaceScreen.isPoweredOn;
+
+    if (isDesktop && isMobileLayout && poweredOn) {
+      this.showMySpacePanel();
+      return;
     }
-  }
 
-  hideTerminal() {
-    if (this.terminalPanel) this.terminalPanel.hidden = true;
-  }
-
-  runTerminalSequence() {
-    if (!this.terminalOutput) return;
-    window.clearInterval(this._typingTimer);
-    this.terminalOutput.textContent = "";
-    let lineIndex = 0;
-    let charIndex = 0;
-
-    this._typingTimer = window.setInterval(() => {
-      const line = CLI_LINES[lineIndex] ?? "";
-      this.terminalOutput.textContent += line.charAt(charIndex);
-      charIndex += 1;
-      if (charIndex >= line.length) {
-        this.terminalOutput.textContent += "\n";
-        lineIndex += 1;
-        charIndex = 0;
-      }
-      if (lineIndex >= CLI_LINES.length) {
-        window.clearInterval(this._typingTimer);
-      }
-    }, 18);
+    this.hideMySpacePanel();
   }
 }

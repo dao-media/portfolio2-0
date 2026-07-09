@@ -1,0 +1,604 @@
+/* SpaceHey-style MySpace profile — responsive for CRT capture and mobile fullscreen */
+
+.ms-root {
+  box-sizing: border-box;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 12.1px;
+  line-height: 1.35;
+  color: #000;
+  background: #fff;
+  -webkit-font-smoothing: antialiased;
+}
+
+.ms-root *,
+.ms-root *::before,
+.ms-root *::after {
+  box-sizing: border-box;
+}
+
+#myspace-crt-host {
+  position: fixed;
+  left: -120vw;
+  top: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* CRT capture — page fills IE content pane edge-to-edge; no viewport padding. */
+.ms-root--crt {
+  overflow: visible;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.ms-root--crt .ms-viewport {
+  height: var(--ms-capture-h, auto);
+  max-height: none;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: visible;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.ms-root--crt .ms-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+/* Site chrome — full width, internal padding only (like a real browser page). */
+.ms-root--crt .ms-header {
+  width: 100%;
+  margin: 0;
+  border-radius: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  gap: 0.35rem 0.5rem;
+  padding: 0.35rem 0.55rem;
+}
+
+.ms-root--crt .ms-header__account {
+  display: none;
+}
+
+.ms-root--crt .ms-header__search-input {
+  width: 4.25rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ms-root--crt .ms-nav {
+  width: 100%;
+  margin: 0;
+  border-radius: 0;
+  flex-wrap: wrap;
+  overflow: visible;
+  max-width: 100%;
+  padding: 0.28rem 0.55rem;
+  font-size: 0.62rem;
+  line-height: 1.35;
+}
+
+.ms-root--crt .ms-nav__item,
+.ms-root--crt .ms-nav__sep {
+  white-space: nowrap;
+}
+
+.ms-root--crt .ms-body {
+  padding: 0.45rem 0.55rem 0.65rem;
+  gap: 0.5rem;
+  max-width: 100%;
+}
+
+.ms-root--crt .ms-col {
+  max-width: 100%;
+  overflow: visible;
+  min-width: 0;
+}
+
+.ms-root--crt .ms-module__body,
+.ms-root--crt .ms-module,
+.ms-root--crt .ms-body {
+  overflow: visible;
+}
+
+.ms-root--crt .ms-profile__name {
+  font-size: 1.15rem;
+}
+
+.ms-root--crt .ms-friends {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.3rem 0.25rem;
+}
+
+.ms-root--crt .ms-friend__img,
+.ms-root--crt .ms-friend__initials {
+  max-width: 2.75rem;
+}
+
+.ms-root--live {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  font-size: clamp(13.2px, 3.74vw, 15.4px);
+}
+
+.ms-viewport {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ms-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  padding: 0.45rem 0.6rem;
+  background: #003399;
+  color: #fff;
+}
+
+.ms-header__logo {
+  display: block;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.ms-header__tag {
+  display: block;
+  font-size: 0.65rem;
+  opacity: 0.95;
+}
+
+.ms-header__search {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.ms-header__search-label {
+  font-size: 0.65rem;
+  white-space: nowrap;
+}
+
+.ms-header__search-input {
+  width: min(7rem, 18vw);
+  min-width: 3rem;
+  height: 1.25rem;
+  padding: 0 0.25rem;
+  border: 1px solid #333;
+  font: inherit;
+}
+
+.ms-header__search-btn {
+  height: 1.25rem;
+  padding: 0 0.45rem;
+  border: 1px solid #808080;
+  background: #ece9d8;
+  font: inherit;
+  cursor: default;
+}
+
+.ms-header__account {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.35rem;
+  justify-content: flex-end;
+  font-size: 0.65rem;
+}
+
+.ms-header__account a {
+  color: #fff;
+  text-decoration: none;
+}
+
+.ms-header__account span {
+  opacity: 0.75;
+}
+
+/* ——— Sub nav ——— */
+
+.ms-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0;
+  align-items: center;
+  padding: 0.35rem 0.5rem;
+  background: #6699ff;
+  color: #fff;
+  font-size: 0.65rem;
+  line-height: 1.4;
+}
+
+.ms-nav__sep {
+  margin: 0 0.2rem;
+  opacity: 0.65;
+}
+
+.ms-nav__item.is-active {
+  color: #ffffcc;
+}
+
+/* ——— Two-column body ——— */
+
+.ms-body {
+  display: grid;
+  grid-template-columns: minmax(0, 38%) minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0.6rem;
+  align-items: start;
+}
+
+.ms-col {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ms-col--left,
+.ms-col--right {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+/* ——— Profile ——— */
+
+.ms-profile__name {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.15;
+  word-break: break-word;
+}
+
+.ms-profile__card {
+  display: grid;
+  grid-template-columns: minmax(0, 5.5rem) minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: start;
+}
+
+.ms-profile__photo {
+  display: block;
+  width: 100%;
+  max-width: 5.5rem;
+  height: auto;
+  aspect-ratio: 1 / 0.85;
+  object-fit: cover;
+  border: 1px solid #8899aa;
+}
+
+.ms-profile__meta {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ms-profile__meta li {
+  margin: 0 0 0.2rem;
+  word-break: break-word;
+}
+
+.ms-profile__mood,
+.ms-profile__login,
+.ms-profile__view {
+  margin: 0;
+  word-break: break-word;
+}
+
+.ms-profile__view {
+  color: #0000ee;
+}
+
+/* ——— Modules ——— */
+
+.ms-module {
+  border: 1px solid #6699ff;
+  background: #fff;
+  overflow: hidden;
+}
+
+.ms-module__title {
+  margin: 0;
+  padding: 0.3rem 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.ms-module--blue .ms-module__title {
+  background: #6699ff;
+}
+
+.ms-module--orange .ms-module__title {
+  background: #ff9933;
+}
+
+.ms-module__body {
+  padding: 0.45rem;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.ms-module__body a {
+  color: #0000ee;
+  word-break: break-all;
+}
+
+/* ——— Contact grid ——— */
+
+.ms-contact__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem 0.5rem;
+  padding: 0.45rem;
+}
+
+.ms-contact__link {
+  display: block;
+  color: #0000ee;
+  word-break: break-word;
+}
+
+/* ——— Interests ——— */
+
+.ms-interests {
+  display: flex;
+  flex-direction: column;
+}
+
+.ms-interests__row {
+  display: grid;
+  grid-template-columns: minmax(0, 34%) minmax(0, 1fr);
+  border-bottom: 1px solid #ccc;
+}
+
+.ms-interests__row:last-child {
+  border-bottom: 0;
+}
+
+.ms-interests__label {
+  padding: 0.3rem 0.4rem;
+  background: #e8f0ff;
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.ms-interests__value {
+  padding: 0.3rem 0.4rem;
+  word-break: break-word;
+}
+
+/* ——— Blog list ——— */
+
+.ms-section-title {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.ms-blog {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ms-blog__link {
+  display: block;
+  color: #0000ee;
+  text-decoration: none;
+  word-break: break-word;
+}
+
+.ms-blog__link.is-hover,
+.ms-blog__link:hover {
+  color: #ff6600;
+}
+
+.ms-blog__title {
+  display: block;
+  font-size: 0.75rem;
+}
+
+.ms-blog__meta {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.65rem;
+  color: #666;
+}
+
+/* ——— Blurbs ——— */
+
+.ms-blurb__label {
+  margin: 0 0 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #0000ee;
+}
+
+.ms-blurb__text {
+  margin: 0 0 0.55rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ms-blurb__text:last-child {
+  margin-bottom: 0;
+}
+
+/* ——— Friends ——— */
+
+.ms-friends__count {
+  margin: 0 0 0.45rem;
+}
+
+.ms-friends {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.45rem 0.35rem;
+}
+
+.ms-friend {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  text-align: center;
+}
+
+.ms-friend__name {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: #0000ee;
+  font-size: 0.65rem;
+  word-break: break-word;
+  width: 100%;
+}
+
+.ms-friend__img,
+.ms-friend__initials {
+  display: block;
+  width: 100%;
+  max-width: 3.25rem;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border: 1px solid #aaa;
+}
+
+.ms-friend__initials {
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.7rem;
+}
+
+/* ——— Comments ——— */
+
+.ms-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.ms-comment__author {
+  display: block;
+  color: #0000ee;
+  margin-bottom: 0.15rem;
+}
+
+.ms-comment__text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ——— Detail view ——— */
+
+.ms-detail {
+  border: 1px solid #6699ff;
+  padding: 0.55rem;
+  background: #fff;
+  word-break: break-word;
+}
+
+.ms-detail__back {
+  display: inline-block;
+  margin-bottom: 0.5rem;
+  color: #0000ee;
+  text-decoration: none;
+}
+
+.ms-detail__title {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.ms-detail__date {
+  margin: 0 0 0.55rem;
+  color: #666;
+  font-size: 0.7rem;
+}
+
+.ms-detail__body {
+  white-space: pre-wrap;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+/* ——— Mobile / narrow ——— */
+
+@media (max-width: 520px) {
+  .ms-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ms-header__search,
+  .ms-header__account {
+    justify-content: flex-start;
+  }
+
+  .ms-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ms-friends {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ms-contact__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ——— Live fullscreen panel ——— */
+
+#myspace-panel .ms-root--live {
+  flex: 1;
+  min-height: 0;
+}
+
+#myspace-panel.myspace-panel--fullscreen {
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+}
+
+#myspace-panel.myspace-panel--fullscreen .myspace-panel__chrome {
+  flex-shrink: 0;
+}
+
+#myspace-panel.myspace-panel--fullscreen .ms-viewport {
+  flex: 1;
+  min-height: 0;
+}
+
+@media (max-width: 900px) {
+  #myspace-panel:not([hidden]) {
+    inset: 0;
+    left: 0;
+    right: 0;
+    top: 0;
+    width: 100vw;
+    height: 100dvh;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+    z-index: 10;
+  }
+}
