@@ -204,14 +204,23 @@ export function remapSidekickScreenUvs(geometry, bounds = null) {
 }
 
 export function applySidekickScreenMapSettings(texture, map = SIDEKICK_SCREEN_MAP) {
+  applySidekickDisplayOrientation(texture, map);
+}
+
+/**
+ * Lock the LCD atlas to authored mesh UVs — the screen rig handles swivel orientation.
+ * @param {THREE.Texture} texture
+ * @param {typeof SIDEKICK_SCREEN_MAP} [map]
+ */
+export function applySidekickDisplayOrientation(texture, map = SIDEKICK_SCREEN_MAP) {
   texture.flipY = map.flipY;
-  texture.center.set(map.center, map.center);
-  texture.rotation = map.rotation;
-  texture.repeat.set(map.repeatX, map.repeatY);
-  texture.offset.set(map.offsetX, map.offsetY);
+  texture.center.set(map.center ?? 0, map.center ?? 0);
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.matrixAutoUpdate = false;
+  texture.rotation = map.rotation;
+  texture.repeat.set(map.repeatX, map.repeatY);
+  texture.offset.set(map.offsetX, map.offsetY);
   texture.updateMatrix();
   texture.needsUpdate = true;
 }

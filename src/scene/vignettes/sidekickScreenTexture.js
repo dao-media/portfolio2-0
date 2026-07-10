@@ -1,5 +1,8 @@
 import * as THREE from "three";
-import { applySidekickScreenMapSettings } from "./screenTextureMap.js";
+import {
+  applySidekickDisplayOrientation,
+  applySidekickScreenMapSettings
+} from "./screenTextureMap.js";
 
 /** Bump to force re-snapshot of authored GLB geometry (never remaps UVs). */
 export const SIDEKICK_SCREEN_UV_VERSION = 6;
@@ -181,6 +184,31 @@ export function drawSidekickScreenComposite(
   ctx.drawImage(frame, 0, 0, size, size);
 }
 
+/**
+ * LCD readout — GLB exports SCREENIMAGE as fully metallic, which blacks out the
+ * composite splash under stage lighting when the phone rests closed.
+ * @param {THREE.Material} material
+ */
+export function configureSidekickScreenMaterial(material) {
+  if (!material) return;
+
+  material.metalness = 0;
+  material.roughness = 0.38;
+  material.color.setHex(0xffffff);
+  material.emissive.setHex(0xffffff);
+  material.emissiveIntensity = 0.9;
+  if (material.map) {
+    material.emissiveMap = material.map;
+  }
+  material.toneMapped = false;
+  material.side = THREE.DoubleSide;
+  material.polygonOffset = true;
+  material.polygonOffsetFactor = -2;
+  material.polygonOffsetUnits = -2;
+  material.depthWrite = true;
+  material.visible = true;
+}
+
 /** Keep authored GLB UVs — only re-clone from the saved original when version bumps. */
 function restoreAuthoredSidekickGeometry(screenMesh) {
   if (!screenMesh?.geometry) return screenMesh;
@@ -198,7 +226,7 @@ function restoreAuthoredSidekickGeometry(screenMesh) {
 }
 
 /**
- * Re-apply the frozen SIDEKICK_SCREEN_MAP if anything touched texture transform.
+ * Re-apply SIDEKICK_SCREEN_MAP if anything touched the transform.
  * @param {THREE.Mesh} screenMesh
  */
 export function ensureSidekickScreenMapLocked(screenMesh) {
@@ -206,7 +234,8 @@ export function ensureSidekickScreenMapLocked(screenMesh) {
     ? screenMesh.material.find((mat) => mat?.name === "SCREENIMAGE" || mat?.map)
     : screenMesh?.material;
   if (!material?.map) return;
-  applySidekickScreenMapSettings(material.map);
+  applySidekickDisplayOrientation(material.map);
+  configureSidekickScreenMaterial(material);
 }
 
 /**
@@ -259,6 +288,7 @@ export async function applySidekickScreenTexture(screenMesh) {
   applySidekickScreenMapSettings(texture);
 
   material.map = texture;
+  configureSidekickScreenMaterial(material);
   material.needsUpdate = true;
 
   screenMesh.userData.sidekickScreenTextureApplied = true;

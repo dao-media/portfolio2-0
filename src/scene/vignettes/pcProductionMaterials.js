@@ -327,16 +327,37 @@ async function enhanceMeshMaterial(mesh, renderer) {
 
 /** Production texture pipeline — external maps from pc-source/, not GLB embeds. */
 export async function preparePcModelMaterials(root, renderer) {
+  await preparePcModelMaterialsChunked(root, renderer, async () => {});
+}
+
+/**
+ * Upgrade PC materials in small batches with frame yields between groups.
+ * @param {THREE.Object3D} root
+ * @param {THREE.WebGLRenderer} renderer
+ * @param {() => Promise<void>} yieldFrame
+ * @param {number} [batchSize=2]
+ */
+export async function preparePcModelMaterialsChunked(
+  root,
+  renderer,
+  yieldFrame,
+  batchSize = 2
+) {
   await preloadPcTextures();
 
-  const jobs = [];
+  const meshes = [];
   root.traverse((obj) => {
     if (!obj.isMesh) return;
     obj.castShadow = true;
     obj.receiveShadow = true;
     obj.frustumCulled = false;
-    jobs.push(enhanceMeshMaterial(obj, renderer));
+    meshes.push(obj);
   });
 
-  await Promise.all(jobs);
+  for (let i = 0; i < meshes.length; i += 1) {
+    await enhanceMeshMaterial(meshes[i], renderer);
+    if ((i + 1) % batchSize === 0) {
+      await yieldFrame();
+    }
+  }
 }

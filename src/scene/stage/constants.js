@@ -94,6 +94,38 @@ export const PARALLAX_FOLLOW_SETTLING = 0.11;
 export const PARALLAX_POST_TRANSITION_FOLLOW = 0.135;
 export const PARALLAX_POST_TRANSITION_MS = 620;
 
+/** Brief ramp after intro — parallax influence eases onto the resting POV (ms). */
+export const INTRO_HANDOFF_MS = 680;
+export const INTRO_PARALLAX_HANDOFF_FOLLOW = 0.14;
+/** Keep the post-intro frame lean until deferred integration finishes. */
+export const INTRO_SETTLE_GRACE_MS = 1200;
+/** Extra pause after handoff + settle before model integration begins. */
+export const INTRO_INTEGRATION_DELAY_MS = 500;
+/** Delay CRT / screen-light GPU work until models have been visible for a beat. */
+export const INTRO_HEAVY_EFFECTS_DELAY_MS = 2000;
+/** Defer Sidekick anchor bake — not needed until the user visits that stop. */
+export const INTRO_SIDEKICK_BAKE_DELAY_MS = 4500;
+/** Max wait before deferred intro work runs (avoid idle firing mid-handoff). */
+export const INTRO_DEFERRED_IDLE_TIMEOUT_MS = 5000;
+/** Meshes upgraded per frame during PC material integration. */
+export const INTRO_MATERIAL_BATCH_SIZE = 2;
+
+/** Desktop click-to-focus — boot gating and parallax lock threshold. */
+export const FOCUS_BLEND_THRESHOLD = 0.85;
+export const FOCUS_ENTER_DURATION = 0.72;
+export const FOCUS_EXIT_DURATION = 0.82;
+/** Camera dolly toward the monitor while focusBlend → 1 (meters). Lower = closer at full zoom. */
+export const DESKTOP_FOCUS_CAM_PULL = 0.95 * 0.9;
+/** Sidekick open zoom — camera pull fallback when viewport bake is unavailable (meters). */
+export const SIDEKICK_FOCUS_CAM_PULL = 1.35;
+/** Extra resting distance on the desktop vignette only — fades out during focus so boot zoom is unchanged. */
+export const DESKTOP_REST_EXTRA_BACK = 3 * FT_TO_M;
+/** Default desktop rest anchor — push the scene 10% away from the POV (object-side, not camera zoom). */
+export const DESKTOP_REST_ANCHOR_CAM_PUSH = 0.22;
+/** Parallax travel retained at full zoom — scene still follows the cursor, softly. */
+export const DESKTOP_FOCUS_PARALLAX_SCALE = 0.38;
+export const FOCUS_PARALLAX_EASE_DURATION = 0.28;
+
 /** Capture scroll ramps in above this blend; stage scroll resumes below it on exit. */
 export const SCROLL_CAPTURE_WHEEL_ON = 0.34;
 export const SCROLL_CAPTURE_WHEEL_OFF = 0.52;
@@ -103,6 +135,13 @@ export const WHEEL_GESTURE_IDLE_MS = 320;
 
 /** Second gesture within this window (while at rest) uses the vigorous profile. */
 export const VIGOROUS_SCROLL_MS = 160;
+
+/** Accumulated opposing wheel delta required to interrupt an in-flight transition. */
+export const WHEEL_REVERSE_INTERRUPT_DELTA = 96;
+
+/** Ignore reverse scroll until the move has started (ms or progress — whichever comes first). */
+export const TRANSITION_COMMIT_MS = 200;
+export const TRANSITION_COMMIT_PROGRESS = 0.07;
 
 /** Normal vignette settle — full duration at rest. */
 export const TRANSITION_DURATION = 1.8;

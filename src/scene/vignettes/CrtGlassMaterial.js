@@ -182,8 +182,29 @@ export function setCrtGlassEnvMap(material, envMap) {
   if (!material?.uniforms?.envMap || !envMap) return;
   material.envMap = envMap;
   material.uniforms.envMap.value = envMap;
-  material.uniforms.envMapIntensity.value = CRT_GLASS.envMapIntensity;
+  material.uniforms.envMapIntensity.value =
+    CRT_GLASS.envMapIntensity * (material.userData._focusGlareScale ?? 1);
   material.needsUpdate = true;
+}
+
+/**
+ * Damp additive glass glare when the camera dollies in — close-up reads as blowout
+ * if env streak + spotlight spec stack on an already-bright CRT face.
+ * @param {THREE.ShaderMaterial} material
+ * @param {number} focusBlend 0 = stage view, 1 = fully focused on monitor
+ */
+export function setCrtGlassFocusScale(material, focusBlend) {
+  if (!material?.uniforms) return;
+
+  const focus = THREE.MathUtils.clamp(focusBlend, 0, 1);
+  const eased = focus * focus;
+  const scale = THREE.MathUtils.lerp(1, 0.32, eased);
+  material.userData._focusGlareScale = scale;
+
+  material.uniforms.envMapIntensity.value = CRT_GLASS.envMapIntensity * scale;
+  material.uniforms.uDirectGlare.value = CRT_GLASS.directGlare * scale;
+  material.uniforms.uFresnelGlare.value = CRT_GLASS.fresnelGlare * scale;
+  material.uniforms.uBaseGlare.value = CRT_GLASS.baseGlare * scale;
 }
 
 /**

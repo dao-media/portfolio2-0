@@ -6,6 +6,8 @@ import {
   resolveInterruptedVignetteIndex,
   sanitizeParallax
 } from "./stageScrollUtils.js";
+import { runStageParallaxHandoffStressTest } from "./stageParallaxMotion.js";
+import { runStageCameraTrackStressTest } from "./stageCameraTrack.js";
 import {
   rotationDeltaToAnchor,
   vignetteAnchorRotation,
@@ -108,6 +110,24 @@ export function runStageScrollStressTest() {
       assert(idx >= 0 && idx <= 2 && Number.isFinite(idx), "bad index");
     }
   });
+
+  const parallaxStress = runStageParallaxHandoffStressTest();
+  for (const result of parallaxStress.results) {
+    results.push({
+      name: `parallax: ${result.name}`,
+      ok: result.ok,
+      error: result.error
+    });
+  }
+
+  const trackStress = runStageCameraTrackStressTest();
+  for (const result of trackStress.results) {
+    results.push({
+      name: `track: ${result.name}`,
+      ok: result.ok,
+      error: result.error
+    });
+  }
 
   const passed = results.filter((r) => r.ok).length;
   return { passed, failed: results.length - passed, results };

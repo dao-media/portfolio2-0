@@ -20,8 +20,6 @@ import {
   CAM_REST_OFFSET_X,
   PARALLAX_CAM_X,
   PARALLAX_CAM_Y,
-  PARALLAX_LOOK_X,
-  PARALLAX_LOOK_Y,
   LOOK,
   AMBIENT_INTENSITY,
   HEMI_INTENSITY,
@@ -37,19 +35,29 @@ import {
   SCROLL_CAPTURE_BLEND_OUT,
   SCROLL_CAPTURE_WHEEL_ON,
   SCROLL_CAPTURE_WHEEL_OFF,
-  PARALLAX_CAPTURE_IN,
   PARALLAX_CAPTURE_OUT,
   PARALLAX_FOLLOW,
-  PARALLAX_FOLLOW_SETTLING,
   PARALLAX_POST_TRANSITION_FOLLOW,
   PARALLAX_POST_TRANSITION_MS,
+  INTRO_SETTLE_GRACE_MS,
+  INTRO_HANDOFF_MS,
+  INTRO_HEAVY_EFFECTS_DELAY_MS,
+  FOCUS_BLEND_THRESHOLD,
+  FOCUS_ENTER_DURATION,
+  FOCUS_EXIT_DURATION,
+  DESKTOP_FOCUS_CAM_PULL,
+  DESKTOP_REST_EXTRA_BACK,
   VIGOROUS_SCROLL_MS,
+  WHEEL_REVERSE_INTERRUPT_DELTA,
+  TRANSITION_COMMIT_MS,
+  TRANSITION_COMMIT_PROGRESS,
   TRANSITION_DURATION,
   TRANSITION_VIGOROUS_SPEED,
   vignetteAnchorRotation,
   vignetteStageDegrees,
   rotationDeltaToAnchor,
   placeOnStage,
+  STAGE_RADIUS,
   STAGE_BG,
   EXPOSURE
 } from "./stage/constants.js";
@@ -64,17 +72,42 @@ import {
   sanitizeCameraPose,
   finite
 } from "./stage/stageScrollUtils.js";
+import {
+  STAGE_FOCUS_PHASE,
+  canEnterDesktopFocus,
+  canStartDesktopBoot,
+  shouldBlockScrollCaptureBlend
+} from "./stage/stageAnimationPolicy.js";
+import {
+  INTRO_MODEL_INTEGRATE_TRACK,
+  INTRO_MODEL_REVEAL_TRACK,
+  INTRO_TRACK_DESCENT,
+  INTRO_TRACK_SETTLE_MS
+} from "./stage/stageCameraTrack.js";
+import { setGroupRenderOpacity } from "./stage/stageModelReveal.js";
+import {
+  resolveParallaxFollowMode,
+  resolveTransitionParallaxDesired,
+  tickParallaxState,
+  stepIntroDescent,
+  introDescentHandoffOffset
+} from "./stage/stageParallaxMotion.js";
 import { STAGE_FLOOR_Y, measureBlockoutReferenceBounds, measureSceneBounds, snapAllGroupsToFloor, snapGroupToFloor } from "./vignettes/pcSceneBlockout.js";
 import { WaterCursor } from "../cursor/WaterCursor.js";
+import { CameraRig } from "./camera/CameraRig.js";
+import { buildVignetteRing } from "./camera/ringLayout.js";
+import { createScrollAdvance } from "./camera/scrollAdvance.js";
+import { createVignetteClick } from "./camera/vignetteClick.js";
 
-/** Vertical drop into the resting POV — stage stays fixed; camera only translates on Y. */
-const INTRO_DESCENT = 11;
+/** Spring turntable — fixed POV; world rotates vignettes around the ring. */
+const LOOK_AT_HEIGHT = LOOK.y;
+const CAMERA_REST_HEIGHT = CAM_Y;
+const CAMERA_PAGELOAD_HEIGHT = CAM_Y + INTRO_TRACK_DESCENT;
+const CAMERA_ZOOM_DISTANCE = 4.2;
+const CAMERA_ZOOM_HEIGHT = 2.15;
 
-/** Ease-out cubic — faster start, soft settle at the resting POV. */
-function easeOutCubic(t) {
-  const u = 1 - t;
-  return 1 - u * u * u;
-}
+/** @deprecated — use INTRO_TRACK_DESCENT; kept for debug readouts. */
+const INTRO_DESCENT = INTRO_TRACK_DESCENT;
 
 /** Half-strength ease-out — linear blended with power2.out for vigorous scroll. */
 function easeOutHalf(t) {
@@ -101,14 +134,26 @@ export class StageExperience {
     this.current = 0;
     this.locked = false;
     this.introComplete = false;
-    this.introRig = { descent: INTRO_DESCENT };
+    this.introRig = { descent: INTRO_TRACK_DESCENT };
+    this._introTrackT = 0;
+    this._introTrackLinear = 0;
+    this._introMotionComplete = false;
+    this._introContentReady = false;
+    this._introIntegrateScheduled = false;
     this._introStartedAt = 0;
-    this._introDuration = this.reducedMotion ? 600 : 2400;
+    this._postGrainStrength = 0;
+    this._modelRevealOpacity = 0;
+    this._introDuration = this.reducedMotion ? 600 : 2600;
+    this._introMotionDuration = this._introDuration + INTRO_TRACK_SETTLE_MS;
     this._pendingFloorSnap = false;
     this._lastImpulseAt = 0;
     this._lastImpulseDir = 0;
     this._wheelGestureOpen = true;
     this._wheelIdleTimer = 0;
+    this._transitionScrollDir = 0;
+    this._transitionStartedAt = 0;
+    this._transitionReversing = false;
+    this._opposingScrollAccum = 0;
     this._animTarget = null;
     this._transitionFromIndex = null;
     this._transition = { progress: 0 };
@@ -150,9 +195,11 @@ export class StageExperience {
 
     this.parallax = { x: 0, y: 0, tx: 0, ty: 0 };
     this.focusBlend = 0;
+    this._focusPhase = STAGE_FOCUS_PHASE.IDLE;
     this._focusTween = null;
-    /** True while desktop monitor dolly-in is running — parallax stays off. */
+    /** Legacy flag — true while desktop focus dolly is active. */
     this._focusDollyIn = false;
+    this._bootQueuePending = false;
     this.captureBlend = 0;
     this._captureBlendTarget = false;
     this._captureBlendTween = null;
@@ -160,13 +207,24 @@ export class StageExperience {
     this._parallaxLock = { x: 0, y: 0 };
     /** 0 = follow cursor; 1 = locked at _parallaxLock (realtime eased). */
     this.parallaxInfluence = 0;
+    this._lastParallaxDt = 1 / 60;
     this._parallaxInfluenceTarget = 0;
     this._lastPointer = {
       x: window.innerWidth * 0.5,
       y: window.innerHeight * 0.5
     };
     this._transitionParallaxFrom = null;
+    this._transitionFocusFrom = 0;
     this._parallaxSettleUntil = 0;
+    this._introHandoffUntil = 0;
+    this._introSettleUntil = 0;
+    this._introHeavyEffectsAfter = 0;
+    this._introIntegrationActive = false;
+    this._introDeferredRunning = false;
+    this._introAssetsWarmed = false;
+    this._introDescentCurrent = INTRO_TRACK_DESCENT;
+    this._descentAtHandoff = 0;
+    this._introHandoffStart = 0;
 
     this.environment = new THREE.Group();
     this.scene.add(this.environment);
@@ -180,6 +238,7 @@ export class StageExperience {
     this._buildLighting();
     this.liveEnv = new LiveStageEnvironment(this.renderer);
     this.vignettes = this._buildVignettes();
+    this._initCameraRig();
     this._updatePlaceholderVisibility(0);
 
     if (import.meta.env.DEV) {
@@ -199,7 +258,7 @@ export class StageExperience {
 
     this._bindUi();
     this._bindInput();
-    this._cacheIntroRestRotation();
+    this._mountPovSpotlight();
     this._setActiveVignette(0);
     this._runIntro();
 
@@ -208,6 +267,59 @@ export class StageExperience {
     this.clock = new THREE.Clock();
     this._animate = this._animate.bind(this);
     requestAnimationFrame(this._animate);
+  }
+
+  /**
+   * Spring turntable camera — same ring path as before:
+   * vignettes stay on STAGE_RADIUS; world.rotation.y springs so each stop
+   * lands at the fixed +Z POV (LOOK). Camera only moves for pageload height
+   * and click-to-zoom pull.
+   */
+  _initCameraRig() {
+    const vignetteInputs = this.vignettes.map((vig) => {
+      const p = vig.group.position;
+      return {
+        position: [p.x, p.y, p.z],
+        focusPoint: [p.x, LOOK_AT_HEIGHT, p.z]
+      };
+    });
+
+    this.ring = buildVignetteRing(vignetteInputs, {
+      center: [0, 0, 0],
+      lookAtHeight: LOOK_AT_HEIGHT
+    });
+
+    this.cameraRig = new CameraRig(this.camera, this.ring, {
+      world: this.world,
+      lookAt: LOOK.clone(),
+      // Centered on the vignette stop (no legacy left offset).
+      restPosition: new THREE.Vector3(0, CAM_Y, CAM_Z + CAM_REST_BACK),
+      pageloadHeight: this.reducedMotion ? CAMERA_REST_HEIGHT : CAMERA_PAGELOAD_HEIGHT,
+      zoomDistance: CAMERA_ZOOM_DISTANCE,
+      zoomHeight: CAMERA_ZOOM_HEIGHT,
+      startIndex: 0,
+      parallax: this.reducedMotion ? { maxOffset: 0, omega: 7 } : { maxOffset: 0.35, omega: 7 }
+    });
+
+    // Route scroll through StageExperience so vignette leave hooks still run.
+    this.cameraRig.scrollAdvance = createScrollAdvance({
+      onAdvance: (dir) => this.advance(dir)
+    });
+
+    this.vignettes.forEach((vig, index) => {
+      vig.group.userData.vignetteIndex = index;
+      vig.group.traverse((obj) => {
+        if (obj.isMesh) obj.userData.vignetteIndex = index;
+      });
+    });
+
+    this.vignetteClick = createVignetteClick({
+      camera: this.camera,
+      meshes: this.vignettes.map((vig) => vig.group),
+      cameraRig: this.cameraRig
+    });
+
+    this._lastCameraIndex = 0;
   }
 
   _buildEnvironment() {
@@ -228,12 +340,15 @@ export class StageExperience {
   }
 
   /**
-   * POV spotlight — rigid rig on the camera (above the head, fixed aim in camera space).
-   * Vignettes rotate into the pool; the beam must not drift during transitions.
+   * POV spotlight — parented to camera; aim refreshed each frame toward the
+   * active vignette look target (or LOOK as a fallback before the rig exists).
    */
   _mountPovSpotlight() {
     this.camera.updateMatrixWorld(true);
-    _SPOT_AIM_LOCAL.copy(LOOK);
+    const aim =
+      this.cameraRig?.state?.lookAt?.clone?.() ??
+      new THREE.Vector3(0, LOOK_AT_HEIGHT, STAGE_RADIUS);
+    _SPOT_AIM_LOCAL.copy(aim);
     this.camera.worldToLocal(_SPOT_AIM_LOCAL);
 
     this.spotTarget = new THREE.Object3D();
@@ -252,6 +367,30 @@ export class StageExperience {
     this.camera.add(this.spotLight);
     this.spotLight.target = this.spotTarget;
     configureSpotShadow(this.spotLight);
+  }
+
+  _aimPovSpotlight() {
+    if (!this.spotTarget) return;
+    this.camera.updateMatrixWorld(true);
+    _SPOT_AIM_LOCAL.copy(this.cameraRig?.state?.lookAt ?? LOOK);
+    this.camera.worldToLocal(_SPOT_AIM_LOCAL);
+    this.spotTarget.position.copy(_SPOT_AIM_LOCAL);
+  }
+
+  /** Sync HUD / active vignette when the spring camera changes target index. */
+  _syncCameraRigIndex() {
+    if (!this.cameraRig) return;
+    const index = this.cameraRig.state.index;
+    if (index === this._lastCameraIndex) return;
+    this._lastCameraIndex = index;
+    this._setActiveVignette(index);
+    this._setCaption(index);
+    if (this.ui.caption) this.ui.caption.style.opacity = "1";
+    if (index === 2) {
+      // Re-fit after turntable lands — old orbit-era rest pose is invalid.
+      this.vignettes[2]?.instance?.invalidateRestPose?.();
+      this._fitSidekickRestPose(true);
+    }
   }
 
   /** Dev helper — full alignment report for every vignette. */
@@ -285,17 +424,17 @@ export class StageExperience {
     return this.debugFloorHeights();
   }
 
-  /** Dev helper — Sidekick anchor + motion state (run while settled or moving the cursor). */
+  /** Dev helper — Sidekick motion state. */
   debugSidekick() {
     const sidekick = this.vignettes[2]?.instance;
     return {
       current: this.current,
-      focusBlend: this.focusBlend,
-      parallax: { ...this.parallax },
-      parallaxLock: { ...this._parallaxLock },
-      transitioning: Boolean(this._transitionTl),
-      anchorsReady: sidekick?._anchorsReady ?? false,
-      sidekick: sidekick?.debugAnchors?.() ?? null
+      aligned: sidekick?._aligned ?? false,
+      isOpen: sidekick?.isOpen ?? false,
+      swiveling: Boolean(sidekick?._swivelTween),
+      sidekickRootPosition: sidekick?.sidekickRoot?.position?.toArray?.() ?? null,
+      restPoseReady: sidekick?._restPoseReady ?? false,
+      sidekickScale: sidekick?.sidekickRoot?.scale?.x ?? null
     };
   }
 
@@ -308,34 +447,130 @@ export class StageExperience {
     this._pendingFloorSnap = false;
   }
 
-  _finishIntro() {
-    if (this.introComplete) return;
-    this.introRig.descent = 0;
-    this.introComplete = true;
-    requestAnimationFrame(() => {
-      void this._releaseIntroDeferredWork();
-    });
+  _onIntroContentReady() {
+    if (this._introContentReady) return;
+    this._introContentReady = true;
+    this._refreshParallaxTarget();
   }
 
-  /** Heavy vignette + env work — runs only after the camera descent finishes. */
-  async _releaseIntroDeferredWork() {
-    await Promise.all(
-      this.vignettes.map((vig) => vig.instance?.integrateAfterIntro?.() ?? null)
-    );
+  _completeIntroMotion() {
+    if (this._introMotionComplete) return;
+    this._introTrackT = 1;
+    this._introMotionComplete = true;
+    this.introComplete = true;
+    this.introRig.descent = 0;
+    this._descentAtHandoff = 0;
+    this._introSettleUntil = performance.now() + INTRO_SETTLE_GRACE_MS;
+    this._introHandoffUntil = performance.now() + INTRO_HANDOFF_MS;
+    this._warmIntroAssetsDeferred();
+    // Models may have finished loading after the first integrate pass — retry.
+    this._scheduleIntroDeferredWork();
+  }
 
-    if (this._pendingFloorSnap) {
-      this._snapAllVignettesToFloor(true);
+  /** Mark intro done once the spring pageload descent settles. */
+  _tickIntroFromCameraRig() {
+    if (this._introMotionComplete || !this.cameraRig) return;
+    const s = this.cameraRig.state;
+    const heightSpan = Math.max(CAMERA_PAGELOAD_HEIGHT - CAMERA_REST_HEIGHT, 1e-3);
+    const progress = 1 - THREE.MathUtils.clamp(
+      (s.height - CAMERA_REST_HEIGHT) / heightSpan,
+      0,
+      1
+    );
+    this._introTrackT = progress;
+    this._introTrackLinear = progress;
+    this.introRig.descent = Math.max(0, s.height - CAMERA_REST_HEIGHT);
+
+    if (this._introTrackT >= INTRO_MODEL_INTEGRATE_TRACK && !this._introIntegrateScheduled) {
+      this._introIntegrateScheduled = true;
+      this._scheduleIntroDeferredWork();
     }
 
-    this._bakeSidekickAnchors();
+    if (this._introTrackLinear >= 0.84 && !this._introContentReady) {
+      this._onIntroContentReady();
+    }
 
-    this._flushIntroDeferredWork();
+    if (!this.cameraRig._introActive && s.isSettled) {
+      this._completeIntroMotion();
+    }
   }
 
-  /** One-shot updates deferred until the entrance settles. */
-  _flushIntroDeferredWork() {
-    this.liveEnv.update(null, this.liveEnv.position, { applyToScene: false });
+  /** Texture decode + GPU warm — after the POV lands, not during ground settle. */
+  _warmIntroAssetsDeferred() {
+    if (this._introAssetsWarmed) return;
+    this._introAssetsWarmed = true;
+    const desktop = this.vignettes[1]?.instance;
+    const idle = window.requestIdleCallback;
+    const warm = () => void desktop?.warmIntroAssets?.(this.renderer);
+    if (idle) {
+      idle(warm, { timeout: 1200 });
+    } else {
+      window.setTimeout(warm, 0);
+    }
+  }
 
+  /** Wait until the intro track reaches the silent-integration window. */
+  async _waitForIntegrateWindow() {
+    while (!this._introMotionComplete && this._introTrackT < INTRO_MODEL_INTEGRATE_TRACK) {
+      await this._yieldFrame();
+    }
+  }
+
+  _scheduleIntroDeferredWork() {
+    void this._releaseIntroDeferredWork();
+  }
+
+  /** Yield the main thread for one display frame between heavy intro integration steps. */
+  _yieldFrame() {
+    return new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+
+  /** Heavy vignette integration — chunked across frames after the resting POV is stable. */
+  async _releaseIntroDeferredWork() {
+    if (this._introDeferredRunning) return;
+    this._introDeferredRunning = true;
+    this._introIntegrationActive = true;
+
+    const desktop = this.vignettes[1]?.instance;
+    const sidekick = this.vignettes[2]?.instance;
+    const yieldFrame = () => this._yieldFrame();
+    let stillHolding = false;
+
+    try {
+      await this._waitForIntegrateWindow();
+      await yieldFrame();
+
+      await desktop?.integrateAfterIntro?.({ yieldFrame, revealHidden: true });
+      await yieldFrame();
+
+      await sidekick?.integrateAfterIntro?.({ yieldFrame, revealHidden: true });
+      await yieldFrame();
+
+      stillHolding = Boolean(desktop?._holdForIntro || sidekick?._holdForIntro);
+
+      if (this._pendingFloorSnap) {
+        this._snapAllVignettesToFloor(true);
+        await yieldFrame();
+      }
+    } finally {
+      this._introIntegrationActive = false;
+      this._introDeferredRunning = false;
+      this._introHeavyEffectsAfter = performance.now() + INTRO_HEAVY_EFFECTS_DELAY_MS;
+    }
+
+    if (stillHolding) {
+      // Models hadn't finished loading — try again shortly.
+      window.setTimeout(() => this._scheduleIntroDeferredWork(), 400);
+      return;
+    }
+
+    window.setTimeout(() => {
+      this._flushIntroDeferredWork();
+    }, INTRO_HEAVY_EFFECTS_DELAY_MS);
+  }
+
+  /** CRT env capture — runs well after models are visible; never on the settle frame. */
+  _flushIntroDeferredWork() {
     const desktop = this.vignettes[1]?.instance;
     if (!desktop?.updateCrtGlassReflection) return;
     desktop._pendingCrtEnvRefresh = true;
@@ -349,19 +584,101 @@ export class StageExperience {
     desktop._pendingCrtEnvRefresh = false;
   }
 
-  _tickIntro() {
-    if (this.introComplete || !this._introStartedAt) return;
-
-    const linear = Math.min(1, (performance.now() - this._introStartedAt) / this._introDuration);
-    const eased = easeOutCubic(linear);
-    this.introRig.descent = INTRO_DESCENT * (1 - eased);
-
-    if (linear >= 1) {
-      this._finishIntro();
+  /** Grain ramps in during the descent — always via RT composite, never a path switch. */
+  _tickPostGrainStrength(dt) {
+    const cappedDt = Math.min(Math.max(dt, 0), 1 / 24);
+    let target = 0;
+    if (this._introTrackT >= 0.78 || this._introMotionComplete) {
+      target = 1;
+    }
+    const rate = 1 / 2.4;
+    if (this._postGrainStrength < target) {
+      this._postGrainStrength = Math.min(target, this._postGrainStrength + cappedDt * rate);
+    } else if (this._postGrainStrength > target) {
+      this._postGrainStrength = Math.max(target, this._postGrainStrength - cappedDt * rate * 2);
     }
   }
 
-  /** Lock the resting look direction so intro is a straight vertical drop, not a re-aim each frame. */
+  /** Fade PC + Sidekick in during the second half of the intro track. */
+  _tickModelReveal(dt) {
+    const desktopRoot = this.vignettes[1]?.instance?.pcRoot;
+    const sidekickRoot = this.vignettes[2]?.instance?.sidekickRoot;
+    if (!desktopRoot && !sidekickRoot) return;
+
+    const ready =
+      this._introTrackT >= INTRO_MODEL_REVEAL_TRACK || this._introMotionComplete;
+    if (!ready) return;
+
+    const cappedDt = Math.min(Math.max(dt, 0), 1 / 24);
+    const duration = 1.75;
+    this._modelRevealOpacity = Math.min(
+      1,
+      this._modelRevealOpacity + cappedDt / duration
+    );
+    const opacity = this._modelRevealOpacity;
+    if (desktopRoot) setGroupRenderOpacity(desktopRoot, opacity);
+    if (sidekickRoot) setGroupRenderOpacity(sidekickRoot, opacity);
+  }
+
+  /** Advance pageload → ground-rest track; content loads before motion finishes. */
+  _tickIntro(dt) {
+    if (this._introMotionComplete) return;
+
+    if (this._introStartedAt === 0) {
+      this._introStartedAt = performance.now();
+      this._introTrackLinear = 0;
+    }
+
+    const cappedDt = Math.min(Math.max(dt, 0), 1 / 20);
+    const durationSec = this._introMotionDuration / 1000;
+    this._introTrackLinear = Math.min(1, this._introTrackLinear + cappedDt / durationSec);
+    this._introTrackT = this._introTrackLinear;
+
+    this._introDescentCurrent = stepIntroDescent(
+      this._introDescentCurrent,
+      this._introTrackLinear,
+      INTRO_TRACK_DESCENT,
+      cappedDt
+    );
+    this.introRig.descent = this._introDescentCurrent;
+
+    if (this._introTrackT >= INTRO_MODEL_INTEGRATE_TRACK && !this._introIntegrateScheduled) {
+      this._introIntegrateScheduled = true;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          this._scheduleIntroDeferredWork();
+        });
+      });
+    }
+
+    if (this._introTrackLinear >= 0.84 && !this._introContentReady) {
+      this._onIntroContentReady();
+    }
+
+    if (this._introTrackLinear >= 1) {
+      this._completeIntroMotion();
+    }
+  }
+
+  /**
+   * Sample the implied ground track — single path from aerial pageload to resting POV.
+   * Cursor parallax is full strength for the entire descent.
+   */
+  _applyCameraFromTrack() {
+    const y = CAM_Y + this._introDescentCurrent;
+    this.camera.position.set(CAM_REST_OFFSET_X, y, CAM_Z + CAM_REST_BACK);
+    this.camera.quaternion.copy(this._introRestQuat);
+
+    const travelScale = this._parallaxTravelScale();
+    if (travelScale > 0.001) {
+      this.camera.translateX(this.parallax.x * travelScale * PARALLAX_CAM_X);
+      this.camera.translateY(this.parallax.y * travelScale * PARALLAX_CAM_Y);
+    }
+
+    this._aimPovSpotlight();
+  }
+
+  /** Lock the resting look direction so the track lands with the same aim as parallax rest. */
   _cacheIntroRestRotation() {
     this.camera.position.set(CAM_REST_OFFSET_X, CAM_Y, CAM_Z + CAM_REST_BACK);
     this.camera.lookAt(LOOK);
@@ -369,22 +686,25 @@ export class StageExperience {
     if (!this.spotLight) {
       this._mountPovSpotlight();
     }
-    this._applyIntroCamera();
+    this._applyCameraFromTrack();
   }
 
-  /** Fixed stage — only the camera descends into the resting POV. */
-  _applyIntroCamera() {
-    this.camera.position.set(
-      CAM_REST_OFFSET_X,
-      CAM_Y + this.introRig.descent,
-      CAM_Z + CAM_REST_BACK
+  _introDescentHandoffY() {
+    if (this._descentAtHandoff <= 1e-6 || this._introHandoffStart <= 0) return 0;
+    const offset = introDescentHandoffOffset(
+      performance.now(),
+      this._introHandoffStart,
+      this._descentAtHandoff
     );
-    this.camera.quaternion.copy(this._introRestQuat);
+    if (offset <= 1e-6) {
+      this._descentAtHandoff = 0;
+      this.introRig.descent = 0;
+    }
+    return offset;
   }
 
   /**
-   * Post-intro camera must match the locked intro settle pose when parallax/focus are idle —
-   * regenerating lookAt every frame would fight the intro rest quaternion and nudge the spotlight.
+   * Post-intro camera matches the locked intro settle pose when parallax/focus are idle.
    */
   _restingCameraMatchesIntro() {
     return (
@@ -392,6 +712,183 @@ export class StageExperience {
       Math.abs(this.parallax.x) < 0.0005 &&
       Math.abs(this.parallax.y) < 0.0005
     );
+  }
+
+  /** Per-vignette resting pullback on the travel circle (desktop only). */
+  _vignetteRestExtraBack(index, focusBlend = 0) {
+    if (index !== 1) return 0;
+    const focus = THREE.MathUtils.clamp(focusBlend, 0, 1);
+    return DESKTOP_REST_EXTRA_BACK * (1 - focus);
+  }
+
+  /** 0 = aligned baseline, 1 = baked desktop rest — tracks vignette travel. */
+  _getDesktopRestAnchorBlend() {
+    if (this._transitionTl) {
+      const from = this._transitionFromIndex ?? this.current;
+      const to = this._animTarget ?? this.current;
+      const t = THREE.MathUtils.clamp(this._transition.progress, 0, 1);
+      if (from !== 1 && to === 1) return t;
+      if (from === 1 && to !== 1) return 1 - t;
+      if (from === 1 && to === 1) return 1;
+      return 0;
+    }
+    return this.current === 1 ? 1 : 0;
+  }
+
+  _tickDesktopRestAnchor() {
+    const desktop = this.vignettes[1]?.instance;
+    if (!desktop?.pcRoot) return;
+
+    const blend = this._getDesktopRestAnchorBlend();
+    if (blend > 0 && !desktop._restAnchorPosition) {
+      desktop.ensureRestAnchorBaked(this.camera, this.world, this._anchorY(1));
+    }
+    desktop.applyRestAnchorBlend(blend);
+  }
+
+  /**
+   * Blend vignette rest/zoom camera offsets during travel so landings do not snap.
+   * @returns {{ restExtra: number, focusPull: number }}
+   */
+  _resolveTravelCameraOffsets() {
+    if (this._transitionTl) {
+      const from = this._transitionFromIndex ?? this.current;
+      const to = this._animTarget ?? this.current;
+      const t = THREE.MathUtils.clamp(this._transition.progress, 0, 1);
+      const focusT = THREE.MathUtils.lerp(this._transitionFocusFrom ?? 0, 0, t);
+      const restExtra = THREE.MathUtils.lerp(
+        this._vignetteRestExtraBack(from, focusT),
+        this._vignetteRestExtraBack(to, 0),
+        t
+      );
+      const fromPull = from === 1 ? focusT * DESKTOP_FOCUS_CAM_PULL : 0;
+      const toPull = to === 1 ? 0 : 0;
+      const focusPull = THREE.MathUtils.lerp(fromPull, toPull, t);
+      return { restExtra, focusPull };
+    }
+
+    const focus = THREE.MathUtils.clamp(this.focusBlend ?? 0, 0, 1);
+    return {
+      restExtra: this._vignetteRestExtraBack(this.current, focus),
+      focusPull: this.current === 1 ? focus * DESKTOP_FOCUS_CAM_PULL : 0
+    };
+  }
+
+  /**
+   * Parallax travel multiplier — live when settled; frozen during vignette travel.
+   * @returns {number}
+   */
+  _parallaxTravelScale() {
+    if (this.reducedMotion) return 0;
+    return 1;
+  }
+
+  /**
+   * Resting POV — camera stays on the fixed rig; the turntable (world) rotates for travel.
+   * Parallax is camera-local translation only — never a lookAt / yaw change.
+   */
+  _applyCameraPose() {
+    this._sanitizeMotionState();
+
+    const focus = THREE.MathUtils.clamp(this.focusBlend, 0, 1);
+    const restX = CAM_REST_OFFSET_X * (1 - focus);
+    let restZ = CAM_REST_BACK * (1 - focus);
+    const pullback = this._getTransitionPullback();
+
+    const { restExtra, focusPull } = this._resolveTravelCameraOffsets();
+    restZ += focusPull - restExtra;
+
+    const handoffY = this._introDescentHandoffY();
+    const restY = CAM_Y + handoffY;
+
+    if (
+      !this._focusDollyIn &&
+      handoffY < 1e-6 &&
+      this._restingCameraMatchesIntro() &&
+      pullback < 1e-6 &&
+      focus < 0.001 &&
+      restExtra < 1e-6 &&
+      focusPull < 1e-6
+    ) {
+      this.camera.position.set(CAM_REST_OFFSET_X, CAM_Y, CAM_Z + CAM_REST_BACK);
+      this.camera.quaternion.copy(this._introRestQuat);
+      this._aimPovSpotlight();
+      return;
+    }
+
+    this.camera.position.set(restX, restY, CAM_Z + restZ + pullback);
+
+    if (this._focusDollyIn) {
+      this.camera.lookAt(LOOK);
+    } else {
+      this.camera.quaternion.copy(this._introRestQuat);
+      const travelScale = this._parallaxTravelScale();
+      if (travelScale > 0.001) {
+        this.camera.translateX(this.parallax.x * travelScale * PARALLAX_CAM_X);
+        this.camera.translateY(this.parallax.y * travelScale * PARALLAX_CAM_Y);
+      }
+    }
+
+    this._aimPovSpotlight();
+    sanitizeCameraPose(this.camera, LOOK);
+  }
+
+  /**
+   * Cursor parallax — live during intro, travel, and rest.
+   */
+  _tickLiveParallax(dt) {
+    const travelScale = this._parallaxTravelScale();
+    const { tx, ty } = this._parallaxTargetFromClient(this._lastPointer.x, this._lastPointer.y);
+    this.parallax.tx = tx;
+    this.parallax.ty = ty;
+
+    if (this._introMotionComplete && travelScale <= 0.001) return;
+
+    let desiredX = tx * travelScale;
+    let desiredY = ty * travelScale;
+
+    if (this._focusDollyIn) {
+      desiredX = 0;
+      desiredY = 0;
+    }
+
+    const transitioning = Boolean(this._transitionTl && this._transitionParallaxFrom);
+    let mode = resolveParallaxFollowMode({
+      now: performance.now(),
+      introHandoffUntil: this._introHandoffUntil,
+      parallaxSettleUntil: this._parallaxSettleUntil,
+      frozen: false
+    });
+
+    if (transitioning) {
+      const blended = resolveTransitionParallaxDesired(
+        this._transitionParallaxFrom,
+        tx,
+        ty,
+        this._transition.progress,
+        travelScale
+      );
+      desiredX = blended.desiredX;
+      desiredY = blended.desiredY;
+      mode = "travel";
+    }
+
+    if (this._focusDollyIn) {
+      this.parallax.x = 0;
+      this.parallax.y = 0;
+    } else {
+      tickParallaxState(this.parallax, {
+        dt,
+        desiredX,
+        desiredY,
+        mode
+      });
+    }
+
+    this._parallaxInfluenceTarget = 0;
+    if (this.parallaxInfluence > 0.001) {
+      this.parallaxInfluence += (0 - this.parallaxInfluence) * PARALLAX_CAPTURE_OUT;
+    }
   }
 
   _buildVignettes() {
@@ -412,6 +909,8 @@ export class StageExperience {
           renderer: this.renderer,
           liveEnv: this.liveEnv,
           introGate: () => !this.introComplete,
+          getCamera: () => this.camera,
+          reducedMotion: this.reducedMotion,
           onAligned: () => this._snapAllVignettesToFloor()
         });
         instances.push({ def, group, angle, stageDeg, instance: desktop });
@@ -424,7 +923,7 @@ export class StageExperience {
           onAligned: () => {
             this._snapAllVignettesToFloor();
             if (this.introComplete) {
-              this._bakeSidekickAnchors();
+              this._fitSidekickRestPose(false);
             }
           }
         });
@@ -498,95 +997,42 @@ export class StageExperience {
     }
   }
 
-  /** Zero parallax so viewport anchors match the resting POV (parallax would drift framing). */
-  _zeroParallaxForSidekickBake() {
-    return {
-      x: this.parallax.x,
-      y: this.parallax.y,
-      tx: this.parallax.tx,
-      ty: this.parallax.ty,
-      lockX: this._parallaxLock.x,
-      lockY: this._parallaxLock.y
-    };
-  }
-
-  _restoreParallaxAfterSidekickBake(saved) {
-    this.parallax.x = saved.x;
-    this.parallax.y = saved.y;
-    this.parallax.tx = saved.tx;
-    this.parallax.ty = saved.ty;
-    this._parallaxLock.x = saved.lockX;
-    this._parallaxLock.y = saved.lockY;
-  }
-
-  /** Snap cursor parallax off on the Sidekick stop — mesh anchors assume a fixed POV. */
-  _freezeParallaxForSidekickStop() {
-    this.parallax.x = 0;
-    this.parallax.y = 0;
-    this.parallax.tx = 0;
-    this.parallax.ty = 0;
-    this._parallaxLock.x = 0;
-    this._parallaxLock.y = 0;
-  }
-
-  /** Bake Sidekick rest/focus anchors while the stage faces the 240° stop. */
-  _bakeSidekickAnchors(force = false) {
-    const sidekick = this.vignettes[2]?.instance;
-    if (!sidekick?.bakeAnchors || (!force && sidekick._anchorsReady)) return false;
-    if (!sidekick._aligned) return false;
-
-    if (force) {
-      sidekick.invalidateAnchors?.();
-    }
-
-    const savedRotation = this.world.rotation.y;
-    const savedParallax = this._zeroParallaxForSidekickBake();
-
-    this.parallax.x = 0;
-    this.parallax.y = 0;
-    this.parallax.tx = 0;
-    this.parallax.ty = 0;
-    this._parallaxLock.x = 0;
-    this._parallaxLock.y = 0;
-
-    this.world.rotation.y = sanitizeWorldRotation(this._anchorY(2));
-    this.world.updateMatrixWorld(true);
-    this._applyCameraPose();
-
-    const baked = sidekick.bakeAnchors(this.camera);
-
-    this.world.rotation.y = savedRotation;
-    this.world.updateMatrixWorld(true);
-    this._restoreParallaxAfterSidekickBake(savedParallax);
-    this._applyCameraPose();
-
-    if (baked) {
-      sidekick.update?.(0);
-    }
-
-    return baked;
-  }
-
   _setActiveVignette(index) {
     this.vignettes[this.current]?.instance?.setInactive?.();
     this.current = index;
     this.vignettes[this.current]?.instance?.setActive?.();
-    if (index === 2) {
-      this._freezeParallaxForSidekickStop();
-      if (!this.vignettes[2]?.instance?._anchorsReady) {
-        this._bakeSidekickAnchors();
-      }
+    if (index === 2 && !this.vignettes[2]?.instance?._restPoseReady) {
+      this._fitSidekickRestPose(false);
     }
     this._updatePlaceholderVisibility(index);
     this.hud.updateMySpacePanelForVignette(index);
   }
 
-  /** Ease out of interactive/focused state when the turntable starts moving. */
+  /** Fit Sidekick rest scale + center in model space (camera already faces the stop). */
+  _fitSidekickRestPose(force = false) {
+    const sidekick = this.vignettes[2]?.instance;
+    if (!sidekick?.fitRestHeroPose || !sidekick._aligned) return false;
+    if (!force && sidekick._restPoseReady) return true;
+
+    if (force) {
+      sidekick.invalidateRestPose?.();
+    }
+
+    this.world.updateMatrixWorld(true);
+    const fitted = sidekick.fitRestHeroPose(this.camera);
+    if (fitted) {
+      sidekick.update?.(0);
+    }
+    return fitted;
+  }
+
+  /** Ease out of interactive/focused state when travel starts. */
   _prepareForVignetteTransition(fromIndex) {
     this._focusTween?.kill();
     this._focusTween = null;
     this._focusDollyIn = false;
-    this.focusBlend = 0;
+    this._focusPhase = STAGE_FOCUS_PHASE.IDLE;
+    this._bootQueuePending = false;
 
     if (fromIndex === 2) {
       const sidekick = this.vignettes[2]?.instance;
@@ -602,38 +1048,43 @@ export class StageExperience {
     this._focusTween?.kill();
     this._focusTween = null;
     this._focusDollyIn = false;
+    this._focusPhase = STAGE_FOCUS_PHASE.IDLE;
+    this._bootQueuePending = false;
     this.focusBlend = 0;
   }
 
-  /** Zero parallax during monitor dolly-in so the camera doesn't fight the focus tween. */
-  _freezeParallaxForFocusIn() {
-    this._captureBlendTween?.kill();
-    this._captureBlendTween = null;
-    this._captureBlendTarget = false;
-    this.captureBlend = 0;
-    this.parallaxInfluence = 0;
-    this._parallaxInfluenceTarget = 0;
-    this.parallax.x = 0;
-    this.parallax.y = 0;
-    this.parallax.tx = 0;
-    this.parallax.ty = 0;
-    this._parallaxLock.x = 0;
-    this._parallaxLock.y = 0;
-  }
-
   _focusVignette() {
+    if (!canEnterDesktopFocus(this)) return;
+
+    this._focusPhase = STAGE_FOCUS_PHASE.ENTERING;
+    this._focusDollyIn = true;
+
+    if (!this.reducedMotion) {
+      this._captureBlendTween?.kill();
+      this._captureBlendTween = gsap.to(this, {
+        captureBlend: 0,
+        duration: FOCUS_ENTER_DURATION,
+        ease: "power2.inOut",
+        overwrite: true,
+        onComplete: () => {
+          this._captureBlendTween = null;
+        }
+      });
+    } else {
+      this.captureBlend = 0;
+    }
+
     if (this.reducedMotion) {
       this.focusBlend = 1;
       this._onVignetteFocusComplete();
       return;
     }
+
     this._focusTween?.kill();
-    this._focusDollyIn = true;
-    this._freezeParallaxForFocusIn();
     this._focusTween = gsap.to(this, {
       focusBlend: 1,
-      duration: 0.62,
-      ease: "power3.out",
+      duration: FOCUS_ENTER_DURATION,
+      ease: "power2.inOut",
       overwrite: true,
       onComplete: () => {
         this._focusTween = null;
@@ -643,18 +1094,36 @@ export class StageExperience {
   }
 
   _onVignetteFocusComplete() {
-    this._focusDollyIn = false;
-    this._tryStartDesktopBoot();
+    if (this.focusBlend >= FOCUS_BLEND_THRESHOLD) {
+      this._focusPhase = STAGE_FOCUS_PHASE.FOCUSED;
+    }
+    this._focusDollyIn = true;
+    requestAnimationFrame(() => {
+      this._tryStartDesktopBoot();
+    });
   }
 
-  /** Start XP boot once the desktop monitor is zoomed — idempotent. */
+  /** Start XP boot once the desktop monitor is zoomed — idempotent, screen-ready gated. */
   _tryStartDesktopBoot() {
-    if (this.current !== 1 || this.focusBlend <= 0.85) return;
+    if (this.current !== 1 || !canStartDesktopBoot(this)) return;
+
+    const desktop = this._getDesktopInstance();
+    if (!desktop?.screenReady) {
+      if (!this._bootQueuePending) {
+        this._bootQueuePending = true;
+        desktop?.whenScreenReady?.(() => {
+          this._bootQueuePending = false;
+          this._tryStartDesktopBoot();
+        });
+      }
+      return;
+    }
+
     const mySpace = this.hud.getMySpaceScreen();
     if (!mySpace) return;
 
     if (mySpace.xpBoot?.canStartBoot) {
-      void this._getDesktopInstance()?.playPowerOn?.();
+      void desktop.playPowerOn?.();
       return;
     }
 
@@ -664,18 +1133,28 @@ export class StageExperience {
   }
 
   _unfocusVignette() {
+    if (this._focusPhase === STAGE_FOCUS_PHASE.IDLE) return;
+
+    this._focusPhase = STAGE_FOCUS_PHASE.EXITING;
+    this._bootQueuePending = false;
+
     if (this.reducedMotion) {
       this.focusBlend = 0;
+      this._focusDollyIn = false;
+      this._focusPhase = STAGE_FOCUS_PHASE.IDLE;
       return;
     }
+
     this._focusTween?.kill();
     this._focusTween = gsap.to(this, {
       focusBlend: 0,
-      duration: 0.72,
-      ease: "power3.inOut",
+      duration: FOCUS_EXIT_DURATION,
+      ease: "power2.inOut",
       overwrite: true,
       onComplete: () => {
         this._focusTween = null;
+        this._focusDollyIn = false;
+        this._focusPhase = STAGE_FOCUS_PHASE.IDLE;
       }
     });
   }
@@ -696,6 +1175,147 @@ export class StageExperience {
       duration: base,
       ease: this.reducedMotion ? "power1.inOut" : "power2.inOut"
     };
+  }
+
+  _inferTransitionDir(fromIndex, target, dirHint) {
+    if (dirHint != null && dirHint !== 0) return Math.sign(dirHint);
+    const n = this.vignettes.length;
+    const forward = (target - fromIndex + n) % n;
+    const backward = (fromIndex - target + n) % n;
+    if (forward === 0) return 0;
+    return forward <= backward ? 1 : -1;
+  }
+
+  _canInterruptTransition() {
+    if (!this._transitionTl) return false;
+    const elapsed = performance.now() - (this._transitionStartedAt || 0);
+    const progress = THREE.MathUtils.clamp(finite(this._transition.progress, 0), 0, 1);
+    return elapsed >= TRANSITION_COMMIT_MS || progress >= TRANSITION_COMMIT_PROGRESS;
+  }
+
+  _clearTransitionMotionState() {
+    this._transitionTl = null;
+    this._animTarget = null;
+    this._transitionFromIndex = null;
+    this._transitionRotFrom = null;
+    this._transitionRotTo = null;
+    this._transitionParallaxFrom = null;
+    this._transitionFocusFrom = 0;
+    this._transitionScrollDir = 0;
+    this._transitionReversing = false;
+    this._opposingScrollAccum = 0;
+    this.locked = false;
+  }
+
+  /** Smoothly undo an in-flight move back to the vignette it came from. */
+  _reverseActiveTransition(vigorous = false) {
+    if (!this._transitionTl || this._transitionReversing) return;
+
+    const fromIndex = this._transitionFromIndex ?? this.current;
+    const fromY = this._transitionRotFrom;
+    const toY = this._transitionRotTo;
+    if (fromY == null || toY == null) return;
+
+    const startProgress = THREE.MathUtils.clamp(finite(this._transition.progress, 0), 0, 1);
+    if (startProgress <= 1e-4) {
+      this._transitionTl.kill();
+      this._clearTransitionMotionState();
+      return;
+    }
+
+    this._transitionTl.kill();
+    this._transitionReversing = true;
+    this._opposingScrollAccum = 0;
+    this._transitionScrollDir = -this._transitionScrollDir;
+    this._transitionStartedAt = performance.now();
+
+    const profile = this._transitionProfile(vigorous);
+    const blend = { t: startProgress };
+
+    const tl = gsap.timeline({
+      onComplete: () => {
+        this._onTransitionReverseComplete(fromIndex);
+      }
+    });
+
+    this._transitionTl = tl;
+    this._animTarget = fromIndex;
+
+    tl.to(blend, {
+      t: 0,
+      duration: Math.max(profile.duration * startProgress, 0.12),
+      ease: profile.ease,
+      onUpdate: () => {
+        this._transition.progress = blend.t;
+        this.world.rotation.y = fromY + (toY - fromY) * blend.t;
+      }
+    });
+  }
+
+  _onTransitionReverseComplete(fromIndex) {
+    this._flushTravelParallaxHandoff();
+    this._snapToVignette(fromIndex);
+    this._setCaption(fromIndex);
+    this.vignettes.forEach((vig, index) => {
+      vig.instance?.setInactive?.();
+    });
+    this.current = fromIndex;
+    this.vignettes[fromIndex]?.instance?.setActive?.();
+    this._updatePlaceholderVisibility(fromIndex);
+    this.hud.updateMySpacePanelForVignette(fromIndex);
+    this._updateHoverFromClient(this._lastPointer.x, this._lastPointer.y);
+
+    this._parallaxLock.x = this.parallax.x;
+    this._parallaxLock.y = this.parallax.y;
+    this._parallaxSettleUntil = performance.now() + PARALLAX_POST_TRANSITION_MS;
+    this._refreshParallaxTarget();
+
+    if (this.ui.caption) this.ui.caption.style.opacity = "1";
+    this.focusBlend = 0;
+    this._clearTransitionMotionState();
+  }
+
+  /**
+   * Wheel / swipe / keyboard travel — during an active move, opposing input reverses
+   * instead of jumping to a third vignette.
+   */
+  _handleTravelImpulse(dir, options = {}) {
+    const travelDir = Math.sign(dir);
+    if (!travelDir) return;
+
+    if (this._transitionTl && this._animTarget != null && this._transitionScrollDir !== 0) {
+      if (travelDir === this._transitionScrollDir) return;
+      if (!this._canInterruptTransition()) return;
+      this._reverseActiveTransition(options.vigorous ?? true);
+      return;
+    }
+
+    this._registerScrollImpulse(travelDir, options);
+  }
+
+  _handleTransitionWheel(delta) {
+    if (!this._transitionTl || this._animTarget == null) return false;
+
+    const scrollDir = delta > 0 ? 1 : -1;
+    const travelDir = this._transitionScrollDir;
+    if (travelDir !== 0 && scrollDir === travelDir) {
+      this._opposingScrollAccum = 0;
+      return true;
+    }
+
+    if (!this._canInterruptTransition()) {
+      return true;
+    }
+
+    this._opposingScrollAccum += Math.abs(delta);
+    if (this._opposingScrollAccum < WHEEL_REVERSE_INTERRUPT_DELTA) {
+      return true;
+    }
+
+    this._opposingScrollAccum = 0;
+    this._consumeWheelGesture();
+    this._reverseActiveTransition(this._isVigorousScroll(performance.now()));
+    return true;
   }
 
   _anchorY(index) {
@@ -742,6 +1362,8 @@ export class StageExperience {
     this._transitionRotFrom = null;
     this._transitionRotTo = null;
     this._transitionParallaxFrom = null;
+    this._transitionFocusFrom = 0;
+    this.focusBlend = 0;
     this._reconcileInterruptedVignette(fromIndex, snapIndex);
     this._parallaxLock.x = this.parallax.x;
     this._parallaxLock.y = this.parallax.y;
@@ -759,7 +1381,7 @@ export class StageExperience {
   }
 
   _syncParallaxToPointer(force = false) {
-    if (!force && (this.reducedMotion || this.parallaxInfluence > 0.02)) return;
+    if (!force && this.reducedMotion) return;
     this._refreshParallaxTarget();
     if (force) {
       this.parallax.x = this.parallax.tx;
@@ -767,17 +1389,37 @@ export class StageExperience {
     }
   }
 
+  /** One damp step at travel end so landing POV matches live cursor before handoff clears. */
+  _flushTravelParallaxHandoff() {
+    const from = this._transitionParallaxFrom;
+    if (!from || this.reducedMotion) return;
+
+    const travelScale = this._parallaxTravelScale();
+    if (travelScale <= 0.001) return;
+
+    const { tx, ty } = this._parallaxTargetFromClient(this._lastPointer.x, this._lastPointer.y);
+    const { desiredX, desiredY } = resolveTransitionParallaxDesired(from, tx, ty, 1, travelScale);
+    tickParallaxState(this.parallax, {
+      dt: finite(this._lastParallaxDt, 1 / 60),
+      desiredX,
+      desiredY,
+      mode: "travel"
+    });
+  }
+
   _onVignetteTransitionComplete(target) {
+    this._flushTravelParallaxHandoff();
     this._snapToVignette(target);
     this._setCaption(target);
     this._setActiveVignette(target);
     this._updateHoverFromClient(this._lastPointer.x, this._lastPointer.y);
-    if (target !== 2) {
-      this._parallaxLock.x = this.parallax.x;
-      this._parallaxLock.y = this.parallax.y;
-    }
+
+    // Travel blend targets live cursor at progress=1 — lock from here, no snap.
+    this._parallaxLock.x = this.parallax.x;
+    this._parallaxLock.y = this.parallax.y;
     this._parallaxSettleUntil = performance.now() + PARALLAX_POST_TRANSITION_MS;
     this._refreshParallaxTarget();
+
     if (this.ui.caption) this.ui.caption.style.opacity = "1";
     this.locked = false;
     this._animTarget = null;
@@ -786,75 +1428,32 @@ export class StageExperience {
     this._transitionRotFrom = null;
     this._transitionRotTo = null;
     this._transitionParallaxFrom = null;
+    this._transitionFocusFrom = 0;
+    this.focusBlend = 0;
+    this._transitionScrollDir = 0;
+    this._transitionReversing = false;
+    this._opposingScrollAccum = 0;
   }
 
-  goTo(target, dirHint, options = {}) {
-    const vigorous = options.vigorous ?? false;
+  goTo(target, _dirHint, _options = {}) {
+    if (!this.cameraRig) return;
     const n = this.vignettes.length;
+    const index = ((target % n) + n) % n;
+    if (index === this.cameraRig.state.index && !this.cameraRig.state.isZoomed) return;
 
-    if (this._transitionTl) {
-      this._killActiveTransition(vigorous);
-    }
-
-    if (target === this.current) return;
-
-    const fromIndex = this.current;
-
-    const fromY = this.world.rotation.y;
-    const anchorY = this._anchorY(target);
-    const delta = rotationDeltaToAnchor(fromY, anchorY, dirHint);
-    const toY = fromY + delta;
-
-    const profile = this._transitionProfile(vigorous);
-    this._prepareForVignetteTransition(fromIndex);
-
-    this.locked = true;
-    this._animTarget = target;
-    this._transitionFromIndex = fromIndex;
-    this._transitionRotFrom = fromY;
-    this._transitionRotTo = toY;
-    this._transition.progress = 0;
-    if (!this.reducedMotion) {
-      this._transitionParallaxFrom = { x: this.parallax.x, y: this.parallax.y };
-    } else {
-      this._transitionParallaxFrom = null;
-    }
-
+    this._prepareForVignetteTransition(this.current);
     if (this.ui.caption) this.ui.caption.style.opacity = "0";
-
-    const tl = gsap.timeline({
-      onComplete: () => {
-        this._onVignetteTransitionComplete(target);
-      }
-    });
-
-    this._transitionTl = tl;
-
-    tl.to(
-      this._transition,
-      {
-        progress: 1,
-        duration: profile.duration,
-        ease: profile.ease,
-        onUpdate: () => {
-          const t = finite(this._transition.progress, 0);
-          this.world.rotation.y = fromY + (toY - fromY) * t;
-        }
-      },
-      0
-    );
+    this.cameraRig.goToIndex(index);
   }
 
   /**
    * @param {number} steps Signed step count (+1 next, -1 prev).
    * @param {{ vigorous?: boolean }} [options]
    */
-  advance(steps, options = {}) {
-    if (!steps) return;
-    const n = this.vignettes.length;
-    const dir = Math.sign(steps);
-    const target = (this.current + dir + n * 32) % n;
-    this.goTo(target, dir, options);
+  advance(steps, _options = {}) {
+    if (!steps || !this.cameraRig) return;
+    this._prepareForVignetteTransition(this.current);
+    this.cameraRig.advance(Math.sign(steps));
   }
 
   next = (options) => this.advance(1, options);
@@ -907,7 +1506,6 @@ export class StageExperience {
         if (this.scrollCapture.activeMeshId) {
           event.preventDefault();
           this.scrollCapture.handleWheel(event, 1);
-          this._resetScrollIntent();
           return;
         }
 
@@ -918,7 +1516,6 @@ export class StageExperience {
           if (viewport) {
             viewport.scrollTop += normalizeWheelDelta(event);
           }
-          this._resetScrollIntent();
           return;
         }
       }
@@ -929,29 +1526,24 @@ export class StageExperience {
         return;
       }
 
-      const delta = normalizeWheelDelta(event) * stageWeight;
-      if (Math.abs(delta) < WHEEL_MIN_DELTA) return;
-
-      event.preventDefault();
-
-      if (!this._wheelGestureOpen) {
-        this._extendWheelGestureIdle();
-        return;
-      }
-
-      const now = performance.now();
-      const dir = delta > 0 ? 1 : -1;
-      const vigorous = this._isVigorousScroll(now);
-      this._consumeWheelGesture();
-      this._registerScrollImpulse(dir, { vigorous });
+      if (!this.cameraRig) return;
+      this.cameraRig.scrollAdvance.handleWheel(event);
     };
 
     window.addEventListener("wheel", this._onWheel, { passive: false });
 
     window.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && this.focusBlend > 0.02) {
-        this._unfocusVignette();
-        this.vignettes[2]?.instance?.playSlideClose?.();
+      if (event.key === "Escape") {
+        if (this.cameraRig?.state?.isZoomed) {
+          this.cameraRig.zoomOut();
+          this._unfocusVignette();
+          this.vignettes[2]?.instance?.playSlideClose?.();
+          return;
+        }
+        if (this.focusBlend > 0.02) {
+          this._unfocusVignette();
+          this.vignettes[2]?.instance?.playSlideClose?.();
+        }
         return;
       }
       if (event.key === "ArrowRight" || event.key === "ArrowDown") this.next();
@@ -997,6 +1589,12 @@ export class StageExperience {
       "pointermove",
       (event) => {
         this._updateHoverFromClient(event.clientX, event.clientY);
+        if (this.cameraRig && !this.reducedMotion) {
+          const rect = this._getCanvasRect();
+          const x = ((event.clientX - rect.left) / Math.max(rect.width, 1)) * 2 - 1;
+          const y = ((event.clientY - rect.top) / Math.max(rect.height, 1)) * 2 - 1;
+          this.cameraRig.parallax.setPointerNdc(x, y);
+        }
       },
       { passive: true }
     );
@@ -1004,6 +1602,7 @@ export class StageExperience {
     this.canvas.addEventListener("pointerdown", this._onPointerDown, { capture: true });
     this.canvas.addEventListener("pointerup", this._onPointerUp, { capture: true });
     this.canvas.addEventListener("pointerleave", this._onPointerLeave, { capture: true });
+    this.vignetteClick?.attach(this.canvas);
   }
 
   _getCanvasRect() {
@@ -1015,25 +1614,15 @@ export class StageExperience {
     return parallaxTargetFromClient(clientX, clientY, rect);
   }
 
-  /** Ease wheel authority when entering/leaving scroll-capture zones; parallax uses parallaxInfluence. */
+  /** Ease wheel authority when entering/leaving scroll-capture zones (parallax stays live). */
   _setScrollCaptureBlendTarget(active) {
+    if (active && shouldBlockScrollCaptureBlend(this)) return;
     if (active === this._captureBlendTarget) return;
     this._captureBlendTarget = active;
-    this._parallaxInfluenceTarget = active ? 1 : 0;
 
     if (this.reducedMotion) {
       this.captureBlend = active ? 1 : 0;
-      this.parallaxInfluence = active ? 1 : 0;
-      if (active) {
-        this._parallaxLock.x = this.parallax.x;
-        this._parallaxLock.y = this.parallax.y;
-      }
       return;
-    }
-
-    if (active) {
-      this._parallaxLock.x = this.parallax.x;
-      this._parallaxLock.y = this.parallax.y;
     }
 
     this._captureBlendTween?.kill();
@@ -1078,7 +1667,6 @@ export class StageExperience {
       this._pcScreenHovered =
         this.scrollCapture.activeMeshId === SCROLL_CAPTURE_MESH_IDS.finalPcScreen;
       const onSidekick = this.scrollCapture.activeMeshId === SCROLL_CAPTURE_MESH_IDS.sidekick;
-      const sidekickOpen = Boolean(this.vignettes[2]?.instance?.isOpen);
       if (!this.waterCursor) {
         const cursorMode = hovering
           ? "pointer"
@@ -1087,9 +1675,7 @@ export class StageExperience {
               ? "pointer"
               : "zoom-in"
             : onSidekick
-              ? sidekickOpen || this.focusBlend > 0.02
-                ? "pointer"
-                : "zoom-in"
+              ? "pointer"
               : "default";
         this.canvas.style.cursor = cursorMode === "default" ? "default" : cursorMode;
       }
@@ -1101,9 +1687,25 @@ export class StageExperience {
       }
     }
 
-    this._setScrollCaptureBlendTarget(this.scrollCapture.isActive);
+    this._setScrollCaptureBlendTarget(this._shouldEngageScrollCapture());
 
     return meshTarget ?? null;
+  }
+
+  /** Scroll-capture wheel block — PC monitor defers until zoom/boot; Sidekick blocks turntable only. */
+  _shouldEngageScrollCapture() {
+    if (!this.scrollCapture.isActive) return false;
+    if (
+      this._pcScreenHovered &&
+      this.current === 1 &&
+      (this.focusBlend ?? 0) <= 0.02
+    ) {
+      const mySpace = this.hud.getMySpaceScreen();
+      if (!mySpace?.isPoweredOn && !mySpace?.xpBoot?.isBooting) {
+        return false;
+      }
+    }
+    return true;
   }
 
   _getDesktopInstance() {
@@ -1126,55 +1728,11 @@ export class StageExperience {
   }
 
   _getDisplayStageDegrees() {
+    // Match the old readout: stage degrees from world turntable rotation.
     return THREE.MathUtils.euclideanModulo(
       THREE.MathUtils.radToDeg(-this.world.rotation.y),
       360
     );
-  }
-
-  _applyCameraPose() {
-    this._sanitizeMotionState();
-
-    const sidekick = this.vignettes[2]?.instance;
-    const sidekickOwnsFocus =
-      this.current === 2 && (this.focusBlend > 0.02 || sidekick?.isOpen || sidekick?._swivelTween);
-    const focus = sidekickOwnsFocus
-      ? 0
-      : THREE.MathUtils.clamp(this.focusBlend, 0, 1);
-    const restX = CAM_REST_OFFSET_X * (1 - focus);
-    const restZ = CAM_REST_BACK * (1 - focus);
-    const pullback = this._getTransitionPullback();
-
-    if (
-      !this._focusDollyIn &&
-      this._restingCameraMatchesIntro() &&
-      pullback < 1e-6 &&
-      focus < 0.001
-    ) {
-      this.camera.position.set(CAM_REST_OFFSET_X, CAM_Y, CAM_Z + CAM_REST_BACK);
-      this.camera.quaternion.copy(this._introRestQuat);
-      return;
-    }
-
-    const parallaxX = this._focusDollyIn ? 0 : this.parallax.x;
-    const parallaxY = this._focusDollyIn ? 0 : this.parallax.y;
-
-    if (!this.reducedMotion) {
-      this.camera.position.x = restX + parallaxX * PARALLAX_CAM_X;
-      this.camera.position.y = CAM_Y + parallaxY * PARALLAX_CAM_Y;
-      this.camera.position.z = CAM_Z + restZ + pullback;
-      this.camera.lookAt(
-        LOOK.x + parallaxX * PARALLAX_LOOK_X,
-        LOOK.y + parallaxY * PARALLAX_LOOK_Y,
-        LOOK.z
-      );
-      sanitizeCameraPose(this.camera, LOOK);
-      return;
-    }
-
-    this.camera.position.set(restX, CAM_Y, CAM_Z + restZ + pullback);
-    this.camera.lookAt(LOOK);
-    sanitizeCameraPose(this.camera, LOOK);
   }
 
   /** Recover from NaN parallax / rotation before applying camera pose. */
@@ -1193,24 +1751,15 @@ export class StageExperience {
   }
 
   _onPointerDown = (event) => {
-    if (this.locked) return;
     this._updateHoverFromClient(event.clientX, event.clientY);
 
     const onSidekick =
       this.scrollCapture.activeMeshId === SCROLL_CAPTURE_MESH_IDS.sidekick;
-    const sidekick = this.vignettes[2]?.instance;
-    const sidekickFocused = Boolean(sidekick?.isOpen || sidekick?._swivelTween);
     const onDesktop =
       this.scrollCapture.activeMeshId === SCROLL_CAPTURE_MESH_IDS.finalPcScreen;
+    const rigZoomed = Boolean(this.cameraRig?.state?.isZoomed);
 
-    if (onSidekick && (this.focusBlend > 0.02 || sidekickFocused)) {
-      this._unfocusVignette();
-      this.vignettes[2]?.instance?.playSlideClose?.();
-      event.stopImmediatePropagation();
-      return;
-    }
-
-    if (onDesktop && this.focusBlend > 0.02) {
+    if (onDesktop && (this.focusBlend > 0.02 || rigZoomed)) {
       const mySpace = this.hud.getMySpaceScreen();
       const handled = this.scrollCapture.handlePointerDown();
       if (handled) {
@@ -1226,7 +1775,6 @@ export class StageExperience {
         event.stopImmediatePropagation();
         return;
       }
-      // Clicks on the screen stay in-screen (blog posts, etc.) — unfocus only outside.
       event.stopImmediatePropagation();
       return;
     }
@@ -1234,21 +1782,26 @@ export class StageExperience {
     if (this.scrollCapture.handlePointerDown()) {
       this.waterCursor?.setPressed(true);
       if (onSidekick) {
+        // Sidekick swivel is handled by scroll-capture; zoom stays with vignetteClick.
         event.stopImmediatePropagation();
         return;
       }
-      if (this.focusBlend < 0.98) {
-        this._focusVignette();
-      } else if (onDesktop) {
-        this._tryStartDesktopBoot();
+      if (onDesktop && this.cameraRig?.state?.index === 1 && this.cameraRig.state.isZoomed) {
+        if (this.focusBlend < 0.98) {
+          this._focusVignette();
+        } else {
+          this._tryStartDesktopBoot();
+        }
+        event.stopImmediatePropagation();
+        return;
       }
-      event.stopImmediatePropagation();
+      // First click on desktop/monolith: let the click handler run CameraRig.zoomIn.
       return;
     }
 
-    if (this.focusBlend > 0.02) {
+    if (this.focusBlend > 0.02 || rigZoomed) {
+      this.cameraRig?.zoomOut?.();
       this._unfocusVignette();
-      this.vignettes[2]?.instance?.playSlideClose?.();
     }
   };
 
@@ -1276,9 +1829,9 @@ export class StageExperience {
       parallaxInfluence: this.parallaxInfluence,
       parallaxInfluenceTarget: this._parallaxInfluenceTarget,
       focusBlend: this.focusBlend,
+      focusPhase: this._focusPhase,
       locked: this.locked,
       current: this.current,
-      sidekickAnchors: this.vignettes[2]?.instance?.debugAnchors?.(),
       transitionProgress: this._transition?.progress ?? 0,
       wheelGestureOpen: this._wheelGestureOpen
     };
@@ -1286,7 +1839,9 @@ export class StageExperience {
 
   _runIntro() {
     requestAnimationFrame(() => {
-      window.setTimeout(() => this.ui.fader?.classList.add("gone"), 80);
+      requestAnimationFrame(() => {
+        this.ui.fader?.classList.add("gone");
+      });
     });
   }
 
@@ -1300,8 +1855,8 @@ export class StageExperience {
     this.hud.updateMySpacePanelForVignette(this.current);
     this.waterCursor?.resize(w, h);
     if (this.current === 2) {
-      this.vignettes[2]?.instance?.invalidateAnchors?.();
-      this._bakeSidekickAnchors(true);
+      this.vignettes[2]?.instance?.invalidateRestPose?.();
+      this._fitSidekickRestPose(true);
     }
   };
 
@@ -1328,14 +1883,26 @@ export class StageExperience {
     }
   }
 
+  /** Post-intro desktop effects — deferred until integration + settle grace complete. */
+  _shouldRunIntroHeavyEffects() {
+    return (
+      this.introComplete &&
+      !this._introIntegrationActive &&
+      this._introHeavyEffectsAfter > 0 &&
+      performance.now() >= this._introHeavyEffectsAfter
+    );
+  }
+
   _animate() {
     const dt = this.clock.getDelta();
     const t = this.clock.elapsedTime;
 
     const desktop = this.vignettes[1]?.instance;
-    if (this.introComplete) {
-      desktop?._ensurePowerLed?.();
-      desktop?.powerLed?.update(t);
+    if (desktop?.pcRoot && desktop._pcSceneReady) {
+      desktop._ensurePowerLed?.();
+    }
+
+    if (this._shouldRunIntroHeavyEffects()) {
       desktop?.screenLightRig?.update();
       desktop?.updateCrtGlassReflection?.(
         this.liveEnv,
@@ -1351,67 +1918,26 @@ export class StageExperience {
 
     this.animFns.forEach((fn) => fn(t));
 
-    if (!this.introComplete) {
-      if (this._introStartedAt === 0) {
-        this._introStartedAt = performance.now();
-      }
-      this._tickIntro();
-      this._applyIntroCamera();
-    } else {
-      if (!this.reducedMotion) {
-        const { tx, ty } = this._parallaxTargetFromClient(this._lastPointer.x, this._lastPointer.y);
-        this.parallax.tx = tx;
-        this.parallax.ty = ty;
+    this.cameraRig?.update(dt);
+    this._tickIntroFromCameraRig();
+    this._syncCameraRigIndex();
+    this._aimPovSpotlight();
 
-        const infTarget = this._parallaxInfluenceTarget;
-        const infEase = infTarget > this.parallaxInfluence ? PARALLAX_CAPTURE_IN : PARALLAX_CAPTURE_OUT;
-        if (!this._transitionTl && !this._focusDollyIn) {
-          this.parallaxInfluence += (infTarget - this.parallaxInfluence) * infEase;
-        }
-
-        const inf = this.parallaxInfluence;
-        const lock = this._parallaxLock;
-        let desiredX = tx * (1 - inf) + lock.x * inf;
-        let desiredY = ty * (1 - inf) + lock.y * inf;
-
-        const sidekickStop = this.current === 2 && !this._transitionTl;
-
-        if (this._focusDollyIn) {
-          desiredX = 0;
-          desiredY = 0;
-        } else if (sidekickStop) {
-          desiredX = 0;
-          desiredY = 0;
-        }
-
-        if (this._transitionTl && this._transitionParallaxFrom) {
-          desiredX = this._transitionParallaxFrom.x;
-          desiredY = this._transitionParallaxFrom.y;
-        }
-
-        const postTransitionSettle = performance.now() < this._parallaxSettleUntil;
-        const infSettling = Math.abs(infTarget - inf) > 0.015;
-        let follow = infSettling ? PARALLAX_FOLLOW_SETTLING : PARALLAX_FOLLOW;
-        if (postTransitionSettle) follow = PARALLAX_POST_TRANSITION_FOLLOW;
-
-        if (this._focusDollyIn || sidekickStop) {
-          this.parallax.x = 0;
-          this.parallax.y = 0;
-        } else {
-          this.parallax.x += (desiredX - this.parallax.x) * follow;
-          this.parallax.y += (desiredY - this.parallax.y) * follow;
-        }
-      }
-      this._applyCameraPose();
+    if (this.introComplete) {
+      this._tickDesktopRestAnchor();
       this._applyVignetteMotion(t);
     }
+    this._tickModelReveal(dt);
+    this._tickPostGrainStrength(dt);
 
     if (this.ui.readout) {
       const deg = this._getDisplayStageDegrees();
       this.ui.readout.textContent = `STAGE ${deg.toFixed(1).padStart(5, "0")}°`;
     }
 
-    this.post.render(this.scene, this.camera, t);
+    this.post.render(this.scene, this.camera, t, {
+      grainStrength: this._postGrainStrength
+    });
     this.waterCursor?.render();
     requestAnimationFrame(this._animate);
   }

@@ -4,7 +4,7 @@ import * as THREE from "three";
 export function createCrtScreenMaterial(texture) {
   const material = new THREE.MeshBasicMaterial({
     map: texture,
-    toneMapped: false,
+    toneMapped: true,
     side: THREE.FrontSide,
     depthWrite: true,
     depthTest: true,

@@ -81,8 +81,14 @@ export class PostPass {
     this._createTarget(w, h);
   }
 
-  render(scene, camera, time) {
+  render(scene, camera, time, options = {}) {
+    const grainStrength =
+      typeof options.grainStrength === "number"
+        ? THREE.MathUtils.clamp(options.grainStrength, 0, 1)
+        : 1;
+
     this.uniforms.uTime.value = time;
+    this.uniforms.uGrain.value = this.grain * grainStrength;
 
     this.renderer.setRenderTarget(this.target);
     this.renderer.render(scene, camera);

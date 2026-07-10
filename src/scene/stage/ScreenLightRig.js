@@ -51,8 +51,11 @@ export class ScreenLightRig {
     this.sampleInterval = sampleInterval;
     this.smoothing = smoothing;
     this.saturationBoost = saturationBoost;
+    this._baseMaxSpillIntensity = maxSpillIntensity;
+    this._baseMaxGlowIntensity = maxGlowIntensity;
     this.maxSpillIntensity = maxSpillIntensity;
     this.maxGlowIntensity = maxGlowIntensity;
+    this._intensityScale = 1;
 
     this._rt = new THREE.WebGLRenderTarget(1, 1, {
       minFilter: THREE.LinearFilter,
@@ -90,6 +93,15 @@ export class ScreenLightRig {
     this._blitMat.map = texture;
   }
 
+  /** Scale spill/glow caps — e.g. pull back when the monitor fills the frame. */
+  setIntensityScale(scale) {
+    const s = THREE.MathUtils.clamp(scale, 0, 1);
+    if (Math.abs(s - this._intensityScale) < 1e-4) return;
+    this._intensityScale = s;
+    this.maxSpillIntensity = this._baseMaxSpillIntensity * s;
+    this.maxGlowIntensity = this._baseMaxGlowIntensity * s;
+  }
+
   /** Call once per frame from your render loop. */
   update() {
     this._frame++;
@@ -117,7 +129,11 @@ export class ScreenLightRig {
     const [pr, pg, pb] = this._pixel;
     const c = this._targetColor.setRGB(pr / 255, pg / 255, pb / 255);
 
-    this._targetLuma = 0.2126 * (pr / 255) + 0.7152 * (pg / 255) + 0.0722 * (pb / 255);
+    this._targetLuma = THREE.MathUtils.clamp(
+      0.2126 * (pr / 255) + 0.7152 * (pg / 255) + 0.0722 * (pb / 255),
+      0,
+      0.62
+    );
 
     c.getHSL(this._hsl);
     if (this._hsl.s > 0.02) {

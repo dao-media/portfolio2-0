@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test:cursor": "node scripts/water-cursor-stress.mjs",
     "test:scroll": "node scripts/stage-scroll-stress.mjs",
-    "test:motion": "npm run test:cursor && npm run test:scroll"
+    "test:parallax": "node scripts/stage-parallax-stress.mjs",
+    "test:motion": "npm run test:cursor && npm run test:scroll && npm run test:parallax"
   },
   "devDependencies": {
     "vite": "^6.3.5"

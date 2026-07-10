@@ -8,7 +8,14 @@ import {
   measureSceneBounds
 } from "./pcSceneBlockout.js";
 import { LOOK } from "../stage/constants.js";
-import { applySidekickScreenTexture, ensureSidekickScreenMapLocked } from "./sidekickScreenTexture.js";
+import {
+  applySidekickScreenTexture,
+  configureSidekickScreenMaterial,
+  ensureSidekickScreenMapLocked
+} from "./sidekickScreenTexture.js";
+import { SidekickScrollballLed } from "./SidekickScrollballLed.js";
+import { hideGroupForReveal } from "../stage/stageModelReveal.js";
+import "./sidekickMotionEasing.js";
 
 const MODEL_URL = "/assets/models/sidekick/Sidekick3.glb";
 const SCREEN_NODE_NAME = "Screen";
@@ -17,32 +24,23 @@ const SCREEN_MATERIAL_NAME = "SCREENIMAGE";
 const PHONE_ROOT_NAME = "TMobleSideKick3";
 const SWIVEL_NODE_NAME = "swivelOpenRotateY";
 const SLIDE_NODE_NAME = "offsetRotateX";
+const RIVET_NODE_NAME = "rivet";
+const SWIVEL_PART_NAME = "swivelPart";
 
-/** Swivel open/close — 30% faster than the prior 0.88s slide. */
+const CLOSED_LCD_FORWARD_Z = 0.0025;
+const SCREEN_FRAME_REVEAL = 0.22;
 const SWIVEL_DURATION = 0.88 * 0.7;
-/** Closed — 180° Z arc on the bar hinge (screen folded over keyboard). Negative = flip from left rivet. */
 const SWIVEL_CLOSED_SLIDE_Z = -Math.PI;
-/** Bar rivet pivot — ScreenFrame origin in offsetRotateX space. */
+const CLOSED_HINGE_TILT_X = -0.048;
 const _HINGE_AXIS = new THREE.Vector3(0, 0, 1);
-/** Subtle hero bob when settled (world Y / +Z toward camera). */
-const FLOAT_AMP_Y = 0.02;
-const FLOAT_AMP_Z = 0.013;
-const FLOAT_SPEED = 0.92;
-/**
- * Nudge in group +Z toward the fixed camera at POV (~10× nearer than the old 3.5 m offset).
- * Stay below ~7.5 — larger values push the phone past the camera (behind the viewer).
- */
-const SIDEKICK_POV_FORWARD = 7.25;
-/** True-scale phone center — matches the spotlight / look-at height on the stage. */
-const SIDEKICK_DISPLAY_CENTER_Y = LOOK.y;
-/** Resting hero width — closed phone at the vignette stop (fraction of viewport). */
-const REST_SCREEN_WIDTH = 0.17;
-/** Click-to-focus hero framing — fraction of viewport width (open phone). */
-const FOCUS_SCREEN_WIDTH = 0.38;
-/** NDC vertical target (0 = optical center). */
-const FOCUS_SCREEN_Y = 0;
+const _TILT_AXIS = new THREE.Vector3(1, 0, 0);
 
-/** Cancel Maya Z-up export; +π X upright; +π Y face POV; +π Z wall-hung. */
+/** Group +Z nudge toward the fixed POV — keep modest so the phone stays on the stop. */
+const SIDEKICK_POV_FORWARD = 2.4;
+/** Closed phone target width as a fraction of the viewport. */
+const REST_SCREEN_WIDTH = 0.22;
+
+const SIDEKICK_DISPLAY_CENTER_Y = LOOK.y;
 const STAGE_EULER = new THREE.Euler(Math.PI / 2, Math.PI, Math.PI, "YXZ");
 
 const _BOX = new THREE.Box3();
@@ -51,8 +49,9 @@ const _VEC2 = new THREE.Vector3();
 const _VEC3 = new THREE.Vector3();
 const _RIGHT = new THREE.Vector3();
 const _UP = new THREE.Vector3();
-const _ANCHOR_LERP = new THREE.Vector3();
-
+const _OPEN_SLIDE_EULER = new THREE.Euler(0, 0, 0);
+const _CLOSED_Q_FOLD = new THREE.Quaternion();
+const _CLOSED_Q_TILT = new THREE.Quaternion();
 const _BOX_CORNERS = [
   new THREE.Vector3(),
   new THREE.Vector3(),
@@ -64,11 +63,6 @@ const _BOX_CORNERS = [
   new THREE.Vector3()
 ];
 
-/**
- * Bistable swivel easing — static friction at detents, gravity snap through mid-travel.
- * @param {number} t Linear time progress 0→1
- * @returns {number} Swivel progress 0 (closed) → 1 (open)
- */
 function mapSidekickSwivelProgress(t) {
   const clamped = THREE.MathUtils.clamp(t, 0, 1);
 
@@ -90,8 +84,8 @@ function mapSidekickSwivelProgress(t) {
   return start + (1 - start) * (1 - Math.pow(1 - u, 2));
 }
 
-function cloneAnchor(position, scale) {
-  return { position: position.clone(), scale };
+function isSidekickDisplayClosed(progress) {
+  return THREE.MathUtils.clamp(progress, 0, 1) < 1 - 1e-6;
 }
 
 export const sidekickVignetteMeta = {
@@ -119,20 +113,23 @@ export class SidekickVignette {
     this.swivel = null;
     this.slideNode = null;
     this.screenMesh = null;
+    this._screenFrame = null;
+    this._displayCover = null;
+    this._coverAuthoredX = 0;
+    this._screenBasePosition = new THREE.Vector3();
     this.hitMeshes = [];
 
-    /** GLB authored bar Z (swivelOpenRotateY) — held while the screen arcs on offsetRotateX. */
     this._openSwivelZ = 0;
-    /** Hinge on the bar under the screen — fixed while the screen swings over the keyboard. */
     this._hingePivotLocal = new THREE.Vector3();
-    /** Mechanical pose after blockout alignment — used until viewport anchors bake. */
-    this._alignBaseline = cloneAnchor(new THREE.Vector3(), 1);
-    /** Baked once while the vignette faces the POV — closed / resting hero. */
-    this._restAnchor = cloneAnchor(new THREE.Vector3(), 1);
-    /** Baked once while the vignette faces the POV — open / zoom hero. */
-    this._focusAnchor = cloneAnchor(new THREE.Vector3(), 1);
-    this._anchorsReady = false;
-    this._focusBlend = 0;
+    this._closedSlidePosition = new THREE.Vector3();
+    this._openSlidePosition = new THREE.Vector3();
+    this._closedSlideQuat = new THREE.Quaternion();
+    this._openSlideQuat = new THREE.Quaternion();
+    this._swivelScratchQuat = new THREE.Quaternion();
+    this._mechanicalBaseline = { position: new THREE.Vector3(), scale: 1 };
+    this._restHeroPose = { position: new THREE.Vector3(), scale: 1 };
+    this._restPoseReady = false;
+
     this.isOpen = false;
     this._swivelTween = null;
     this._aligned = false;
@@ -140,16 +137,23 @@ export class SidekickVignette {
     this._swivelProgress = null;
     this._holdForIntro = false;
     this._pendingScene = null;
+    this.scrollballLed = null;
 
     this.group.userData.skipFloorSnap = true;
     this.blockoutRef = buildPcSceneBlockout(this.group, { hidden: true });
     this._loadModel();
   }
 
-  async integrateAfterIntro() {
+  async integrateAfterIntro({ yieldFrame = async () => {}, revealHidden = false } = {}) {
     if (!this._holdForIntro) return;
+    let spins = 0;
+    while (this._holdForIntro && !this._pendingScene && spins < 180) {
+      await yieldFrame();
+      spins += 1;
+    }
+    if (!this._pendingScene) return;
     this._holdForIntro = false;
-    await this._commitModel();
+    await this._commitModel({ yieldFrame, revealHidden });
   }
 
   async _loadModel() {
@@ -170,7 +174,7 @@ export class SidekickVignette {
     }
   }
 
-  async _commitModel() {
+  async _commitModel({ yieldFrame = async () => {}, revealHidden = false } = {}) {
     if (!this._pendingScene) return;
 
     this.sidekickRoot = this._pendingScene;
@@ -195,23 +199,43 @@ export class SidekickVignette {
       return;
     }
 
+    await yieldFrame();
+
+    this._hideChassisRigMeshes();
+    this.scrollballLed = SidekickScrollballLed.attach(this.phoneRoot, {
+      reducedMotion: this.reducedMotion
+    });
+
     this._openSwivelZ = this.swivel.rotation.z;
-    const screenFrame = this.slideNode.getObjectByName(SCREEN_FRAME_NAME);
-    if (screenFrame) {
-      this._hingePivotLocal.copy(screenFrame.position);
+    this._screenFrame = this.slideNode.getObjectByName(SCREEN_FRAME_NAME);
+    this._displayCover = this.slideNode.getObjectByName("transparentCover");
+    if (this._displayCover) {
+      this._coverAuthoredX = this._displayCover.rotation.x;
+      this._displayCover.material.depthWrite = false;
+      this._displayCover.material.transparent = true;
     }
+
+    this._screenBasePosition.copy(this.screenMesh.position);
+    this._configureScreenMaterial();
+    this._captureBarPivot();
 
     if (!this.screenMesh.userData.sidekickOriginalGeometry) {
       this.screenMesh.userData.sidekickOriginalGeometry = this.screenMesh.geometry.clone();
     }
 
-    await this._applyScreenTexture();
-    this._alignClosedPhone();
+    await yieldFrame();
+
+    this._alignPhone();
     this._collectHitMeshes();
     this._registerScrollCapture();
     this._aligned = true;
+
+    if (revealHidden) {
+      hideGroupForReveal(this.sidekickRoot);
+    }
+
     this.onAligned?.();
-    this._applyAnchors(0);
+    void this._applyScreenTexture();
 
     if (this._pendingOpen) {
       this._pendingOpen = false;
@@ -227,7 +251,21 @@ export class SidekickVignette {
     });
   }
 
-  /** Open rest — bar mount stays at GLB export; screen hinge is on offsetRotateX. */
+  _hideChassisRigMeshes() {
+    this.phoneRoot?.traverse((obj) => {
+      if (!obj.isMesh) return;
+      if (/^rivet/i.test(obj.name) || obj.name === SWIVEL_PART_NAME) {
+        obj.visible = false;
+        obj.castShadow = false;
+        obj.receiveShadow = false;
+      }
+    });
+    if (this._screenFrame) {
+      this._screenFrame.castShadow = false;
+      this._screenFrame.receiveShadow = false;
+    }
+  }
+
   _applyOpenSwivelBase() {
     this.swivel.rotation.set(0, 0, this._openSwivelZ);
   }
@@ -235,168 +273,138 @@ export class SidekickVignette {
   _resetSlideNode() {
     this.slideNode.rotation.set(0, 0, 0);
     this.slideNode.position.set(0, 0, 0);
+    this.slideNode.quaternion.identity();
   }
 
-  invalidateAnchors() {
-    this._anchorsReady = false;
+  _resetDisplayNode() {
+    if (!this.screenMesh) return;
+    this.screenMesh.rotation.set(0, 0, 0);
+    this.screenMesh.position.copy(this._screenBasePosition);
   }
 
-  /**
-   * One-shot viewport anchors — call while the stage world rotation faces this vignette.
-   * @param {THREE.PerspectiveCamera} camera
-   * @returns {boolean}
-   */
-  bakeAnchors(camera) {
+  _configureScreenMaterial() {
+    if (!this.screenMesh?.material) return;
+    const materials = Array.isArray(this.screenMesh.material)
+      ? this.screenMesh.material
+      : [this.screenMesh.material];
+    for (const material of materials) {
+      configureSidekickScreenMaterial(material);
+    }
+    this.screenMesh.renderOrder = 4;
+  }
+
+  _applyClosedDisplayVisibility(isClosed, progress = 0) {
+    this._hideChassisRigMeshes();
+
+    if (this._screenFrame) {
+      this._screenFrame.visible = !isClosed && progress > SCREEN_FRAME_REVEAL;
+    }
+
+    if (!this.screenMesh?.material) return;
+
+    const materials = Array.isArray(this.screenMesh.material)
+      ? this.screenMesh.material
+      : [this.screenMesh.material];
+
+    for (const material of materials) {
+      if (isClosed) {
+        material.polygonOffsetFactor = -6;
+        material.polygonOffsetUnits = -6;
+      } else {
+        material.polygonOffsetFactor = -2;
+        material.polygonOffsetUnits = -2;
+      }
+    }
+
+    this.screenMesh.renderOrder = isClosed ? 8 : 4;
+  }
+
+  _captureBarPivot() {
+    this._applyOpenSwivelBase();
+    this._resetSlideNode();
+    this._resetDisplayNode();
+    this.slideNode.updateMatrixWorld(true);
+
+    const screenFrame = this.slideNode.getObjectByName(SCREEN_FRAME_NAME);
+    if (screenFrame) {
+      this._hingePivotLocal.copy(screenFrame.position);
+    } else {
+      const rivet = this.phoneRoot?.getObjectByName(RIVET_NODE_NAME);
+      if (rivet) {
+        rivet.getWorldPosition(_VEC);
+        this.slideNode.worldToLocal(_VEC);
+        this._hingePivotLocal.copy(_VEC);
+      }
+    }
+
+    this._captureSlideKeyframes();
+  }
+
+  _closedSlideQuaternion(out = new THREE.Quaternion()) {
+    const qFold = _CLOSED_Q_FOLD.setFromAxisAngle(_HINGE_AXIS, SWIVEL_CLOSED_SLIDE_Z);
+    const qTilt = _CLOSED_Q_TILT.setFromAxisAngle(_TILT_AXIS, CLOSED_HINGE_TILT_X);
+    return out.copy(qFold).multiply(qTilt);
+  }
+
+  _orbitSlideAboutPivot(pivot, quaternion, outPosition) {
+    const rotated = _VEC.copy(pivot).applyQuaternion(quaternion);
+    outPosition.copy(pivot).sub(rotated);
+    outPosition.y += Math.abs(pivot.y);
+    return outPosition;
+  }
+
+  _captureSlideKeyframes() {
+    this._applyOpenSwivelBase();
+    this._resetSlideNode();
+    this._openSlidePosition.set(0, 0, 0);
+    this._openSlideQuat.setFromEuler(_OPEN_SLIDE_EULER);
+    this._closedSlideQuat.copy(this._closedSlideQuaternion());
+    this._orbitSlideAboutPivot(this._hingePivotLocal, this._closedSlideQuat, this._closedSlidePosition);
+  }
+
+  /** Viewport scale + center while the stage faces this vignette — no camera dolly. */
+  fitRestHeroPose(camera) {
     if (!camera || !this.phoneRoot || !this._aligned) return false;
 
-    this._applyClosedPose();
-    this._resetRootToBaseline();
+    this._resetToMechanicalBaseline();
+    this._applyClosedSettledPose();
 
-    const rest = this._measureViewportFrame(camera, REST_SCREEN_WIDTH, false);
-    if (!rest) return false;
+    const frame = this._measureViewportFrame(camera, REST_SCREEN_WIDTH);
+    if (!frame) return false;
 
-    this._restAnchor.position.copy(rest.position);
-    this._restAnchor.scale = rest.scale;
-
-    const focusScale = this._measureViewportScale(camera, FOCUS_SCREEN_WIDTH, true);
-    this._focusAnchor.position.copy(this._restAnchor.position);
-    this._focusAnchor.scale = focusScale ?? this._restAnchor.scale;
-
-    this._applyClosedPose();
-    this._resetRootToBaseline();
-
-    this._anchorsReady = true;
-    this._applyAnchors(this._focusBlend);
+    this.sidekickRoot.position.copy(frame.position);
+    this.sidekickRoot.scale.setScalar(frame.scale);
+    this._applyPlacementNudges();
+    this.sidekickRoot.updateMatrixWorld(true);
+    this._restHeroPose.position.copy(this.sidekickRoot.position);
+    this._restHeroPose.scale = this.sidekickRoot.scale.x;
+    this._restPoseReady = true;
     return true;
   }
 
-  /** Dev helper — anchor state for console inspection. */
-  debugAnchors() {
-    return {
-      aligned: this._aligned,
-      anchorsReady: this._anchorsReady,
-      focusBlend: this._focusBlend,
-      isOpen: this.isOpen,
-      swivelProgress: this._swivelProgress,
-      slideRotation: this.slideNode
-        ? [this.slideNode.rotation.x, this.slideNode.rotation.y, this.slideNode.rotation.z]
-        : null,
-      swivelZ: this.swivel?.rotation.z ?? null,
-      alignBaseline: {
-        x: this._alignBaseline.position.x,
-        y: this._alignBaseline.position.y,
-        z: this._alignBaseline.position.z,
-        scale: this._alignBaseline.scale
-      },
-      rest: {
-        x: this._restAnchor.position.x,
-        y: this._restAnchor.position.y,
-        z: this._restAnchor.position.z,
-        scale: this._restAnchor.scale
-      },
-      focus: {
-        x: this._focusAnchor.position.x,
-        y: this._focusAnchor.position.y,
-        z: this._focusAnchor.position.z,
-        scale: this._focusAnchor.scale
-      },
-      live: this.sidekickRoot
-        ? {
-            x: this.sidekickRoot.position.x,
-            y: this.sidekickRoot.position.y,
-            z: this.sidekickRoot.position.z,
-            scale: this.sidekickRoot.scale.x
-          }
-        : null
-    };
-  }
-
-  _collectHitMeshes() {
-    this.hitMeshes = [];
-    this.phoneRoot?.traverse((obj) => {
-      if (obj.isMesh && obj.visible) {
-        this.hitMeshes.push(obj);
-      }
-    });
-  }
-
-  _registerScrollCapture() {
-    if (!this.scrollCapture || !this.hitMeshes.length) return;
-
-    this.scrollCapture.registerMesh(SCROLL_CAPTURE_MESH_IDS.sidekick, {
-      vignetteIndex: this.vignetteIndex,
-      meshes: this.hitMeshes,
-      onPointerDown: () => this.handlePointerDown(),
-      onPointerMove: () => this.handlePointerMove()
-    });
-  }
-
-  _applyStageOrientation() {
-    this.sidekickRoot.rotation.order = "YXZ";
-    this.sidekickRoot.rotation.set(
-      STAGE_EULER.x,
-      STAGE_EULER.y + this.blockoutRef.rotation.y,
-      STAGE_EULER.z
-    );
-  }
-
-  _applyTrueScale() {
-    this.sidekickRoot.scale.setScalar(1);
-    this._applyStageOrientation();
+  /** Re-apply the cached rest pose without remeasuring the viewport. */
+  applyRestHeroPose() {
+    if (!this._restPoseReady || !this.sidekickRoot) return false;
+    this.sidekickRoot.position.copy(this._restHeroPose.position);
+    this.sidekickRoot.scale.setScalar(this._restHeroPose.scale);
+    this._applyClosedSettledPose();
     this.sidekickRoot.updateMatrixWorld(true);
+    return true;
   }
 
-  _snapPhoneDisplayHeight() {
-    this.sidekickRoot.updateMatrixWorld(true);
-    const box = measureSceneBounds(this.sidekickRoot, this.group);
-    if (box.isEmpty()) return;
-    const center = box.getCenter(_VEC);
-    this.sidekickRoot.position.y += SIDEKICK_DISPLAY_CENTER_Y - center.y;
-    this.sidekickRoot.updateMatrixWorld(true);
+  invalidateRestPose() {
+    this._restPoseReady = false;
   }
 
-  _alignPhoneXZToMonitor() {
-    const monitor = findBlockoutPart(this.blockoutRef, "blockout-ref-monitor");
-    if (!monitor) return;
-
-    monitor.updateMatrixWorld(true);
-    this.sidekickRoot.updateMatrixWorld(true);
-
-    _BOX.setFromObject(monitor);
-    const monitorCenter = _BOX.getCenter(_VEC);
-    this.group.worldToLocal(monitorCenter);
-
-    const phoneBox = measureSceneBounds(this.sidekickRoot, this.group);
-    if (phoneBox.isEmpty()) return;
-    const phoneCenter = phoneBox.getCenter(_VEC2);
-
-    this.sidekickRoot.position.x += monitorCenter.x - phoneCenter.x;
-    this.sidekickRoot.position.z += monitorCenter.z - phoneCenter.z;
-    this.sidekickRoot.updateMatrixWorld(true);
+  _saveMechanicalBaseline() {
+    this._mechanicalBaseline.position.copy(this.sidekickRoot.position);
+    this._mechanicalBaseline.scale = this.sidekickRoot.scale.x;
   }
 
-  /** @param {THREE.PerspectiveCamera} _camera
-   *  @param {number} focusBlend
-   *  @param {{ isActive?: boolean, transitioning?: boolean }} [opts] */
-  updateFocus(_camera, focusBlend, opts = {}) {
-    const isActive = opts.isActive !== false;
-    const transitioning = Boolean(opts.transitioning);
-
-    if (!isActive) {
-      this._focusBlend = 0;
-      return;
-    }
-
-    if (transitioning || this._swivelTween) {
-      return;
-    }
-
-    if (this.isOpen) {
-      this._focusBlend = 1;
-      return;
-    }
-
-    this._focusBlend = THREE.MathUtils.clamp(focusBlend, 0, 1);
+  _resetToMechanicalBaseline() {
+    this.sidekickRoot.position.copy(this._mechanicalBaseline.position);
+    this.sidekickRoot.scale.setScalar(this._mechanicalBaseline.scale);
+    this._applyClosedSettledPose();
   }
 
   _fillBoxCorners(box) {
@@ -428,32 +436,21 @@ export class SidekickVignette {
     return Math.max(0, maxX - minX);
   }
 
-  _resetRootToBaseline() {
-    this.sidekickRoot.position.copy(this._alignBaseline.position);
-    this.sidekickRoot.scale.setScalar(this._alignBaseline.scale);
-  }
-
   /**
    * @param {THREE.PerspectiveCamera} camera
    * @param {number} screenWidthFraction
-   * @param {boolean} measureOpen
    * @returns {{ scale: number, position: THREE.Vector3 } | null}
    */
-  _measureViewportFrame(camera, screenWidthFraction, measureOpen) {
+  _measureViewportFrame(camera, screenWidthFraction) {
     if (!this.phoneRoot) return null;
 
-    const scale = this._measureViewportScale(camera, screenWidthFraction, measureOpen);
+    const scale = this._measureViewportScale(camera, screenWidthFraction);
     if (scale == null) return null;
 
-    const base = this._alignBaseline.position;
+    const base = this._mechanicalBaseline.position;
     this.sidekickRoot.position.copy(base);
     this.sidekickRoot.scale.setScalar(scale);
-
-    if (measureOpen) {
-      this._applyOpenPoseForMeasurement();
-    } else {
-      this._applyClosedPose();
-    }
+    this._applyClosedSettledPose();
     this.sidekickRoot.updateMatrixWorld(true);
 
     _BOX.setFromObject(this.phoneRoot);
@@ -469,7 +466,7 @@ export class SidekickVignette {
     _UP.setFromMatrixColumn(camera.matrixWorld, 1).normalize();
 
     const errX = 0 - _VEC3.x;
-    const errY = FOCUS_SCREEN_Y - _VEC3.y;
+    const errY = 0 - _VEC3.y;
 
     const position = new THREE.Vector3(base.x, base.y, base.z);
     position.x += _RIGHT.x * errX * halfW + _UP.x * errY * halfH;
@@ -480,103 +477,167 @@ export class SidekickVignette {
   }
 
   /**
-   * Viewport width scale only — used for the open / focus anchor (position stays at rest).
    * @param {THREE.PerspectiveCamera} camera
    * @param {number} screenWidthFraction
-   * @param {boolean} measureOpen
    * @returns {number | null}
    */
-  _measureViewportScale(camera, screenWidthFraction, measureOpen) {
+  _measureViewportScale(camera, screenWidthFraction) {
     if (!this.phoneRoot) return null;
 
-    this.sidekickRoot.position.copy(this._alignBaseline.position);
-    this.sidekickRoot.scale.setScalar(this._alignBaseline.scale);
-
-    if (measureOpen) {
-      this._applyOpenPoseForMeasurement();
-    } else {
-      this._applyClosedPose();
-    }
+    this.sidekickRoot.position.copy(this._mechanicalBaseline.position);
+    this.sidekickRoot.scale.setScalar(this._mechanicalBaseline.scale);
+    this._applyClosedSettledPose();
     this.sidekickRoot.updateMatrixWorld(true);
 
     const ndcWidth = this._measureNdcWidth(camera);
     const targetNdcWidth = screenWidthFraction * 2;
-    let scale = this._alignBaseline.scale;
+    let scale = this._mechanicalBaseline.scale;
     if (ndcWidth > 1e-4) {
-      scale = this._alignBaseline.scale * (targetNdcWidth / ndcWidth);
+      scale = this._mechanicalBaseline.scale * (targetNdcWidth / ndcWidth);
     }
     return THREE.MathUtils.clamp(scale, 0.05, 8);
   }
 
-  _applyOpenPoseForMeasurement() {
-    this._applySwivelProgress(1);
+  _applyPovForward() {
+    this.sidekickRoot.position.z += SIDEKICK_POV_FORWARD_BASE;
+    this.sidekickRoot.updateMatrixWorld(true);
   }
 
-  _restoreSwivelPoseAfterMeasurement() {
-    if (this._swivelTween && this._swivelProgress != null) {
-      this._applySwivelProgress(this._swivelProgress);
-    } else if (this.isOpen) {
-      this._applySwivelProgress(1);
-    } else {
-      this._applyClosedPose();
-    }
-  }
-
-  /** Pin the phone body to baked anchors — swivel + float when idle. */
-  _applyAnchors(focusT = 0, time = 0) {
-    if (!this.sidekickRoot) return;
-
-    const t = THREE.MathUtils.clamp(focusT, 0, 1);
-
-    if (!this._anchorsReady) {
-      this.sidekickRoot.position.copy(this._alignBaseline.position);
-      this.sidekickRoot.scale.setScalar(this._alignBaseline.scale);
-      return;
-    }
-
-    _ANCHOR_LERP.lerpVectors(this._restAnchor.position, this._focusAnchor.position, t);
-    this.sidekickRoot.position.copy(_ANCHOR_LERP);
-    this.sidekickRoot.scale.setScalar(
-      THREE.MathUtils.lerp(this._restAnchor.scale, this._focusAnchor.scale, t)
+  _applyStageOrientation() {
+    this.sidekickRoot.rotation.order = "YXZ";
+    this.sidekickRoot.rotation.set(
+      STAGE_EULER.x,
+      STAGE_EULER.y + this.blockoutRef.rotation.y,
+      STAGE_EULER.z
     );
-
-    if (time > 0 && !this._swivelTween && !this.reducedMotion) {
-      const strength = THREE.MathUtils.lerp(0.45, 1, t);
-      this.sidekickRoot.position.y +=
-        (Math.sin(time * FLOAT_SPEED) * 0.65 + Math.sin(time * FLOAT_SPEED * 0.43 + 1.15) * 0.35) *
-        FLOAT_AMP_Y *
-        strength;
-      this.sidekickRoot.position.z +=
-        Math.sin(time * FLOAT_SPEED * 0.68 + 0.55) * FLOAT_AMP_Z * strength;
-    }
   }
 
-  /**
-   * Real Sidekick arc — 180° Z on the bar rivet; screen travels over the keyboard.
-   * @param {number} progress 0 = closed (over keyboard), 1 = open (authored rest)
-   */
+  _snapPhoneDisplayHeight() {
+    this.sidekickRoot.updateMatrixWorld(true);
+    const box = measureSceneBounds(this.sidekickRoot, this.group);
+    if (box.isEmpty()) return;
+    const center = box.getCenter(_VEC);
+    this.sidekickRoot.position.y += SIDEKICK_DISPLAY_CENTER_Y - center.y;
+    this.sidekickRoot.updateMatrixWorld(true);
+  }
+
+  _alignPhoneXZToMonitor() {
+    const monitor = findBlockoutPart(this.blockoutRef, "blockout-ref-monitor");
+    if (!monitor) return;
+
+    monitor.updateMatrixWorld(true);
+    this.sidekickRoot.updateMatrixWorld(true);
+
+    _BOX.setFromObject(monitor);
+    const monitorCenter = _BOX.getCenter(_VEC);
+    this.group.worldToLocal(monitorCenter);
+
+    const phoneBox = measureSceneBounds(this.sidekickRoot, this.group);
+    if (phoneBox.isEmpty()) return;
+    const phoneCenter = phoneBox.getCenter(_VEC2);
+
+    this.sidekickRoot.position.x += monitorCenter.x - phoneCenter.x;
+    this.sidekickRoot.position.z += monitorCenter.z - phoneCenter.z;
+    this.sidekickRoot.updateMatrixWorld(true);
+  }
+
+  _alignPhone() {
+    this.sidekickRoot.position.set(0, 0, 0);
+    this.sidekickRoot.scale.setScalar(1);
+    this.sidekickRoot.rotation.set(0, 0, 0);
+    this._applyClosedSettledPose();
+    this._applyStageOrientation();
+    this.sidekickRoot.updateMatrixWorld(true);
+    this._snapPhoneDisplayHeight();
+    this._alignPhoneXZToMonitor();
+    // Keep the phone on the vignette stop — no large lateral hero offsets.
+    this.sidekickRoot.position.x = 0;
+    this._applyPovForward();
+    this._saveMechanicalBaseline();
+    this._restPoseReady = false;
+  }
+
+  _collectHitMeshes() {
+    this.hitMeshes = [];
+    this.phoneRoot?.traverse((obj) => {
+      if (obj.isMesh && obj.visible) {
+        this.hitMeshes.push(obj);
+      }
+    });
+  }
+
+  _registerScrollCapture() {
+    if (!this.scrollCapture || !this.hitMeshes.length) return;
+
+    this.scrollCapture.registerMesh(SCROLL_CAPTURE_MESH_IDS.sidekick, {
+      vignetteIndex: this.vignetteIndex,
+      meshes: this.hitMeshes,
+      onPointerDown: () => this.handlePointerDown(),
+      onPointerMove: () => this.handlePointerMove()
+    });
+  }
+
   _applySwivelProgress(progress) {
     const t = THREE.MathUtils.clamp(progress, 0, 1);
-    const angle = (1 - t) * SWIVEL_CLOSED_SLIDE_Z;
 
     this._applyOpenSwivelBase();
 
-    if (Math.abs(angle) <= 1e-6) {
+    if (t <= 1e-6) {
+      this.slideNode.quaternion.copy(this._closedSlideQuat);
+      this.slideNode.position.copy(this._closedSlidePosition);
+    } else if (t >= 1 - 1e-6) {
       this._resetSlideNode();
-      return;
+    } else {
+      this._swivelScratchQuat.slerpQuaternions(this._closedSlideQuat, this._openSlideQuat, t);
+      this.slideNode.quaternion.copy(this._swivelScratchQuat);
+      this.slideNode.position.lerpVectors(this._closedSlidePosition, this._openSlidePosition, t);
     }
 
-    this.slideNode.rotation.set(0, 0, angle);
-    const pivot = this._hingePivotLocal;
-    const rotated = _VEC.copy(pivot).applyAxisAngle(_HINGE_AXIS, angle);
-    this.slideNode.position.copy(pivot).sub(rotated);
-    // Closed-only Y — cancels double pivot travel; open rest unchanged.
-    this.slideNode.position.y += (1 - t) * Math.abs(pivot.y);
+    this._applyDisplayState(t);
   }
 
-  _applyOpenPose() {
+  _applyDisplayState(progress = 0) {
+    const isClosed = isSidekickDisplayClosed(progress);
+
+    if (this.screenMesh) {
+      this.screenMesh.visible = true;
+      this._resetDisplayNode();
+
+      if (isClosed) {
+        this.screenMesh.position.z += CLOSED_LCD_FORWARD_Z;
+      }
+
+      const materials = Array.isArray(this.screenMesh.material)
+        ? this.screenMesh.material
+        : [this.screenMesh.material];
+      for (const material of materials) {
+        if (material) configureSidekickScreenMaterial(material);
+      }
+
+      ensureSidekickScreenMapLocked(this.screenMesh);
+    }
+
+    if (this.swivel) {
+      this.swivel.visible = true;
+    }
+
+    if (this._displayCover) {
+      this._displayCover.rotation.x = this._coverAuthoredX;
+      this._displayCover.position.set(0, 0, 0);
+      this._displayCover.visible = !isClosed;
+    }
+
+    this._applyClosedDisplayVisibility(isClosed, progress);
+  }
+
+  _applyOpenSettledPose() {
     this._applySwivelProgress(1);
     this.isOpen = true;
+  }
+
+  _applyClosedSettledPose() {
+    this._applySwivelProgress(0);
+    this.isOpen = false;
   }
 
   async _applyScreenTexture() {
@@ -584,29 +645,29 @@ export class SidekickVignette {
     await applySidekickScreenTexture(this.screenMesh);
   }
 
-  _applyClosedPose() {
-    this._applySwivelProgress(0);
-    this.isOpen = false;
-  }
-
-  _alignClosedPhone() {
-    this.sidekickRoot.position.set(0, 0, 0);
-    this.sidekickRoot.scale.setScalar(1);
-    this.sidekickRoot.rotation.set(0, 0, 0);
-    this._applyClosedPose();
-
-    this._applyTrueScale();
-    this._snapPhoneDisplayHeight();
-    this._alignPhoneXZToMonitor();
-    this._applyPovForward();
-
-    this._alignBaseline.position.copy(this.sidekickRoot.position);
-    this._alignBaseline.scale = 1;
-  }
-
-  _applyPovForward() {
-    this.sidekickRoot.position.z += SIDEKICK_POV_FORWARD;
-    this.sidekickRoot.updateMatrixWorld(true);
+  _runSwivelTween(from, to) {
+    const blend = { t: from };
+    this._swivelTween?.kill();
+    this._swivelTween = gsap.to(blend, {
+      t: to,
+      duration: SWIVEL_DURATION * Math.max(Math.abs(to - from), 0.12),
+      ease: "sidekick.inOut",
+      onUpdate: () => {
+        const progress = mapSidekickSwivelProgress(blend.t);
+        this._applySwivelProgress(progress);
+        this._swivelProgress = progress;
+      },
+      onComplete: () => {
+        this._swivelTween = null;
+        this._swivelProgress = to >= 1 - 1e-6 ? 1 : null;
+        this.isOpen = to >= 1 - 1e-6;
+        if (this.isOpen) {
+          this._applyOpenSettledPose();
+        } else {
+          this._applyClosedSettledPose();
+        }
+      }
+    });
   }
 
   playSlideOpen() {
@@ -614,40 +675,17 @@ export class SidekickVignette {
       this._pendingOpen = true;
       return;
     }
-    if (this.isOpen && this._swivelTween) return;
-    if (this.isOpen) return;
+    if (this.isOpen || this._swivelTween) return;
 
     this._pendingOpen = false;
     this._swivelProgress = 0;
 
     if (this.reducedMotion) {
-      this._applyOpenPose();
-      this._focusBlend = 1;
-      this._applyAnchors(1);
+      this._applyOpenSettledPose();
       return;
     }
 
-    const blend = { t: 0 };
-    this._swivelTween?.kill();
-    this._swivelTween = gsap.to(blend, {
-      t: 1,
-      duration: SWIVEL_DURATION,
-      ease: "none",
-      onUpdate: () => {
-        const progress = mapSidekickSwivelProgress(blend.t);
-        this._applySwivelProgress(progress);
-        this._swivelProgress = progress;
-        this._focusBlend = progress;
-        this._applyAnchors(progress);
-      },
-      onComplete: () => {
-        this._applyOpenPose();
-        this._swivelTween = null;
-        this._swivelProgress = 1;
-        this._focusBlend = 1;
-        this._applyAnchors(1);
-      }
-    });
+    this._runSwivelTween(0, 1);
   }
 
   playSlideClose() {
@@ -663,53 +701,20 @@ export class SidekickVignette {
           : 0;
 
     if (startProgress <= 0.001 && !this.isOpen) {
-      this._snapClosed();
+      this._applyClosedSettledPose();
       return;
     }
-
-    this._swivelProgress = startProgress;
 
     if (this.reducedMotion) {
-      this._snapClosed();
+      this._applyClosedSettledPose();
       return;
     }
 
-    const blend = { t: startProgress };
-    this._swivelTween?.kill();
-    this._swivelTween = gsap.to(blend, {
-      t: 0,
-      duration: SWIVEL_DURATION * Math.max(startProgress, 0.12),
-      ease: "none",
-      onUpdate: () => {
-        const progress = mapSidekickSwivelProgress(blend.t);
-        this._applySwivelProgress(progress);
-        this._swivelProgress = progress;
-        this._focusBlend = progress;
-        this._applyAnchors(progress);
-      },
-      onComplete: () => {
-        this._applyClosedPose();
-        this._swivelTween = null;
-        this._swivelProgress = null;
-        this._focusBlend = 0;
-        this._applyAnchors(0);
-      }
-    });
-  }
-
-  _snapClosed() {
-    this._swivelTween?.kill();
-    this._swivelTween = null;
-    this._swivelProgress = null;
-    this._applyClosedPose();
-    this._focusBlend = 0;
-    this._applyAnchors(0);
+    this._runSwivelTween(startProgress, 0);
   }
 
   handlePointerDown() {
-    if (this._focusBlend > 0.02) {
-      return false;
-    }
+    if (this.isOpen || this._swivelTween) return false;
     this.playSlideOpen();
     return true;
   }
@@ -718,16 +723,21 @@ export class SidekickVignette {
     return true;
   }
 
-  setActive() {
-    this._applyAnchors(this._focusBlend);
-  }
+  setActive() {}
 
   setInactive() {
     this._pendingOpen = false;
-    this._focusBlend = 0;
     if (this._swivelTween || this.isOpen) {
       this.playSlideClose();
     }
+  }
+
+  updateFocus() {}
+
+  update(time) {
+    if (!this._aligned || !this.sidekickRoot) return;
+    ensureSidekickScreenMapLocked(this.screenMesh);
+    this.scrollballLed?.update(time);
   }
 
   _findScreenMesh(root) {
@@ -744,12 +754,5 @@ export class SidekickVignette {
     });
 
     return byNode ?? byMaterial;
-  }
-
-  update(time) {
-    if (!this._aligned || !this.sidekickRoot) return;
-
-    ensureSidekickScreenMapLocked(this.screenMesh);
-    this._applyAnchors(this._focusBlend, time);
   }
 }

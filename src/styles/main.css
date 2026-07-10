@@ -156,34 +156,54 @@ body {
 }
 
 .audio-fab {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 44px;
   height: 44px;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: none;
   border-radius: 50%;
-  background: rgba(12, 12, 12, 0.72);
+  background: transparent;
   color: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+  pointer-events: auto;
+  transition:
+    color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.audio-fab::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(12, 12, 12, 0.72);
   box-shadow:
     0 8px 28px rgba(0, 0, 0, 0.45),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  cursor: pointer;
-  pointer-events: auto;
+  opacity: 0;
+  transform: scale(1.42);
+  pointer-events: none;
   transition:
-    background 0.2s ease,
+    opacity 0.28s ease,
+    transform 0.28s ease,
     border-color 0.2s ease,
-    color 0.2s ease,
-    transform 0.2s ease;
+    background 0.2s ease;
 }
 
 .audio-fab:hover {
-  background: rgba(22, 22, 22, 0.88);
-  border-color: rgba(255, 255, 255, 0.28);
   color: #fff;
+}
+
+.audio-fab:hover::before {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(22, 22, 22, 0.88);
+  animation: audio-fab-ring-in 0.48s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 .audio-fab:active {
@@ -192,7 +212,10 @@ body {
 
 .audio-fab.is-muted {
   color: rgba(255, 255, 255, 0.45);
-  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.audio-fab.is-muted:hover::before {
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
 .audio-fab:focus-visible {
@@ -201,15 +224,37 @@ body {
 }
 
 .audio-fab__icon {
+  position: relative;
+  z-index: 1;
   display: block;
+}
+
+@keyframes audio-fab-ring-in {
+  from {
+    opacity: 0;
+    transform: scale(1.42);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .audio-fab:hover::before {
+    animation: none;
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .fader {
   position: fixed;
   inset: 0;
-  background: #000;
+  background: #141414;
   pointer-events: none;
-  transition: opacity 1.6s ease;
+  transition: opacity 2.4s cubic-bezier(0.22, 1, 0.36, 1);
   opacity: 1;
   z-index: 5;
 }

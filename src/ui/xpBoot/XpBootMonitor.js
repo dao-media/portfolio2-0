@@ -141,7 +141,15 @@ export class XpBootMonitor {
   /** Called when the desktop vignette finishes zooming in. */
   async startBoot() {
     if (!this.canStartBoot) return false;
+    if (this._bootPromise) return this._bootPromise;
 
+    this._bootPromise = this._runBoot().finally(() => {
+      this._bootPromise = null;
+    });
+    return this._bootPromise;
+  }
+
+  async _runBoot() {
     this._ensureBootDom();
     this.screen.monitorLedOn = false;
     this.screen.notifyMonitorPowerLed("standby");
