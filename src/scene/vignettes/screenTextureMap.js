@@ -211,14 +211,20 @@ export function applySidekickScreenMapSettings(texture, map = SIDEKICK_SCREEN_MA
  * Lock the LCD atlas to authored mesh UVs — the screen rig handles swivel orientation.
  * @param {THREE.Texture} texture
  * @param {typeof SIDEKICK_SCREEN_MAP} [map]
+ * @param {{ rotation?: number }} [orientation] — extra atlas spin (e.g. closed rolodex flip)
  */
-export function applySidekickDisplayOrientation(texture, map = SIDEKICK_SCREEN_MAP) {
+export function applySidekickDisplayOrientation(
+  texture,
+  map = SIDEKICK_SCREEN_MAP,
+  orientation = null
+) {
+  const center = map.center ?? 0.5;
   texture.flipY = map.flipY;
-  texture.center.set(map.center ?? 0, map.center ?? 0);
+  texture.center.set(center, center);
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.matrixAutoUpdate = false;
-  texture.rotation = map.rotation;
+  texture.rotation = orientation?.rotation ?? map.rotation;
   texture.repeat.set(map.repeatX, map.repeatY);
   texture.offset.set(map.offsetX, map.offsetY);
   texture.updateMatrix();

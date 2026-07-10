@@ -228,14 +228,25 @@ function restoreAuthoredSidekickGeometry(screenMesh) {
 /**
  * Re-apply SIDEKICK_SCREEN_MAP if anything touched the transform.
  * @param {THREE.Mesh} screenMesh
+ * @param {{ rotation?: number }} [orientation]
  */
-export function ensureSidekickScreenMapLocked(screenMesh) {
+export function ensureSidekickScreenMapLocked(screenMesh, orientation = null) {
   const material = Array.isArray(screenMesh?.material)
     ? screenMesh.material.find((mat) => mat?.name === "SCREENIMAGE" || mat?.map)
     : screenMesh?.material;
   if (!material?.map) return;
-  applySidekickDisplayOrientation(material.map);
+  applySidekickDisplayOrientation(material.map, undefined, orientation);
   configureSidekickScreenMaterial(material);
+}
+
+/**
+ * Closed-mode atlas spin: 180° around the screen center (horizontal midline pivot).
+ * Open = 0, closed = π. Progress follows the swivel (1 open → 0 closed).
+ * @param {number} progress
+ */
+export function sidekickClosedSplashRotation(progress) {
+  const t = Math.min(1, Math.max(0, progress));
+  return (1 - t) * Math.PI;
 }
 
 /**

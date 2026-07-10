@@ -227,6 +227,26 @@ body {
   position: relative;
   z-index: 1;
   display: block;
+  fill: currentColor;
+  stroke: none;
+  transform-origin: center;
+}
+
+.audio-fab.is-playing:not(.is-muted) .audio-fab__icon {
+  animation: audio-fab-pulse 0.72s ease-in-out infinite;
+}
+
+@keyframes audio-fab-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.16);
+    opacity: 0.72;
+  }
 }
 
 @keyframes audio-fab-ring-in {
@@ -246,6 +266,11 @@ body {
     animation: none;
     opacity: 1;
     transform: scale(1);
+  }
+
+  .audio-fab.is-playing:not(.is-muted) .audio-fab__icon {
+    animation: none;
+    opacity: 0.85;
   }
 }
 

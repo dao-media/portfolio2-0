@@ -11,10 +11,12 @@ import { LOOK } from "../stage/constants.js";
 import {
   applySidekickScreenTexture,
   configureSidekickScreenMaterial,
-  ensureSidekickScreenMapLocked
+  ensureSidekickScreenMapLocked,
+  sidekickClosedSplashRotation
 } from "./sidekickScreenTexture.js";
 import { SidekickScrollballLed } from "./SidekickScrollballLed.js";
 import { hideGroupForReveal } from "../stage/stageModelReveal.js";
+import { playSidekickClose, playSidekickOpen, preloadSidekickSfx } from "../../audio/siteAudio.js";
 import "./sidekickMotionEasing.js";
 
 const MODEL_URL = "/assets/models/sidekick/Sidekick3.glb";
@@ -27,9 +29,14 @@ const SLIDE_NODE_NAME = "offsetRotateX";
 const RIVET_NODE_NAME = "rivet";
 const SWIVEL_PART_NAME = "swivelPart";
 
-const CLOSED_LCD_FORWARD_Z = 0.0025;
 const SCREEN_FRAME_REVEAL = 0.22;
 const SWIVEL_DURATION = 0.88 * 0.7;
+/**
+ * SFX leads the swivel by a fixed offset so the click is locked to motion.
+ * Open needs more lead; close only compensates play-start latency.
+ */
+const OPEN_SFX_LEAD = 0.25;
+const CLOSE_SFX_LEAD = 0.04;
 const SWIVEL_CLOSED_SLIDE_Z = -Math.PI;
 const CLOSED_HINGE_TILT_X = -0.048;
 const _HINGE_AXIS = new THREE.Vector3(0, 0, 1);
@@ -132,9 +139,12 @@ export class SidekickVignette {
 
     this.isOpen = false;
     this._swivelTween = null;
+    this._swivelTarget = null;
+    this._sfxLeadTween = null;
     this._aligned = false;
     this._pendingOpen = false;
     this._swivelProgress = null;
+    this._splashFlipRotation = Math.PI;
     this._holdForIntro = false;
     this._pendingScene = null;
     this.scrollballLed = null;
@@ -229,6 +239,7 @@ export class SidekickVignette {
     this._collectHitMeshes();
     this._registerScrollCapture();
     this._aligned = true;
+    preloadSidekickSfx();
 
     if (revealHidden) {
       hideGroupForReveal(this.sidekickRoot);
@@ -296,8 +307,10 @@ export class SidekickVignette {
   _applyClosedDisplayVisibility(isClosed, progress = 0) {
     this._hideChassisRigMeshes();
 
+    // Keep ScreenFrame (silver rails / bezel) visible in closed mode — only
+    // gate it during the early open transition so it doesn't pop mid-swivel.
     if (this._screenFrame) {
-      this._screenFrame.visible = !isClosed && progress > SCREEN_FRAME_REVEAL;
+      this._screenFrame.visible = isClosed || progress > SCREEN_FRAME_REVEAL;
     }
 
     if (!this.screenMesh?.material) return;
@@ -362,22 +375,25 @@ export class SidekickVignette {
     this._orbitSlideAboutPivot(this._hingePivotLocal, this._closedSlideQuat, this._closedSlidePosition);
   }
 
-  /** Viewport scale + center while the stage faces this vignette — no camera dolly. */
+  /**
+   * Scale the phone for resting hero size — stays on the vignette stop.
+   * No camera-space lateral nudges (those shoved the model off the ring when
+   * the camera wasn't already facing this stop).
+   */
   fitRestHeroPose(camera) {
     if (!camera || !this.phoneRoot || !this._aligned) return false;
 
     this._resetToMechanicalBaseline();
     this._applyClosedSettledPose();
 
-    const frame = this._measureViewportFrame(camera, REST_SCREEN_WIDTH);
-    if (!frame) return false;
+    const scale = this._measureViewportScale(camera, REST_SCREEN_WIDTH);
+    if (scale == null) return false;
 
-    this.sidekickRoot.position.copy(frame.position);
-    this.sidekickRoot.scale.setScalar(frame.scale);
-    this._applyPlacementNudges();
+    this.sidekickRoot.position.set(0, this._mechanicalBaseline.position.y, SIDEKICK_POV_FORWARD);
+    this.sidekickRoot.scale.setScalar(scale);
     this.sidekickRoot.updateMatrixWorld(true);
     this._restHeroPose.position.copy(this.sidekickRoot.position);
-    this._restHeroPose.scale = this.sidekickRoot.scale.x;
+    this._restHeroPose.scale = scale;
     this._restPoseReady = true;
     return true;
   }
@@ -499,7 +515,7 @@ export class SidekickVignette {
   }
 
   _applyPovForward() {
-    this.sidekickRoot.position.z += SIDEKICK_POV_FORWARD_BASE;
+    this.sidekickRoot.position.z += SIDEKICK_POV_FORWARD;
     this.sidekickRoot.updateMatrixWorld(true);
   }
 
@@ -549,10 +565,10 @@ export class SidekickVignette {
     this._applyStageOrientation();
     this.sidekickRoot.updateMatrixWorld(true);
     this._snapPhoneDisplayHeight();
-    this._alignPhoneXZToMonitor();
-    // Keep the phone on the vignette stop — no large lateral hero offsets.
+    // Stay on the ring stop: height only, then a small nudge toward the camera.
     this.sidekickRoot.position.x = 0;
-    this._applyPovForward();
+    this.sidekickRoot.position.z = SIDEKICK_POV_FORWARD;
+    this.sidekickRoot.updateMatrixWorld(true);
     this._saveMechanicalBaseline();
     this._restPoseReady = false;
   }
@@ -598,14 +614,12 @@ export class SidekickVignette {
 
   _applyDisplayState(progress = 0) {
     const isClosed = isSidekickDisplayClosed(progress);
+    // Rolodex flip around the screen center / horizontal midline: closed = 180°.
+    this._splashFlipRotation = sidekickClosedSplashRotation(progress);
 
     if (this.screenMesh) {
       this.screenMesh.visible = true;
       this._resetDisplayNode();
-
-      if (isClosed) {
-        this.screenMesh.position.z += CLOSED_LCD_FORWARD_Z;
-      }
 
       const materials = Array.isArray(this.screenMesh.material)
         ? this.screenMesh.material
@@ -614,7 +628,9 @@ export class SidekickVignette {
         if (material) configureSidekickScreenMaterial(material);
       }
 
-      ensureSidekickScreenMapLocked(this.screenMesh);
+      ensureSidekickScreenMapLocked(this.screenMesh, {
+        rotation: this._splashFlipRotation
+      });
     }
 
     if (this.swivel) {
@@ -645,9 +661,43 @@ export class SidekickVignette {
     await applySidekickScreenTexture(this.screenMesh);
   }
 
+  _killSfxLead() {
+    this._sfxLeadTween?.kill();
+    this._sfxLeadTween = null;
+  }
+
+  /**
+   * Play SFX, then start the swivel after a fixed lead so audio stays locked
+   * to the same point in the motion every time.
+   * @param {0 | 1} to
+   * @param {() => void} playSfx
+   * @param {number} leadSec
+   */
+  _beginSwivelWithSfx(to, playSfx, leadSec) {
+    this._killSfxLead();
+    this._swivelTween?.kill();
+    this._swivelTween = null;
+    this._swivelTarget = to;
+
+    playSfx();
+
+    const startTween = () => {
+      this._sfxLeadTween = null;
+      this._runSwivelTween(this._currentSwivelProgress(), to);
+    };
+
+    if (leadSec > 0) {
+      this._sfxLeadTween = gsap.delayedCall(leadSec, startTween);
+    } else {
+      startTween();
+    }
+  }
+
   _runSwivelTween(from, to) {
+    this._killSfxLead();
     const blend = { t: from };
     this._swivelTween?.kill();
+    this._swivelTarget = to;
     this._swivelTween = gsap.to(blend, {
       t: to,
       duration: SWIVEL_DURATION * Math.max(Math.abs(to - from), 0.12),
@@ -659,7 +709,8 @@ export class SidekickVignette {
       },
       onComplete: () => {
         this._swivelTween = null;
-        this._swivelProgress = to >= 1 - 1e-6 ? 1 : null;
+        this._swivelTarget = null;
+        this._swivelProgress = to >= 1 - 1e-6 ? 1 : 0;
         this.isOpen = to >= 1 - 1e-6;
         if (this.isOpen) {
           this._applyOpenSettledPose();
@@ -670,52 +721,79 @@ export class SidekickVignette {
     });
   }
 
+  _currentSwivelProgress() {
+    if (this._swivelProgress != null) {
+      return THREE.MathUtils.clamp(this._swivelProgress, 0, 1);
+    }
+    return this.isOpen ? 1 : 0;
+  }
+
   playSlideOpen() {
     if (!this._aligned) {
       this._pendingOpen = true;
       return;
     }
-    if (this.isOpen || this._swivelTween) return;
 
     this._pendingOpen = false;
-    this._swivelProgress = 0;
 
-    if (this.reducedMotion) {
+    // Already opening / open — don't restart.
+    if (this._sfxLeadTween && this._swivelTarget >= 1 - 1e-6) return;
+    if (this._swivelTween && this._swivelTarget >= 1 - 1e-6) return;
+
+    const startProgress = this._currentSwivelProgress();
+    if (startProgress >= 1 - 1e-6 && this.isOpen && !this._swivelTween) {
       this._applyOpenSettledPose();
       return;
     }
 
-    this._runSwivelTween(0, 1);
+    if (this.reducedMotion) {
+      playSidekickOpen();
+      this._applyOpenSettledPose();
+      return;
+    }
+
+    this._beginSwivelWithSfx(1, playSidekickOpen, OPEN_SFX_LEAD);
   }
 
   playSlideClose() {
-    if (!this._aligned) return;
-
     this._pendingOpen = false;
+    if (!this._aligned) {
+      this._killSfxLead();
+      return;
+    }
 
-    const startProgress =
-      this._swivelProgress != null
-        ? THREE.MathUtils.clamp(this._swivelProgress, 0, 1)
-        : this.isOpen
-          ? 1
-          : 0;
+    // Already closing / closed — don't restart.
+    if (this._sfxLeadTween && this._swivelTarget <= 1e-6) return;
+    if (this._swivelTween && this._swivelTarget <= 1e-6) return;
 
-    if (startProgress <= 0.001 && !this.isOpen) {
+    const startProgress = this._currentSwivelProgress();
+    if (startProgress <= 0.001 && !this.isOpen && !this._swivelTween && !this._sfxLeadTween) {
       this._applyClosedSettledPose();
       return;
     }
 
     if (this.reducedMotion) {
+      this._killSfxLead();
+      playSidekickClose();
       this._applyClosedSettledPose();
       return;
     }
 
-    this._runSwivelTween(startProgress, 0);
+    this._beginSwivelWithSfx(0, playSidekickClose, CLOSE_SFX_LEAD);
+  }
+
+  /** Keep slide pose locked to camera zoom — open only while zoomed on this stop. */
+  syncToCameraZoom(zoomed) {
+    if (zoomed) {
+      this.playSlideOpen();
+    } else {
+      this.playSlideClose();
+    }
   }
 
   handlePointerDown() {
-    if (this.isOpen || this._swivelTween) return false;
-    this.playSlideOpen();
+    // StageExperience owns the zoom ↔ open/close toggle; scroll-capture only
+    // reports the hit so the stage can run a single consistent path.
     return true;
   }
 
@@ -736,7 +814,9 @@ export class SidekickVignette {
 
   update(time) {
     if (!this._aligned || !this.sidekickRoot) return;
-    ensureSidekickScreenMapLocked(this.screenMesh);
+    ensureSidekickScreenMapLocked(this.screenMesh, {
+      rotation: this._splashFlipRotation
+    });
     this.scrollballLed?.update(time);
   }
 
