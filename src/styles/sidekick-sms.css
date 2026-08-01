@@ -838,3 +838,46 @@
   text-align: center;
   color: #6a7384;
 }
+
+/* ——— 3D scene capture host (offscreen, like #myspace-crt-host) ——— */
+
+#sidekick-sms-host {
+  position: fixed;
+  left: -120vw;
+  top: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+  width: 720px;
+  height: 480px;
+}
+
+.sk-sms--scene {
+  /* Layout at design size, then zoom to capture size (720/1080). */
+  --sk-w: 1080px;
+  --sk-h: 720px;
+  width: 1080px;
+  max-width: none;
+  aspect-ratio: auto;
+  height: 720px;
+  margin: 0;
+  zoom: 0.6667;
+}
+
+.sk-sms--scene .sk-sms__bezel {
+  display: none;
+}
+
+.sk-sms--scene .sk-sms__screen {
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--sk-bg);
+}
+
+.sk-sms--scene .sk-sms__lcd {
+  filter: none;
+}
+
+.sk-sms--scene .sk-screen--splash {
+  display: none !important;
+}

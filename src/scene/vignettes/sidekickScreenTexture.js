@@ -63,7 +63,7 @@ function loadImage(url) {
  * Rasterize the splash SVG at its authored pixel size.
  * @returns {Promise<HTMLCanvasElement>}
  */
-async function rasterizeSplashSvg() {
+export async function rasterizeSplashSvg() {
   const response = await fetch(SIDEKICK_SPLASH_URL);
   let svgText = await response.text();
 

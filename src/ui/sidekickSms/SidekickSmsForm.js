@@ -16,6 +16,9 @@ const SPLASH_GRAY_REMAP = [
  *
  * @typedef {{
  *   onSubmit?: (payload: SidekickSmsPayload) => void | Promise<void>,
+ *   onSendComplete?: () => void | Promise<void>,
+ *   onChange?: () => void,
+ *   sceneMode?: boolean,
  *   formName?: string,
  *   formId?: string,
  *   method?: string,
@@ -34,7 +37,7 @@ const SPLASH_GRAY_REMAP = [
 
 /**
  * Standalone Sidekick 3 SMS compose UI used as a contact form.
- * Splash → Compose → Sent. Independent of the 3D scene.
+ * Splash → Compose → Sent. Also drives the 3D Sidekick LCD in sceneMode.
  *
  * Webflow notes:
  * - Built-in markup uses `data-name`, `w-input`, `w-button`, and `w-form` done/fail.
@@ -45,6 +48,9 @@ export class SidekickSmsForm {
   /** @param {SidekickSmsOptions} [options] */
   constructor(options = {}) {
     this.onSubmit = options.onSubmit ?? null;
+    this.onSendComplete = options.onSendComplete ?? null;
+    this.onChange = options.onChange ?? null;
+    this.sceneMode = Boolean(options.sceneMode);
     this.fieldMap = {
       name: options.fieldMap?.name ?? "name",
       email: options.fieldMap?.email ?? "email",
@@ -61,10 +67,15 @@ export class SidekickSmsForm {
       webflowElementId: options.webflowElementId
     });
 
+    if (this.sceneMode) {
+      this.root.classList.add("sk-sms--scene");
+    }
+
     this._clockTimer = 0;
     this._submitting = false;
     this._splashObjectUrl = null;
     this._webflowForm = resolveFormEl(options.webflowForm);
+    this._focusedField = null;
 
     this._els = {
       splashEnter: this.root.querySelector("#sk-splash-enter"),
@@ -93,7 +104,7 @@ export class SidekickSmsForm {
     this._emojiOpen = false;
     this._bind();
     this._tickClock();
-    void this._darkenSplash();
+    if (!this.sceneMode) void this._darkenSplash();
   }
 
   /** @param {HTMLElement | null} container */
@@ -105,11 +116,98 @@ export class SidekickSmsForm {
 
   destroy() {
     window.clearInterval(this._clockTimer);
+    this._detachSceneTyping();
     if (this._splashObjectUrl) {
       URL.revokeObjectURL(this._splashObjectUrl);
       this._splashObjectUrl = null;
     }
     this.root.remove();
+  }
+
+  /** Reset fields + chrome after the 3D close / flip-back. */
+  resetCompose() {
+    this._detachSceneTyping();
+    this._els.form?.reset();
+    this._setWebflowState(null);
+    this._els.send?.classList.remove("is-sending", "is-error");
+    this._submitting = false;
+    this.showScreen(this.sceneMode ? "compose" : "splash");
+    this.onChange?.();
+  }
+
+  /**
+   * UV-mapped click from the 3D LCD (coords in capture/CSS pixel space).
+   * @param {number} x
+   * @param {number} y
+   * @param {number} width
+   * @param {number} height
+   */
+  handleScenePointer(x, y, width, height) {
+    const lcd = this.root.querySelector(".sk-sms__lcd");
+    if (!(lcd instanceof HTMLElement)) return false;
+
+    const lcdW = lcd.offsetWidth || width;
+    const lcdH = lcd.offsetHeight || height;
+    const px = (x / width) * lcdW;
+    const py = (y / height) * lcdH;
+
+    const target = hitInteractiveAt(lcd, px, py);
+    if (!target) return false;
+
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement
+    ) {
+      this._focusSceneField(target);
+      this.onChange?.();
+      return true;
+    }
+
+    if (target instanceof HTMLButtonElement || target.getAttribute("type") === "submit") {
+      target.click();
+      this.onChange?.();
+      return true;
+    }
+
+    target.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true, view: window })
+    );
+    this.onChange?.();
+    return true;
+  }
+
+  /** @param {HTMLInputElement | HTMLTextAreaElement} field */
+  _focusSceneField(field) {
+    this._focusedField = field;
+    field.focus({ preventScroll: true });
+    field.classList.add("is-focused");
+    field.closest(".sk-field, .sk-message")?.classList.add("is-focused");
+
+    this._detachSceneTyping();
+    this._onSceneKeyDown = (event) => {
+      if (this._focusedField !== field) return;
+      // Let the focused input receive the key; refresh the LCD after.
+      queueMicrotask(() => this.onChange?.());
+    };
+    this._onSceneBlur = () => {
+      field.classList.remove("is-focused");
+      field.closest(".sk-field, .sk-message")?.classList.remove("is-focused");
+      this._detachSceneTyping();
+    };
+    field.addEventListener("input", this._onSceneKeyDown);
+    field.addEventListener("blur", this._onSceneBlur);
+  }
+
+  _detachSceneTyping() {
+    if (this._focusedField && this._onSceneKeyDown) {
+      this._focusedField.removeEventListener("input", this._onSceneKeyDown);
+    }
+    if (this._focusedField && this._onSceneBlur) {
+      this._focusedField.removeEventListener("blur", this._onSceneBlur);
+    }
+    this._onSceneKeyDown = null;
+    this._onSceneBlur = null;
+    this._focusedField = null;
   }
 
   async _darkenSplash() {
@@ -142,15 +240,24 @@ export class SidekickSmsForm {
 
     if (name === "compose") {
       this._setWebflowState(null);
-      queueMicrotask(() => this._els.name?.focus());
+      // Scene mode: never autofocus — focus was chaining onChange → html-to-image.
+      if (!this.sceneMode) {
+        queueMicrotask(() => this._els.name?.focus());
+      }
     }
   }
 
   _bind() {
-    this._els.splashEnter?.addEventListener("click", () => this.showScreen("compose"));
+    if (!this.sceneMode) {
+      this._els.splashEnter?.addEventListener("click", () => this.showScreen("compose"));
+    }
 
     this.root.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && event.target === this._els.splashEnter) {
+      if (
+        !this.sceneMode &&
+        event.key === "Enter" &&
+        event.target === this._els.splashEnter
+      ) {
         event.preventDefault();
         this.showScreen("compose");
       }
@@ -180,28 +287,35 @@ export class SidekickSmsForm {
     this.root.querySelectorAll(".sk-field__input, .sk-message__input").forEach((input) => {
       input.addEventListener("focus", () => {
         input.closest(".sk-field, .sk-message")?.classList.add("is-focused");
+        // Scene LCD only needs a recapture when the value changes — not on focus.
+        if (!this.sceneMode) this.onChange?.();
       });
       input.addEventListener("blur", () => {
         input.closest(".sk-field, .sk-message")?.classList.remove("is-focused");
+        if (!this.sceneMode) this.onChange?.();
       });
+      input.addEventListener("input", () => this.onChange?.());
     });
 
     this._els.again?.addEventListener("click", () => {
       this._els.form?.reset();
       this._setWebflowState(null);
       this.showScreen("compose");
+      this.onChange?.();
     });
 
     this._els.emojiToggle?.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
       this._setEmojiOpen(!this._emojiOpen);
+      this.onChange?.();
     });
 
     this._els.emojiClose?.addEventListener("click", (event) => {
       event.preventDefault();
       this._setEmojiOpen(false);
       this._els.message?.focus();
+      this.onChange?.();
     });
 
     this.root.querySelector(".sk-toolbar")?.addEventListener("click", (event) => {
@@ -209,6 +323,7 @@ export class SidekickSmsForm {
       if (!cell) return;
       event.preventDefault();
       this._insertAtCursor(cell.dataset.emoji ?? "");
+      this.onChange?.();
     });
 
     this._els.emojiGrid?.addEventListener("click", (event) => {
@@ -216,6 +331,7 @@ export class SidekickSmsForm {
       if (!cell) return;
       event.preventDefault();
       this._insertAtCursor(cell.dataset.emoji ?? "");
+      this.onChange?.();
     });
 
     this.root.addEventListener("pointerdown", (event) => {
@@ -228,6 +344,7 @@ export class SidekickSmsForm {
         return;
       }
       this._setEmojiOpen(false);
+      this.onChange?.();
     });
   }
 
@@ -305,6 +422,7 @@ export class SidekickSmsForm {
     this._submitting = true;
     this._els.send?.classList.add("is-sending");
     this._setWebflowState(null);
+    this.onChange?.();
 
     try {
       if (this.onSubmit) {
@@ -319,15 +437,28 @@ export class SidekickSmsForm {
         );
       }
       this._setWebflowState("done");
-      this._showSent(payload);
+
+      if (this.sceneMode) {
+        // Hold the send pulse long enough to read on the LCD, then hand off.
+        await wait(420);
+        this.onChange?.();
+        if (this.onSendComplete) await this.onSendComplete();
+      } else {
+        this._showSent(payload);
+      }
     } catch (err) {
       console.error("[SidekickSmsForm] submit failed", err);
       this._setWebflowState("fail");
       this._els.send?.classList.add("is-error");
-      window.setTimeout(() => this._els.send?.classList.remove("is-error"), 1200);
+      this.onChange?.();
+      window.setTimeout(() => {
+        this._els.send?.classList.remove("is-error");
+        this.onChange?.();
+      }, 1200);
     } finally {
       this._submitting = false;
       this._els.send?.classList.remove("is-sending");
+      this.onChange?.();
     }
   }
 
@@ -533,4 +664,43 @@ function formatSidekickClock(date) {
 /** @param {string} email */
 function isPlausibleEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+/** @param {number} ms */
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+/**
+ * Hit-test interactive controls inside the LCD using offset coords.
+ * @param {HTMLElement} root
+ * @param {number} x
+ * @param {number} y
+ * @returns {HTMLElement | null}
+ */
+function hitInteractiveAt(root, x, y) {
+  const rootRect = root.getBoundingClientRect();
+  const candidates = root.querySelectorAll(
+    "button, input:not(.sk-honeypot), textarea, [role='option'], .sk-toolbar__emoji"
+  );
+
+  /** @type {HTMLElement | null} */
+  let best = null;
+  let bestArea = Infinity;
+
+  for (const el of candidates) {
+    if (!(el instanceof HTMLElement) || el.hidden) continue;
+    if (el.closest("[hidden]")) continue;
+    const rect = el.getBoundingClientRect();
+    const lx = rect.left - rootRect.left;
+    const ly = rect.top - rootRect.top;
+    if (x < lx || x > lx + rect.width || y < ly || y > ly + rect.height) continue;
+    const area = rect.width * rect.height;
+    if (area < bestArea) {
+      bestArea = area;
+      best = el;
+    }
+  }
+
+  return best;
 }

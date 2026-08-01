@@ -731,6 +731,12 @@ export class StageExperience {
           reducedMotion: this.reducedMotion,
           introGate: () => !this.introComplete,
           deferModelLoad: !this.reducedMotion,
+          onRequestClose: () => {
+            if (this.cameraRig?.state?.index !== 2) return;
+            if (!this.cameraRig.state.isZoomed) return;
+            this.cameraRig.zoomOut();
+            this._syncCameraRigZoom();
+          },
           onAligned: () => {
             this._snapAllVignettesToFloor();
             // Only fit once the camera is on the Sidekick stop — otherwise
@@ -933,12 +939,14 @@ export class StageExperience {
 
       if (this.scrollCapture.isActive) {
         if (this.scrollCapture.activeMeshId) {
-          event.preventDefault();
-          this.scrollCapture.handleWheel(event, 1);
-          return;
-        }
-
-        if (this.scrollCapture.activeDomKey) {
+          // Only hard-block when capture blend is engaged (zoomed CRT).
+          // Hover alone must not eat ring scroll — Sidekick used to trap the stop.
+          if (blend > SCROLL_CAPTURE_WHEEL_ON) {
+            event.preventDefault();
+            this.scrollCapture.handleWheel(event, 1);
+            return;
+          }
+        } else if (this.scrollCapture.activeDomKey) {
           event.preventDefault();
           const target = document.elementFromPoint(event.clientX, event.clientY);
           const viewport = target?.closest(".ms-viewport");
@@ -1143,17 +1151,27 @@ export class StageExperience {
     this.parallaxDampZones.setActive(meshId);
   }
 
-  /** Scroll-capture wheel block — PC only while zoomed in; Sidekick blocks turntable only. */
   _shouldEngageScrollCapture() {
     if (!this.scrollCapture.isActive) return false;
-    if (
-      this._pcScreenHovered &&
-      this.current === 1 &&
-      (this.focusBlend ?? 0) <= 0.02
-    ) {
+
+    const meshId = this.scrollCapture.activeMeshId;
+
+    // CRT: capture wheel only while zoomed so MySpace can scroll.
+    if (meshId === SCROLL_CAPTURE_MESH_IDS.finalPcScreen) {
+      return (
+        this.current === 1 &&
+        ((this.focusBlend ?? 0) > 0.02 || Boolean(this.cameraRig?.state?.isZoomed))
+      );
+    }
+
+    // Sidekick must NEVER steal turntable wheel. The phone is a huge hit target;
+    // hard-blocking here trapped the camera on/near the stop and made ring
+    // travel feel broken. Click still opens/closes via pointerdown.
+    if (meshId === SCROLL_CAPTURE_MESH_IDS.sidekick) {
       return false;
     }
-    return true;
+
+    return Boolean(this.scrollCapture.activeDomKey);
   }
 
   _getDesktopInstance() {
@@ -1204,8 +1222,18 @@ export class StageExperience {
 
     // Sidekick owns its full zoom ↔ slide toggle here. Letting pointerdown zoom out
     // and the later click zoom back in made open/close feel random.
+    // When the SMS compose face is up, LCD hits go to the form instead of closing.
     if (onSidekick && this.cameraRig?.state?.index === 2) {
       this.waterCursor?.setPressed(true);
+      const sidekick = this.vignettes[2]?.instance;
+      if (
+        rigZoomed &&
+        sidekick?.handlePointerDown?.(this.scrollCapture.lastHit)
+      ) {
+        this._ignoreNextVignetteClick = true;
+        event.stopImmediatePropagation();
+        return;
+      }
       this._toggleSidekickZoom();
       this._ignoreNextVignetteClick = true;
       event.stopImmediatePropagation();

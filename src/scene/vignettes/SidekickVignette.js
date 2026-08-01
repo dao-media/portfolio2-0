@@ -9,13 +9,13 @@ import {
 } from "./pcSceneBlockout.js";
 import { LOOK } from "../stage/constants.js";
 import {
-  applySidekickScreenTexture,
   configureSidekickScreenMaterial,
   ensureSidekickScreenMapLocked
 } from "./sidekickScreenTexture.js";
 import { SidekickScrollballLed } from "./SidekickScrollballLed.js";
 import { hideGroupForReveal } from "../stage/stageModelReveal.js";
 import { playSidekickClose, playSidekickOpen, preloadSidekickSfx } from "../../audio/siteAudio.js";
+import { SidekickSmsScreen } from "../../ui/sidekickSms/SidekickSmsScreen.js";
 import "./sidekickMotionEasing.js";
 
 const MODEL_URL = "/assets/models/sidekick/Sidekick3.glb";
@@ -181,7 +181,15 @@ export const sidekickVignetteMeta = {
 export class SidekickVignette {
   /**
    * @param {THREE.Group} group
-   * @param {{ vignetteIndex?: number, scrollCapture?: import("../stage/StageScrollCapture.js").StageScrollCapture, onAligned?: () => void, reducedMotion?: boolean, introGate?: () => boolean }} deps
+   * @param {{
+   *   vignetteIndex?: number,
+   *   scrollCapture?: import("../stage/StageScrollCapture.js").StageScrollCapture,
+   *   onAligned?: () => void,
+   *   onRequestClose?: () => void,
+   *   reducedMotion?: boolean,
+   *   introGate?: () => boolean,
+   *   deferModelLoad?: boolean
+   * }} deps
    */
   constructor(group, deps) {
     this.group = group;
@@ -189,6 +197,7 @@ export class SidekickVignette {
     this.vignetteIndex = deps.vignetteIndex ?? 2;
     this.scrollCapture = deps.scrollCapture ?? null;
     this.onAligned = deps.onAligned ?? null;
+    this.onRequestClose = deps.onRequestClose ?? null;
     this.introGate = deps.introGate ?? null;
     this.reducedMotion = deps.reducedMotion ?? false;
     this._modelLoadStarted = false;
@@ -227,6 +236,8 @@ export class SidekickVignette {
     this._holdForIntro = false;
     this._pendingScene = null;
     this.scrollballLed = null;
+    this.smsScreen = null;
+    this._sendSequenceRunning = false;
 
     this.group.userData.skipFloorSnap = true;
     this.blockoutRef = buildPcSceneBlockout(this.group, { hidden: true });
@@ -734,7 +745,7 @@ export class SidekickVignette {
     this.scrollCapture.registerMesh(SCROLL_CAPTURE_MESH_IDS.sidekick, {
       vignetteIndex: this.vignetteIndex,
       meshes: this.hitMeshes,
-      onPointerDown: () => this.handlePointerDown(),
+      onPointerDown: (hit) => this.handlePointerDown(hit),
       onPointerMove: () => this.handlePointerMove()
     });
   }
@@ -765,16 +776,9 @@ export class SidekickVignette {
       this.screenMesh.visible = true;
       this._resetDisplayNode();
 
-      const materials = Array.isArray(this.screenMesh.material)
-        ? this.screenMesh.material
-        : [this.screenMesh.material];
-      for (const material of materials) {
-        if (material) configureSidekickScreenMaterial(material);
-      }
-
-      // Splash + bezel stay UV-locked to the Screen mesh — no atlas spin.
-      // The fold/swivel carries the window content with the lid.
-      ensureSidekickScreenMapLocked(this.screenMesh);
+      // Material/map lock is a one-shot after texture bake — do NOT re-run here.
+      // applySidekickDisplayOrientation sets texture.needsUpdate and was
+      // re-uploading the 2360² atlas every swivel frame.
     }
 
     if (this.swivel) {
@@ -802,8 +806,55 @@ export class SidekickVignette {
 
   async _applyScreenTexture() {
     if (!this.screenMesh) return;
-    await applySidekickScreenTexture(this.screenMesh);
+
+    if (!this.smsScreen) {
+      this.smsScreen = new SidekickSmsScreen({
+        reducedMotion: this.reducedMotion,
+        onSubmit: async (payload) => {
+          // Wire delivery later — for now the send sequence is the product.
+          console.info("[SidekickSms] submit", payload);
+        },
+        onSendSequence: () => this._runSendSequence()
+      });
+      await this.smsScreen.init();
+    }
+
+    const material = Array.isArray(this.screenMesh.material)
+      ? this.screenMesh.material.find((mat) => mat?.name === SCREEN_MATERIAL_NAME || mat?.map)
+      : this.screenMesh.material;
+    if (!material) return;
+
+    const texture = this.smsScreen.getTexture();
+    material.map = texture;
+    material.emissiveMap = texture;
+    configureSidekickScreenMaterial(material);
+    material.needsUpdate = true;
     ensureSidekickScreenMapLocked(this.screenMesh);
+    this.screenMesh.userData.sidekickScreenTextureApplied = true;
+    this.screenMesh.userData.sidekickScreenAligned = true;
+
+    // Open beat may finish before the atlas is ready — catch up the flip.
+    if (this.isOpen && !this.smsScreen.isComposeVisible && !this.smsScreen.isFlipping) {
+      void this.smsScreen.flipToCompose();
+    }
+  }
+
+  /**
+   * Send → red LED double-blink → zoom/close (close flips SMS → splash).
+   */
+  async _runSendSequence() {
+    if (this._sendSequenceRunning) return;
+    this._sendSequenceRunning = true;
+    try {
+      if (this.scrollballLed?.flashAlertRed) {
+        await this.scrollballLed.flashAlertRed({ gapMs: 150, pulseMs: 90 });
+      } else {
+        await new Promise((r) => window.setTimeout(r, 300));
+      }
+      this.onRequestClose?.();
+    } finally {
+      this._sendSequenceRunning = false;
+    }
   }
 
   _killSfxLead() {
@@ -859,8 +910,10 @@ export class SidekickVignette {
         this.isOpen = to >= 1 - 1e-6;
         if (this.isOpen) {
           this._applyOpenSettledPose();
+          void this.smsScreen?.flipToCompose();
         } else {
           this._applyClosedSettledPose();
+          this.smsScreen?.snapToSplash();
         }
       }
     });
@@ -888,12 +941,16 @@ export class SidekickVignette {
     const startProgress = this._currentSwivelProgress();
     if (startProgress >= 1 - 1e-6 && this.isOpen && !this._swivelTween) {
       this._applyOpenSettledPose();
+      if (this.smsScreen && !this.smsScreen.isComposeVisible && !this.smsScreen.isFlipping) {
+        void this.smsScreen.flipToCompose();
+      }
       return;
     }
 
     if (this.reducedMotion) {
       playSidekickOpen();
       this._applyOpenSettledPose();
+      void this.smsScreen?.flipToCompose();
       return;
     }
 
@@ -914,13 +971,18 @@ export class SidekickVignette {
     const startProgress = this._currentSwivelProgress();
     if (startProgress <= 0.001 && !this.isOpen && !this._swivelTween && !this._sfxLeadTween) {
       this._applyClosedSettledPose();
+      this.smsScreen?.snapToSplash();
       return;
     }
+
+    // Flip SMS → splash as the lid starts closing (paper reverse).
+    void this.smsScreen?.flipToSplash();
 
     if (this.reducedMotion) {
       this._killSfxLead();
       playSidekickClose();
       this._applyClosedSettledPose();
+      this.smsScreen?.snapToSplash();
       return;
     }
 
@@ -936,14 +998,36 @@ export class SidekickVignette {
     }
   }
 
-  handlePointerDown() {
-    // StageExperience owns the zoom ↔ open/close toggle; scroll-capture only
-    // reports the hit so the stage can run a single consistent path.
+  /**
+   * When open + compose is showing, LCD hits go to the SMS form.
+   * Chassis hits still fall through so the stage can zoom out.
+   * @param {THREE.Intersection | null | undefined} hit
+   * @returns {boolean}
+   */
+  handlePointerDown(hit) {
+    if (this._sendSequenceRunning) return true;
+    if (!this.isOpen || !this.smsScreen?.isComposeVisible) return false;
+
+    const onScreen = hit?.object ? this._isScreenHit(hit.object) : Boolean(hit?.uv);
+    if (!onScreen) return false;
+
+    this.smsScreen.handlePointer(hit?.uv);
+    // Always consume screen hits while compose is up — chassis still closes.
     return true;
   }
 
   handlePointerMove() {
     return true;
+  }
+
+  /** @param {THREE.Object3D} object */
+  _isScreenHit(object) {
+    let node = object;
+    while (node) {
+      if (node === this.screenMesh || node === this._screenFrame) return true;
+      node = node.parent;
+    }
+    return false;
   }
 
   setActive() {}

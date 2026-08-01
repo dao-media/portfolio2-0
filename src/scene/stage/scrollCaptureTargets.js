@@ -21,9 +21,9 @@ export const SCROLL_CAPTURE_DOM_SELECTORS = [
 
 /** Runtime mesh ids (registered from vignette code). */
 export const SCROLL_CAPTURE_MESH_IDS = {
-  /** CRT monitor face — blocks turntable scroll; wheel scrolls MySpace content. */
+  /** CRT monitor face — blocks turntable scroll while zoomed; wheel scrolls MySpace. */
   finalPcScreen: "final-pc-screen",
-  /** Sidekick body — blocks turntable scroll; click to slide the screen open. */
+  /** Sidekick body — click target only. Does NOT capture wheel (too large a hit area). */
   sidekick: "sidekick-phone"
 };
 

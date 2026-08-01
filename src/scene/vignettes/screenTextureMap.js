@@ -219,16 +219,35 @@ export function applySidekickDisplayOrientation(
   orientation = null
 ) {
   const center = map.center ?? 0.5;
-  texture.flipY = map.flipY;
+  const nextRotation = orientation?.rotation ?? map.rotation;
+  const nextFlipY = map.flipY;
+  const nextRepeatX = map.repeatX;
+  const nextRepeatY = map.repeatY;
+  const nextOffsetX = map.offsetX;
+  const nextOffsetY = map.offsetY;
+
+  const unchanged =
+    texture.flipY === nextFlipY &&
+    texture.rotation === nextRotation &&
+    texture.center.x === center &&
+    texture.center.y === center &&
+    texture.repeat.x === nextRepeatX &&
+    texture.repeat.y === nextRepeatY &&
+    texture.offset.x === nextOffsetX &&
+    texture.offset.y === nextOffsetY;
+
+  texture.flipY = nextFlipY;
   texture.center.set(center, center);
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.matrixAutoUpdate = false;
-  texture.rotation = orientation?.rotation ?? map.rotation;
-  texture.repeat.set(map.repeatX, map.repeatY);
-  texture.offset.set(map.offsetX, map.offsetY);
+  texture.rotation = nextRotation;
+  texture.repeat.set(nextRepeatX, nextRepeatY);
+  texture.offset.set(nextOffsetX, nextOffsetY);
   texture.updateMatrix();
-  texture.needsUpdate = true;
+
+  // Avoid forced GPU re-uploads when the map transform didn't change.
+  if (!unchanged) texture.needsUpdate = true;
 }
 
 /** @deprecated Use applySidekickScreenTexture from sidekickScreenTexture.js */

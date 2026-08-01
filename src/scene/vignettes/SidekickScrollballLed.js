@@ -8,7 +8,10 @@ export const SCROLLBALL_MATERIAL_NAME = "lambert5";
 const RESIN_COLOR = new THREE.Color(0xebe5d4);
 /** Green LED filtered through the resin. */
 const GLOW_COLOR = new THREE.Color(0x3dff6a);
+/** Alert / message-sent red. */
+const ALERT_COLOR = new THREE.Color(0xff2a2a);
 const ATTENUATION_COLOR = new THREE.Color(0x1a6b2e);
+const ATTENUATION_ALERT = new THREE.Color(0x6b1a1a);
 
 const IDLE_GLOW = 0.18;
 const PEAK_GLOW = 5.2;
@@ -154,6 +157,8 @@ export class SidekickScrollballLed {
     this.core = options.core ?? null;
     this.light = options.light ?? null;
     this.reducedMotion = options.reducedMotion ?? false;
+    /** @type {{ until: number, pulses: number[] } | null} */
+    this._alert = null;
   }
 
   /**
@@ -218,11 +223,99 @@ export class SidekickScrollballLed {
     });
   }
 
+  /**
+   * Message-sent alert — two red flashes ~150ms apart.
+   * @param {{ gapMs?: number, pulseMs?: number }} [options]
+   * @returns {Promise<void>}
+   */
+  flashAlertRed(options = {}) {
+    const gapMs = options.gapMs ?? 150;
+    const pulseMs = options.pulseMs ?? 90;
+    const now = performance.now();
+    const pulses = [now, now + gapMs];
+    const until = pulses[pulses.length - 1] + pulseMs + 40;
+    this._alert = { until, pulses, pulseMs };
+
+    return new Promise((resolve) => {
+      const wait = until - now + 30;
+      window.setTimeout(resolve, Math.max(wait, gapMs + pulseMs));
+    });
+  }
+
   /** @param {number} time Scene elapsed seconds */
   update(time) {
+    const now = performance.now();
+    const alertPulse = this._alertPulse(now);
+
+    if (this._alert && now > this._alert.until) {
+      this._alert = null;
+      this._setLedColor(GLOW_COLOR, ATTENUATION_COLOR);
+    }
+
+    if (alertPulse > 0) {
+      this._setLedColor(ALERT_COLOR, ATTENUATION_ALERT);
+      this._applyGlow(alertPulse, {
+        idleShell: 0.08,
+        peakShell: 6.2,
+        idleCore: 0.2,
+        peakCore: 10,
+        idleLight: 0.02,
+        peakLight: 0.7
+      });
+      return;
+    }
+
     const pulse = computeScrollballPulse(time, { reducedMotion: this.reducedMotion });
-    const shellGlow = IDLE_GLOW + pulse * (PEAK_GLOW - IDLE_GLOW);
-    const coreGlow = CORE_IDLE + pulse * (CORE_PEAK - CORE_IDLE);
+    this._setLedColor(GLOW_COLOR, ATTENUATION_COLOR);
+    this._applyGlow(pulse, {
+      idleShell: IDLE_GLOW,
+      peakShell: PEAK_GLOW,
+      idleCore: CORE_IDLE,
+      peakCore: CORE_PEAK,
+      idleLight: LIGHT_IDLE,
+      peakLight: LIGHT_PEAK
+    });
+  }
+
+  /**
+   * @param {number} now
+   * @returns {number} 0–1
+   */
+  _alertPulse(now) {
+    if (!this._alert) return 0;
+    const { pulses, pulseMs } = this._alert;
+    let peak = 0;
+    for (const start of pulses) {
+      if (now < start || now > start + pulseMs) continue;
+      const u = (now - start) / pulseMs;
+      const env = u < 0.35 ? u / 0.35 : 1 - ((u - 0.35) / 0.65) ** 2;
+      peak = Math.max(peak, env);
+    }
+    return peak;
+  }
+
+  /**
+   * @param {THREE.Color} emissive
+   * @param {THREE.Color} attenuation
+   */
+  _setLedColor(emissive, attenuation) {
+    this.material.emissive.copy(emissive);
+    this.material.attenuationColor.copy(attenuation);
+    if (this.core?.material?.emissive) {
+      this.core.material.emissive.copy(emissive);
+    }
+    if (this.light) {
+      this.light.color.copy(emissive);
+    }
+  }
+
+  /**
+   * @param {number} pulse
+   * @param {{ idleShell: number, peakShell: number, idleCore: number, peakCore: number, idleLight: number, peakLight: number }} levels
+   */
+  _applyGlow(pulse, levels) {
+    const shellGlow = levels.idleShell + pulse * (levels.peakShell - levels.idleShell);
+    const coreGlow = levels.idleCore + pulse * (levels.peakCore - levels.idleCore);
 
     this.material.emissiveIntensity = shellGlow;
     this.material.attenuationDistance = 0.18 + pulse * 0.2;
@@ -237,7 +330,7 @@ export class SidekickScrollballLed {
     }
 
     if (this.light) {
-      this.light.intensity = LIGHT_IDLE + pulse * (LIGHT_PEAK - LIGHT_IDLE);
+      this.light.intensity = levels.idleLight + pulse * (levels.peakLight - levels.idleLight);
     }
   }
 }
