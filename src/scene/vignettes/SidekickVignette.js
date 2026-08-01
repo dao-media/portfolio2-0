@@ -16,6 +16,11 @@ import { SidekickScrollballLed } from "./SidekickScrollballLed.js";
 import { hideGroupForReveal } from "../stage/stageModelReveal.js";
 import { playSidekickClose, playSidekickOpen, preloadSidekickSfx } from "../../audio/siteAudio.js";
 import { SidekickSmsScreen } from "../../ui/sidekickSms/SidekickSmsScreen.js";
+import {
+  assertSidekickChassisMaterials,
+  ownMeshMaterial,
+  ownTexture
+} from "./gltfMaterialOwnership.js";
 import "./sidekickMotionEasing.js";
 
 const MODEL_URL = "/assets/models/sidekick/Sidekick3.glb";
@@ -47,6 +52,8 @@ const DECK_LABEL_MESHES = new Set(["KeyboardText"]);
  * Bake luminance into the map alpha so black atlas bg cuts out.
  * Prefer this over alphaMap = map: alphaMap samples only the green channel, which
  * kills red/cyan accent glyphs, and glTF metalness defaults (1) wipe diffuse labels.
+ *
+ * Mutates `texture` in place — callers must pass an owned clone (see ownTexture).
  * @param {THREE.Texture} texture
  */
 function ensureLabelTextureAlpha(texture) {
@@ -81,17 +88,16 @@ function ensureLabelTextureAlpha(texture) {
  * the folded LCD.
  *
  * Never dispose the prior material/texture — GLTF shares them across chassis
- * meshes (e.g. Buttons + sideButtons). Mutating a shared map punches holes in
- * the physical buttons; disposing it makes them vanish entirely.
+ * meshes (e.g. Buttons + transparentCover both use phong3). Mutating a shared
+ * map punches holes in the physical buttons; disposing it makes them vanish.
  * @param {THREE.Mesh} mesh
  */
 function applySidekickLabelMaterial(mesh) {
   const prior = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
   if (!prior?.map) return;
 
-  // Own copy of the atlas so luminance→alpha cannot touch the shared GLTF map.
-  const map = prior.map.clone();
-  map.colorSpace = prior.map.colorSpace;
+  // Own copies so luminance→alpha / MeshBasic swap cannot touch shared GLTF data.
+  const map = ownTexture(prior.map);
   ensureLabelTextureAlpha(map);
 
   const mat = new THREE.MeshBasicMaterial({
@@ -109,6 +115,7 @@ function applySidekickLabelMaterial(mesh) {
   mat.polygonOffsetFactor = -2;
   mat.polygonOffsetUnits = -2;
 
+  // Replace without disposing `prior` — other meshes may still reference it.
   mesh.material = mat;
   mesh.renderOrder = 2;
   mesh.castShadow = false;
@@ -333,10 +340,16 @@ export class SidekickVignette {
     this._openSwivelZ = this.swivel.rotation.z;
     this._screenFrame = this.slideNode.getObjectByName(SCREEN_FRAME_NAME);
     this._displayCover = this.slideNode.getObjectByName("transparentCover");
-    if (this._displayCover) {
+    if (this._displayCover?.isMesh) {
+      // CRITICAL: transparentCover shares phong3 with the physical Buttons mesh.
+      // Mutating the shared material makes the keypad vanish. Own a private copy.
+      const coverMat = ownMeshMaterial(this._displayCover);
+      const mat = Array.isArray(coverMat) ? coverMat[0] : coverMat;
+      if (mat) {
+        mat.depthWrite = false;
+        mat.transparent = true;
+      }
       this._coverAuthoredX = this._displayCover.rotation.x;
-      this._displayCover.material.depthWrite = false;
-      this._displayCover.material.transparent = true;
     }
 
     this._screenBasePosition.copy(this.screenMesh.position);
@@ -353,6 +366,7 @@ export class SidekickVignette {
     this._collectHitMeshes();
     this._registerScrollCapture();
     this._configureKeyboardLabels();
+    assertSidekickChassisMaterials(this.phoneRoot);
     this._aligned = true;
     preloadSidekickSfx();
 

@@ -191,11 +191,8 @@ export class SidekickScrollballLed {
       Array.isArray(source) ? source[0] : source
     );
 
-    if (source && source !== resin) {
-      const toDispose = Array.isArray(source) ? source : [source];
-      toDispose.forEach((mat) => mat.dispose?.());
-    }
-
+    // Never dispose the GLTF material — even if lambert5 looks unique today,
+    // disposing shared resources is what made Sidekick buttons vanish before.
     mesh.material = resin;
     mesh.renderOrder = 6;
 
