@@ -11,8 +11,7 @@ import { LOOK } from "../stage/constants.js";
 import {
   applySidekickScreenTexture,
   configureSidekickScreenMaterial,
-  ensureSidekickScreenMapLocked,
-  sidekickClosedSplashRotation
+  ensureSidekickScreenMapLocked
 } from "./sidekickScreenTexture.js";
 import { SidekickScrollballLed } from "./SidekickScrollballLed.js";
 import { hideGroupForReveal } from "../stage/stageModelReveal.js";
@@ -39,8 +38,10 @@ const OPEN_SFX_LEAD = 0.2;
 const CLOSE_SFX_LEAD = 0.04;
 const SWIVEL_CLOSED_SLIDE_Z = -Math.PI;
 
-/** Black-bg / colored-glyph label atlases on the Sidekick body. */
+/** Black-bg / colored-glyph label atlases — deck + chassis side-button icons. */
 const KEYBOARD_LABEL_MESHES = new Set(["KeyboardText", "sideButtons"]);
+/** Deck atlas only — sits under the folded lid; hide while closed. */
+const DECK_LABEL_MESHES = new Set(["KeyboardText"]);
 
 /**
  * Bake luminance into the map alpha so black atlas bg cuts out.
@@ -75,17 +76,26 @@ function ensureLabelTextureAlpha(texture) {
 
 /**
  * Unlit cutout decals — PhysicalMaterial + metalness 1 made keyboard glyphs vanish
- * into the black environment; depthTest must stay off so keys don't occlude the plane.
+ * into the black environment. depthTest stays off only while the phone is open;
+ * when closed those transparent labels paint in the late pass and punch through
+ * the folded LCD.
+ *
+ * Never dispose the prior material/texture — GLTF shares them across chassis
+ * meshes (e.g. Buttons + sideButtons). Mutating a shared map punches holes in
+ * the physical buttons; disposing it makes them vanish entirely.
  * @param {THREE.Mesh} mesh
  */
 function applySidekickLabelMaterial(mesh) {
   const prior = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
   if (!prior?.map) return;
 
-  ensureLabelTextureAlpha(prior.map);
+  // Own copy of the atlas so luminance→alpha cannot touch the shared GLTF map.
+  const map = prior.map.clone();
+  map.colorSpace = prior.map.colorSpace;
+  ensureLabelTextureAlpha(map);
 
   const mat = new THREE.MeshBasicMaterial({
-    map: prior.map,
+    map,
     name: prior.name || mesh.name,
     transparent: true,
     depthTest: false,
@@ -99,11 +109,6 @@ function applySidekickLabelMaterial(mesh) {
   mat.polygonOffsetFactor = -2;
   mat.polygonOffsetUnits = -2;
 
-  if (Array.isArray(mesh.material)) {
-    mesh.material.forEach((m) => m?.dispose?.());
-  } else {
-    prior.dispose?.();
-  }
   mesh.material = mat;
   mesh.renderOrder = 2;
   mesh.castShadow = false;
@@ -116,6 +121,8 @@ const _TILT_AXIS = new THREE.Vector3(1, 0, 0);
 const SIDEKICK_POV_FORWARD = 2.4;
 /** Closed phone target width as a fraction of the viewport. */
 const REST_SCREEN_WIDTH = 0.22;
+/** Keyboard glyph planes stay hidden until the lid has cleared the deck. */
+const KEYBOARD_LABEL_REVEAL = 0.32;
 
 const SIDEKICK_DISPLAY_CENTER_Y = LOOK.y;
 const STAGE_EULER = new THREE.Euler(Math.PI / 2, Math.PI, Math.PI, "YXZ");
@@ -196,6 +203,8 @@ export class SidekickVignette {
     this._coverAuthoredX = 0;
     this._screenBasePosition = new THREE.Vector3();
     this.hitMeshes = [];
+    /** @type {THREE.Mesh[]} */
+    this._keyboardLabelMeshes = [];
 
     this._openSwivelZ = 0;
     this._hingePivotLocal = new THREE.Vector3();
@@ -215,7 +224,6 @@ export class SidekickVignette {
     this._aligned = false;
     this._pendingOpen = false;
     this._swivelProgress = null;
-    this._splashFlipRotation = Math.PI;
     this._holdForIntro = false;
     this._pendingScene = null;
     this.scrollballLed = null;
@@ -381,10 +389,37 @@ export class SidekickVignette {
 
   /** Keyboard / side-button glyph atlases — unlit cutouts so letters show on the keys. */
   _configureKeyboardLabels() {
+    this._keyboardLabelMeshes = [];
     this.sidekickRoot?.traverse((obj) => {
       if (!obj.isMesh || !KEYBOARD_LABEL_MESHES.has(obj.name)) return;
       applySidekickLabelMaterial(obj);
+      this._keyboardLabelMeshes.push(obj);
     });
+    this._syncKeyboardLabelVisibility(0);
+  }
+
+  /**
+   * Closed lid: hide deck glyphs only (transparent + depthTest:false punches through the LCD).
+   * Side-button icons stay on the chassis — always visible, depthTest off so they sit on the keys.
+   * Mid-open deck: depth-test so labels don't fight the still-overlapping screen.
+   * Fully open deck: depthTest off so keys don't bury the decal planes.
+   * @param {number} progress 0 closed → 1 open
+   */
+  _syncKeyboardLabelVisibility(progress) {
+    const t = THREE.MathUtils.clamp(progress, 0, 1);
+    const deckClear = t >= KEYBOARD_LABEL_REVEAL;
+    const fullyOpen = t >= 1 - 1e-4;
+
+    for (const mesh of this._keyboardLabelMeshes) {
+      const isDeck = DECK_LABEL_MESHES.has(mesh.name);
+      mesh.visible = isDeck ? deckClear : true;
+      const mat = mesh.material;
+      if (!mat || Array.isArray(mat)) continue;
+      // Chassis side icons: never depth-test (they're not under the lid).
+      // Deck: depth-test until the lid is fully clear.
+      mat.depthTest = isDeck ? !fullyOpen : false;
+      mesh.renderOrder = !mat.depthTest ? 2 : 0;
+    }
   }
 
   _applyOpenSwivelBase() {
@@ -440,6 +475,7 @@ export class SidekickVignette {
     }
 
     this.screenMesh.renderOrder = isClosed ? 8 : 4;
+    this._syncKeyboardLabelVisibility(progress);
   }
 
   _captureBarPivot() {
@@ -724,8 +760,6 @@ export class SidekickVignette {
 
   _applyDisplayState(progress = 0) {
     const isClosed = isSidekickDisplayClosed(progress);
-    // Rolodex flip around the screen center / horizontal midline: closed = 180°.
-    this._splashFlipRotation = sidekickClosedSplashRotation(progress);
 
     if (this.screenMesh) {
       this.screenMesh.visible = true;
@@ -738,9 +772,9 @@ export class SidekickVignette {
         if (material) configureSidekickScreenMaterial(material);
       }
 
-      ensureSidekickScreenMapLocked(this.screenMesh, {
-        rotation: this._splashFlipRotation
-      });
+      // Splash + bezel stay UV-locked to the Screen mesh — no atlas spin.
+      // The fold/swivel carries the window content with the lid.
+      ensureSidekickScreenMapLocked(this.screenMesh);
     }
 
     if (this.swivel) {
@@ -769,6 +803,7 @@ export class SidekickVignette {
   async _applyScreenTexture() {
     if (!this.screenMesh) return;
     await applySidekickScreenTexture(this.screenMesh);
+    ensureSidekickScreenMapLocked(this.screenMesh);
   }
 
   _killSfxLead() {
@@ -924,9 +959,6 @@ export class SidekickVignette {
 
   update(time) {
     if (!this._aligned || !this.sidekickRoot) return;
-    ensureSidekickScreenMapLocked(this.screenMesh, {
-      rotation: this._splashFlipRotation
-    });
     this.scrollballLed?.update(time);
   }
 

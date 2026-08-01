@@ -29,7 +29,7 @@ export const SIDEKICK_SPLASH_GRAY_REMAP = [
 ];
 
 /** Splash rotation inside the hollow window (frame drawn unrotated on top). */
-export const SIDEKICK_SPLASH_ROTATION_DEG = 0;
+export const SIDEKICK_SPLASH_ROTATION_DEG = 180;
 
 /** Background behind splash content in the hollow window. */
 export const SIDEKICK_SPLASH_BG = "#ffffff";
@@ -240,13 +240,12 @@ export function ensureSidekickScreenMapLocked(screenMesh, orientation = null) {
 }
 
 /**
- * Closed-mode atlas spin: 180° around the screen center (horizontal midline pivot).
- * Open = 0, closed = π. Progress follows the swivel (1 open → 0 closed).
- * @param {number} progress
+ * @deprecated Splash stays UV-locked to the Screen mesh; fold/swivel carries it.
+ * Kept for callers/tests that still import the name.
+ * @param {number} _progress
  */
-export function sidekickClosedSplashRotation(progress) {
-  const t = Math.min(1, Math.max(0, progress));
-  return (1 - t) * Math.PI;
+export function sidekickClosedSplashRotation(_progress) {
+  return 0;
 }
 
 /**

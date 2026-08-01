@@ -99,10 +99,17 @@ export const INTRO_HANDOFF_MS = 680;
 export const INTRO_PARALLAX_HANDOFF_FOLLOW = 0.14;
 /** Brief pause at aerial POV so first-frame GPU compile doesn't hitch the drop. */
 export const INTRO_SPRING_HOLD_MS = 240;
-/** Start GLB fetches after the drop is mostly done (avoids parse hitch mid-descent). */
-export const INTRO_MODEL_FETCH_TRACK = 0.62;
-/** Decode/upload PC textures near the end of the descent — not in the opening beat. */
-export const INTRO_ASSET_WARM_TRACK = 0.82;
+/**
+ * Post-land delays — keep the ease-out / settle frames free of parse, GPU upload,
+ * and cursor init (those used to fire as height asymptotes onto the ring).
+ */
+export const INTRO_POST_LAND_FETCH_MS = 420;
+export const INTRO_POST_LAND_WARM_MS = 900;
+export const INTRO_POST_LAND_CURSOR_MS = 720;
+/** @deprecated — fetches no longer gate on descent progress; kept for stress docs. */
+export const INTRO_MODEL_FETCH_TRACK = 1.1;
+/** @deprecated — texture warm is post-land only. */
+export const INTRO_ASSET_WARM_TRACK = 1.1;
 /** Keep the post-intro frame lean until deferred integration finishes. */
 export const INTRO_SETTLE_GRACE_MS = 1200;
 /** Extra pause after handoff + settle before model integration begins. */

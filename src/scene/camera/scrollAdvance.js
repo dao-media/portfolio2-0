@@ -5,9 +5,9 @@
 // 1. Camera must be settled on a stop
 // 2. After an advance, wait for land + a short quiet gap
 //
-// Mid-travel wheel no longer resets the quiet clock (that made clickwheel
-// feel dead — keeping the wheel spinning postponed the next step forever).
-// At most one step may be queued while traveling.
+// Mid-travel wheel must not reset the quiet clock (that made clickwheel feel
+// dead). Mid-travel intent is also NOT queued into an auto-fire on land —
+// that skipped stops (force-scroll past Sidekick).
 
 /** Normalize wheel deltas across line / pixel / page modes. */
 function normalizeDeltaY(event) {
@@ -29,8 +29,6 @@ export function createScrollAdvance({
   let quietTimer = null;
   /** Quiet gap already requested while traveling; finish arming after land. */
   let pendingPostSettleIdle = false;
-  /** At most one step queued while the camera is mid-spring. */
-  let queuedDir = 0;
 
   function clearQuietTimer() {
     if (quietTimer != null) {
@@ -54,7 +52,6 @@ export function createScrollAdvance({
         return;
       }
       arm();
-      flushQueue();
     }, quietMs);
   }
 
@@ -64,32 +61,17 @@ export function createScrollAdvance({
     onAdvance(step);
     armed = false;
     accum = 0;
-    queuedDir = 0;
     pendingPostSettleIdle = false;
     scheduleIdleArm();
-  }
-
-  function flushQueue() {
-    if (!queuedDir || !isSettled() || !armed) return;
-    const dir = queuedDir;
-    queuedDir = 0;
-    fire(dir);
   }
 
   /** Call from the camera update loop when settle state may have flipped. */
   function notifySettled() {
     if (!isSettled()) return;
-
-    if (queuedDir) {
-      clearQuietTimer();
-      pendingPostSettleIdle = false;
-      armed = true;
-      flushQueue();
-      return;
-    }
-
-    if (!pendingPostSettleIdle) return;
+    if (!pendingPostSettleIdle && armed) return;
+    // Landed — require a fresh quiet gap. Never auto-advance on the settle frame.
     pendingPostSettleIdle = false;
+    accum = 0;
     scheduleIdleArm();
   }
 
@@ -98,34 +80,15 @@ export function createScrollAdvance({
     const deltaY = normalizeDeltaY(e);
     if (!deltaY) return;
 
-    // Mid-travel: queue intent, do not reset quiet timers.
+    // Mid-travel: remember to re-arm after land, but do not queue another hop.
     if (!isSettled()) {
       pendingPostSettleIdle = true;
-      if (!armed || queuedDir) {
-        accum += deltaY;
-        if (Math.abs(accum) >= threshold) {
-          queuedDir = Math.sign(accum);
-          accum = 0;
-        }
-      } else {
-        // Rare: settled flag lagged behind armed — treat as queue.
-        accum += deltaY;
-        if (Math.abs(accum) >= threshold) {
-          queuedDir = Math.sign(accum);
-          accum = 0;
-        }
-      }
       return;
     }
 
-    // Landed but disarmed — user still gesturing; postpone re-arm.
+    // Landed but disarmed — still gesturing; postpone re-arm (don't chain).
     if (!armed) {
       scheduleIdleArm();
-      accum += deltaY;
-      if (Math.abs(accum) >= threshold) {
-        queuedDir = Math.sign(accum);
-        accum = 0;
-      }
       return;
     }
 

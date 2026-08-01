@@ -38,8 +38,9 @@ import {
   INTRO_SIDEKICK_BAKE_DELAY_MS,
   INTRO_DEFERRED_IDLE_TIMEOUT_MS,
   INTRO_SPRING_HOLD_MS,
-  INTRO_MODEL_FETCH_TRACK,
-  INTRO_ASSET_WARM_TRACK,
+  INTRO_POST_LAND_FETCH_MS,
+  INTRO_POST_LAND_WARM_MS,
+  INTRO_POST_LAND_CURSOR_MS,
   vignetteStageDegrees,
   placeOnStage,
   STAGE_RADIUS,
@@ -461,16 +462,24 @@ export class StageExperience {
     this.introRig.descent = 0;
     this._introSettleUntil = performance.now() + INTRO_SETTLE_GRACE_MS;
     this._introHandoffUntil = performance.now() + INTRO_HANDOFF_MS;
-    this._ensureWaterCursor();
-    // Safety: always kick deferred GLBs once the drop is done.
-    this._startIntroModelFetches();
-    // Hand scroll authority to the ring path as soon as the spring has landed.
+    // Lean settle frame — no WaterCursor / GLB parse / texture upload here.
+    // Those used to hitch exactly as the height spring ease-out kissed rest.
     this.cameraRig?.scrollAdvance?.notifySettled?.();
-    // Integrate only after the spring lands — never mid-descent.
+    this._schedulePostIntroAssetWork();
     if (!this._introIntegrateScheduled) {
       this._introIntegrateScheduled = true;
       this._scheduleIntroDeferredWork();
     }
+  }
+
+  /**
+   * Stagger post-land work so the ring handoff stays on a light frame budget.
+   * Fetch → warm → cursor, each after the height spring has visually settled.
+   */
+  _schedulePostIntroAssetWork() {
+    window.setTimeout(() => this._startIntroModelFetches(), INTRO_POST_LAND_FETCH_MS);
+    window.setTimeout(() => this._warmIntroAssetsDeferred(), INTRO_POST_LAND_WARM_MS);
+    window.setTimeout(() => this._ensureWaterCursor(), INTRO_POST_LAND_CURSOR_MS);
   }
 
   _ensureWaterCursor() {
@@ -508,16 +517,6 @@ export class StageExperience {
     this._introTrackT = progress;
     this._introTrackLinear = progress;
     this.introRig.descent = Math.max(0, s.height - CAMERA_REST_HEIGHT);
-
-    // Fetch GLBs once the drop is clearly underway (parse won't land on the open beat).
-    if (progress >= INTRO_MODEL_FETCH_TRACK) {
-      this._startIntroModelFetches();
-    }
-
-    // Texture warm later in the descent — not in the opening frames.
-    if (progress >= INTRO_ASSET_WARM_TRACK) {
-      this._warmIntroAssetsDeferred();
-    }
 
     if (this._introTrackLinear >= 0.84 && !this._introContentReady) {
       this._onIntroContentReady();
@@ -651,11 +650,11 @@ export class StageExperience {
     desktop._pendingCrtEnvRefresh = false;
   }
 
-  /** Grain ramps in during the descent — always via RT composite, never a path switch. */
+  /** Grain ramps in after land — never mid ease-out (avoids a composite hitch on settle). */
   _tickPostGrainStrength(dt) {
     const cappedDt = Math.min(Math.max(dt, 0), 1 / 24);
     let target = 0;
-    if (this._introTrackT >= 0.78 || this._introMotionComplete) {
+    if (this._introMotionComplete) {
       target = 1;
     }
     const rate = 1 / 2.4;
