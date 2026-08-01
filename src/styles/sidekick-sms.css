@@ -1,0 +1,840 @@
+/**
+ * Sidekick 3 SMS compose UI
+ * Native panel was 240×160 TFT — design canvas is 1080×720 (4.5× / ~1.5× prior web scale).
+ * Colors inferred from washed-out photos toward saturated Danger OS blues.
+ */
+
+.sk-sms {
+  /* Inferred Danger OS palette */
+  --sk-header: #0d4a9e;
+  --sk-header-deep: #083278;
+  --sk-badge: #1a62c4;
+  --sk-badge-hi: #2a78d8;
+  --sk-select: #003399;
+  --sk-bg: #dce8f4;
+  --sk-bg-field: #ffffff;
+  --sk-pane: #b7d0e8;
+  --sk-border: #3a6eaa;
+  --sk-border-focus: #1a5fb4;
+  --sk-text: #111111;
+  --sk-text-muted: #3a3a3a;
+  --sk-chrome-text: #1a4a8a;
+  --sk-status: #3a8fd4;
+  --sk-tmobile: #e20074;
+  --sk-radius-screen: 14px;
+  --sk-font: Tahoma, "Geneva", "Segoe UI", Verdana, sans-serif;
+
+  /* Logical canvas — 1.5× prior 720×480 */
+  --sk-w: 1080px;
+  --sk-h: 720px;
+
+  position: relative;
+  width: min(100%, var(--sk-w));
+  aspect-ratio: 240 / 160;
+  margin: 0 auto;
+  font-family: var(--sk-font);
+  color: var(--sk-text);
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+  font-smooth: never;
+  user-select: none;
+}
+
+.sk-sms *,
+.sk-sms *::before,
+.sk-sms *::after {
+  box-sizing: border-box;
+}
+
+.sk-sms__screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--sk-radius-screen);
+  overflow: hidden;
+  background: #0a1628;
+  box-shadow:
+    0 0 0 3px #1a1a1a,
+    0 0 0 6px #4a4a4a,
+    0 18px 48px rgba(0, 0, 0, 0.45);
+}
+
+.sk-sms__lcd {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--sk-bg);
+  overflow: hidden;
+  filter: contrast(1.05) saturate(1.08);
+}
+
+.sk-sms__grid {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  opacity: 0.16;
+  background-image:
+    linear-gradient(rgba(0, 40, 80, 0.15) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 40, 80, 0.12) 1px, transparent 1px);
+  background-size: 4px 4px;
+  mix-blend-mode: multiply;
+}
+
+.sk-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sk-screen[hidden] {
+  display: none !important;
+}
+
+.sk-screen--compose {
+  min-height: 0;
+}
+
+.sk-w-form {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+.sk-w-form > .sk-compose {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Webflow honeypot — off-screen, not display:none (bots check that) */
+.sk-honeypot {
+  position: absolute;
+  left: -10000px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Webflow success/fail blocks — kept for wf.js; UI uses the Sidekick "sent" screen */
+.sk-w-form > .w-form-done,
+.sk-w-form > .w-form-fail {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+/* ——— Splash ——— */
+
+.sk-splash {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 36px 42px;
+  border: none;
+  background: #ffffff;
+  cursor: pointer;
+  text-align: center;
+}
+
+.sk-splash__img {
+  width: min(92%, 780px);
+  height: auto;
+  image-rendering: auto;
+  pointer-events: none;
+}
+
+.sk-splash__hint {
+  font-size: 18px;
+  letter-spacing: 0.04em;
+  color: #6a6a6a;
+  text-transform: lowercase;
+  animation: sk-hint-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes sk-hint-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sk-splash__hint {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+/* ——— Chrome / header ——— */
+
+.sk-chrome {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px 10px;
+  flex-shrink: 0;
+  background: var(--sk-bg);
+}
+
+.sk-chrome--inbox {
+  background: linear-gradient(180deg, var(--sk-header-deep) 0%, var(--sk-header) 100%);
+  color: #fff;
+  padding-bottom: 12px;
+  border-bottom: 2px solid #062456;
+}
+
+.sk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 15px 6px 9px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, var(--sk-badge-hi) 0%, var(--sk-badge) 55%, #1554b0 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 1px 0 rgba(0, 0, 0, 0.15);
+  color: #fff;
+}
+
+.sk-badge__icon {
+  display: block;
+  width: 21px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.sk-badge__text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.sk-badge__title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.sk-badge__sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #c8dff5;
+}
+
+.sk-badge__lock {
+  display: inline-block;
+  width: 12px;
+  height: 14px;
+}
+
+.sk-chrome__right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  padding-top: 3px;
+}
+
+.sk-chrome__clock {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--sk-chrome-text);
+  white-space: nowrap;
+}
+
+.sk-chrome__clock--light {
+  color: #e8f2ff;
+}
+
+.sk-chrome__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sk-ico {
+  display: block;
+  height: 18px;
+}
+
+.sk-ico--net {
+  width: 30px;
+  height: 24px;
+  margin-right: -2px;
+}
+.sk-ico--sig {
+  width: 24px;
+  height: 18px;
+  margin-left: -4px;
+}
+.sk-ico--bat {
+  width: 32px;
+  height: 22px;
+}
+
+.sk-inbox-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: #fff;
+}
+
+.sk-inbox-title__ico {
+  display: block;
+  width: 21px;
+  height: 24px;
+  margin-top: 3px;
+}
+
+.sk-inbox-title__text {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.sk-inbox-title__counts {
+  display: flex;
+  gap: 14px;
+  margin-top: 3px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #d0e6ff;
+}
+
+.sk-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sk-count__ico {
+  display: inline-block;
+  width: 14px;
+  height: 16px;
+}
+
+/* ——— Compose body ——— */
+
+.sk-compose {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.sk-compose.is-shake {
+  animation: sk-shake 0.35s ease;
+}
+
+@keyframes sk-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-6px);
+  }
+  75% {
+    transform: translateX(6px);
+  }
+}
+
+.sk-compose__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 18px 6px;
+  overflow: hidden;
+}
+
+.sk-field {
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  align-items: center;
+  gap: 9px;
+  flex-shrink: 0;
+  cursor: text;
+}
+
+.sk-field__label {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--sk-text);
+}
+
+.sk-field__input {
+  width: 100%;
+  height: 36px;
+  padding: 2px 9px;
+  border: 2px solid var(--sk-border);
+  border-radius: 3px;
+  background: var(--sk-bg-field);
+  color: var(--sk-text);
+  font-family: inherit;
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.2;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  user-select: text;
+  caret-color: var(--sk-select);
+}
+
+.sk-field.is-focused .sk-field__input,
+.sk-field__input:focus {
+  border-color: var(--sk-border-focus);
+  box-shadow: 0 0 0 1px var(--sk-border-focus);
+}
+
+.sk-field__input.is-invalid {
+  border-color: var(--sk-tmobile);
+  box-shadow: 0 0 0 1px var(--sk-tmobile);
+}
+
+.sk-message {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 120px;
+}
+
+.sk-message__box {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  border: 2px solid var(--sk-border);
+  border-radius: 3px;
+  background: var(--sk-bg-field);
+  overflow: hidden;
+}
+
+.sk-message.is-focused .sk-message__box,
+.sk-message__box:focus-within {
+  border-color: var(--sk-border-focus);
+  box-shadow: 0 0 0 1px var(--sk-border-focus);
+}
+
+.sk-message__editor {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 96px;
+}
+
+.sk-message__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--sk-text);
+  font-family: inherit;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.25;
+  resize: none;
+  overflow-y: auto;
+  outline: none;
+  user-select: text;
+  caret-color: var(--sk-select);
+}
+
+/* Emoji strip stays pinned at the top of the message box */
+.sk-toolbar {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(58, 110, 170, 0.35);
+  background: linear-gradient(180deg, #f4f8fc 0%, #e4eef8 100%);
+}
+
+.sk-toolbar__emoji {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sk-toolbar__emoji:hover,
+.sk-toolbar__emoji:focus-visible {
+  background: rgba(26, 95, 180, 0.16);
+  outline: none;
+}
+
+.sk-toolbar__more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  margin: 0 0 0 2px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 3px;
+  background: rgba(26, 95, 180, 0.12);
+  color: var(--sk-border-focus);
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sk-toolbar__more:hover,
+.sk-toolbar__more:focus-visible,
+.sk-toolbar__more.is-active {
+  background: var(--sk-select);
+  color: #fff;
+  outline: none;
+}
+
+.sk-toolbar__more-label {
+  display: block;
+  transform: translateY(-1px);
+  letter-spacing: -0.12em;
+}
+
+/* Full picker replaces the textarea area inside the message box */
+.sk-emoji {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  background: #eef5fc;
+  overflow: hidden;
+}
+
+.sk-emoji[hidden] {
+  display: none !important;
+}
+
+.sk-emoji__chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  background: linear-gradient(180deg, var(--sk-badge-hi) 0%, var(--sk-badge) 100%);
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.sk-emoji__title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.sk-emoji__close {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.18);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sk-emoji__close:hover,
+.sk-emoji__close:focus-visible {
+  background: rgba(0, 0, 0, 0.35);
+  outline: none;
+}
+
+.sk-emoji__grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+  padding: 6px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.sk-emoji__cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sk-emoji__cell:hover,
+.sk-emoji__cell:focus-visible {
+  background: var(--sk-select);
+  outline: none;
+}
+
+/* ——— Footer ——— */
+
+.sk-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 16px 12px;
+  flex-shrink: 0;
+  border-top: 1px solid rgba(58, 110, 170, 0.35);
+  background: var(--sk-bg);
+}
+
+.sk-footer__left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sk-footer__ico {
+  display: block;
+  width: 18px;
+  height: 21px;
+}
+
+.sk-footer__meta {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--sk-text);
+}
+
+.sk-send {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 5px 6px 5px 12px;
+  border: 2px solid var(--sk-border-focus);
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--sk-text);
+  font-family: inherit;
+  font-size: 20px;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.sk-send:hover,
+.sk-send:focus-visible {
+  background: var(--sk-select);
+  border-color: var(--sk-select);
+  color: #fff;
+  outline: none;
+}
+
+.sk-send:hover .sk-send__menu svg rect,
+.sk-send:focus-visible .sk-send__menu svg rect {
+  fill: #fff;
+}
+
+.sk-send.is-sending {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.sk-send.is-error {
+  background: var(--sk-tmobile);
+  border-color: var(--sk-tmobile);
+  color: #fff;
+}
+
+.sk-send__menu {
+  display: block;
+  width: 18px;
+  height: 15px;
+}
+
+.sk-send__key {
+  display: block;
+  width: 24px;
+  height: 24px;
+}
+
+/* ——— Sent / inbox confirmation ——— */
+
+.sk-sent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #f0f5fa;
+}
+
+.sk-sent__row {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--sk-text);
+}
+
+.sk-sent__row.is-selected {
+  background: var(--sk-select);
+  color: #fff;
+  border-radius: 0;
+}
+
+.sk-sent__preview {
+  font-weight: 600;
+  opacity: 0.95;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sk-sent__date {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.sk-sent__preview-pane {
+  flex: 1;
+  min-height: 120px;
+  padding: 14px 18px;
+  background: var(--sk-pane);
+  border-top: 1px solid #8eb0d0;
+}
+
+.sk-sent__body {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--sk-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sk-sent__again {
+  align-self: flex-end;
+  margin: 12px 16px 14px;
+  padding: 6px 14px;
+  border: 2px solid var(--sk-border);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--sk-text);
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sk-sent__again:hover,
+.sk-sent__again:focus-visible {
+  background: var(--sk-select);
+  border-color: var(--sk-select);
+  color: #fff;
+  outline: none;
+}
+
+/* ——— Host page helpers (standalone preview only) ——— */
+
+.sk-sms-page {
+  min-height: 100vh;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 24px 16px 40px;
+  background:
+    radial-gradient(ellipse at 50% 30%, #2a3344 0%, #12151c 55%, #0a0b0e 100%);
+  color: #c8cdd6;
+  font-family: var(--sk-font);
+}
+
+.sk-sms-page__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #8a93a3;
+}
+
+.sk-sms-page__host {
+  width: min(100%, 1080px);
+}
+
+.sk-sms-page__note {
+  max-width: 420px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+  color: #6a7384;
+}

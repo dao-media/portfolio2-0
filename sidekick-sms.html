@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>Sidekick SMS — Contact Form</title>
+    <link rel="stylesheet" href="/src/styles/sidekick-sms.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+      }
+    </style>
+  </head>
+  <body class="sk-sms-page">
+    <p class="sk-sms-page__title">Sidekick 3 · Text Messages</p>
+    <div class="sk-sms-page__host" id="sk-sms-root"></div>
+    <p class="sk-sms-page__note">
+      Splash → Compose → Send. Standalone preview — not wired into the stage yet.
+    </p>
+
+    <script type="module">
+      import { SidekickSmsForm } from "/src/ui/sidekickSms/SidekickSmsForm.js";
+
+      const form = new SidekickSmsForm({
+        formName: "Sidekick SMS",
+        // Drive a Webflow Designer form when embedded:
+        // webflowForm: "#email-form",
+        // fieldMap: { name: "name", email: "email", phone: "phone", message: "message" },
+        //
+        // Or POST somewhere else:
+        // action: "https://formspree.io/f/xxxx",
+        onSubmit: async (payload) => {
+          console.log("[sidekick sms]", payload);
+        }
+      });
+
+      form.mount(document.getElementById("sk-sms-root"));
+    </script>
+  </body>
+</html>
