@@ -1,13 +1,9 @@
-/* SpaceHey-style MySpace profile — responsive for CRT capture and mobile fullscreen */
+/* SpaceHey-style MySpace profile — layout / chrome.
+   Typography lives in myspace-type.css (loaded first). */
 
 .ms-root {
   box-sizing: border-box;
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 12.1px;
-  line-height: 1.35;
-  color: #000;
   background: #fff;
-  -webkit-font-smoothing: antialiased;
 }
 
 .ms-root *,
@@ -79,8 +75,6 @@
   overflow: visible;
   max-width: 100%;
   padding: 0.28rem 0.55rem;
-  font-size: 0.62rem;
-  line-height: 1.35;
 }
 
 .ms-root--crt .ms-nav__item,
@@ -104,10 +98,6 @@
 .ms-root--crt .ms-module,
 .ms-root--crt .ms-body {
   overflow: visible;
-}
-
-.ms-root--crt .ms-profile__name {
-  font-size: 1.15rem;
 }
 
 .ms-root--crt .ms-friends {
@@ -144,19 +134,14 @@
   align-items: center;
   padding: 0.45rem 0.6rem;
   background: #003399;
-  color: #fff;
 }
 
 .ms-header__logo {
   display: block;
-  font-size: 1.15rem;
-  font-weight: 700;
-  line-height: 1.1;
 }
 
 .ms-header__tag {
   display: block;
-  font-size: 0.65rem;
   opacity: 0.95;
 }
 
@@ -168,7 +153,6 @@
 }
 
 .ms-header__search-label {
-  font-size: 0.65rem;
   white-space: nowrap;
 }
 
@@ -178,7 +162,6 @@
   height: 1.25rem;
   padding: 0 0.25rem;
   border: 1px solid #333;
-  font: inherit;
 }
 
 .ms-header__search-btn {
@@ -186,7 +169,6 @@
   padding: 0 0.45rem;
   border: 1px solid #808080;
   background: #ece9d8;
-  font: inherit;
   cursor: default;
 }
 
@@ -195,12 +177,6 @@
   flex-wrap: wrap;
   gap: 0.25rem 0.35rem;
   justify-content: flex-end;
-  font-size: 0.65rem;
-}
-
-.ms-header__account a {
-  color: #fff;
-  text-decoration: none;
 }
 
 .ms-header__account span {
@@ -216,18 +192,10 @@
   align-items: center;
   padding: 0.35rem 0.5rem;
   background: #6699ff;
-  color: #fff;
-  font-size: 0.65rem;
-  line-height: 1.4;
 }
 
 .ms-nav__sep {
   margin: 0 0.2rem;
-  opacity: 0.65;
-}
-
-.ms-nav__item.is-active {
-  color: #ffffcc;
 }
 
 /* ——— Two-column body ——— */
@@ -256,9 +224,6 @@
 
 .ms-profile__name {
   margin: 0;
-  font-size: 1.35rem;
-  font-weight: 700;
-  line-height: 1.15;
   word-break: break-word;
 }
 
@@ -297,10 +262,6 @@
   word-break: break-word;
 }
 
-.ms-profile__view {
-  color: #0000ee;
-}
-
 /* ——— Modules ——— */
 
 .ms-module {
@@ -312,9 +273,6 @@
 .ms-module__title {
   margin: 0;
   padding: 0.3rem 0.45rem;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: #fff;
 }
 
 .ms-module--blue .ms-module__title {
@@ -332,7 +290,6 @@
 }
 
 .ms-module__body a {
-  color: #0000ee;
   word-break: break-all;
 }
 
@@ -347,7 +304,6 @@
 
 .ms-contact__link {
   display: block;
-  color: #0000ee;
   word-break: break-word;
 }
 
@@ -371,7 +327,6 @@
 .ms-interests__label {
   padding: 0.3rem 0.4rem;
   background: #e8f0ff;
-  font-weight: 700;
   word-break: break-word;
 }
 
@@ -380,51 +335,64 @@
   word-break: break-word;
 }
 
-/* ——— Blog list ——— */
+/* ——— Blog list (classic MySpace "Latest Blog Entries") ——— */
 
 .ms-section-title {
-  margin: 0;
-  font-size: 0.78rem;
-  font-weight: 700;
+  margin: 0 0 0.35rem;
+  padding: 0.2rem 0.35rem;
+  background: #ff9933;
+  border: 1px solid #ff6600;
 }
 
 .ms-blog {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.55rem;
+  margin: 0 0 0.75rem;
+  padding: 0.35rem 0.4rem 0.5rem;
+  border: 1px solid #ff9933;
+  background: #fff;
 }
 
-.ms-blog__link {
-  display: block;
-  color: #0000ee;
-  text-decoration: none;
+.ms-blog__entry {
+  display: flex;
+  flex-direction: column;
+  gap: 0.08rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px dotted #ccc;
+}
+
+.ms-blog__entry:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.ms-blog__link,
+.ms-blog__more {
   word-break: break-word;
-}
-
-.ms-blog__link.is-hover,
-.ms-blog__link:hover {
-  color: #ff6600;
 }
 
 .ms-blog__title {
   display: block;
-  font-size: 0.75rem;
 }
 
 .ms-blog__meta {
   display: block;
+}
+
+.ms-blog__preview {
+  display: block;
+}
+
+.ms-blog__more {
+  display: inline-block;
   margin-top: 0.1rem;
-  font-size: 0.65rem;
-  color: #666;
 }
 
 /* ——— Blurbs ——— */
 
 .ms-blurb__label {
   margin: 0 0 0.2rem;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: #0000ee;
 }
 
 .ms-blurb__text {
@@ -460,8 +428,6 @@
 .ms-friend__name {
   display: block;
   margin-bottom: 0.2rem;
-  color: #0000ee;
-  font-size: 0.65rem;
   word-break: break-word;
   width: 100%;
 }
@@ -480,8 +446,6 @@
   display: grid;
   place-items: center;
   color: #fff;
-  font-weight: 700;
-  font-size: 0.7rem;
 }
 
 /* ——— Comments ——— */
@@ -494,7 +458,6 @@
 
 .ms-comment__author {
   display: block;
-  color: #0000ee;
   margin-bottom: 0.15rem;
 }
 
@@ -504,38 +467,46 @@
   word-break: break-word;
 }
 
-/* ——— Detail view ——— */
+/* ——— Blog detail (classic MySpace blog post page, ~2001–2003) ——— */
 
 .ms-detail {
-  border: 1px solid #6699ff;
-  padding: 0.55rem;
-  background: #fff;
   word-break: break-word;
 }
 
 .ms-detail__back {
   display: inline-block;
-  margin-bottom: 0.5rem;
-  color: #0000ee;
-  text-decoration: none;
+  margin-bottom: 0.55rem;
 }
 
 .ms-detail__title {
-  margin: 0 0 0.35rem;
-  font-size: 1rem;
-  line-height: 1.25;
+  margin: 0 0 0.4rem;
 }
 
-.ms-detail__date {
-  margin: 0 0 0.55rem;
-  color: #666;
-  font-size: 0.7rem;
+.ms-detail__date,
+.ms-detail__meta-row {
+  margin: 0 0 0.2rem;
 }
 
-.ms-detail__body {
-  white-space: pre-wrap;
-  font-size: 0.75rem;
-  line-height: 1.45;
+.ms-detail__rule {
+  border: 0;
+  border-top: 1px solid #999;
+  margin: 0.55rem 0;
+}
+
+.ms-detail__p {
+  margin: 0 0 0.7rem;
+}
+
+.ms-detail__p:last-child {
+  margin-bottom: 0;
+}
+
+.ms-detail__footer {
+  margin: 0.35rem 0 0;
+}
+
+.ms-profile__tagline {
+  margin: 0 0 0.45rem;
 }
 
 /* ——— Mobile / narrow ——— */

@@ -1,0 +1,372 @@
+/**
+ * MySpace typography — one type system for CRT capture + live panel.
+ * Layout/chrome live in myspace-page.css; this file owns text roles only.
+ */
+
+.ms-root {
+  --ms-font: Verdana, Arial, Helvetica, sans-serif;
+  --ms-text: #000000;
+  --ms-text-muted: #666666;
+  --ms-text-soft: #333333;
+  --ms-link: #0000ee;
+  --ms-link-hover: #ff6600;
+  --ms-link-visited: #551a8b;
+  --ms-chrome: #ffffff;
+  --ms-chrome-active: #ffffcc;
+
+  /* Relative to .ms-root font-size (12.1px CRT base). */
+  --ms-size-2xs: 0.62rem; /* dense chrome / CRT nav */
+  --ms-size-xs: 0.65rem; /* tabs, meta, [view more], search labels */
+  --ms-size-sm: 0.7rem; /* section labels, detail meta, back links */
+  --ms-size-md: 0.75rem; /* body copy, blog titles, blurbs */
+  --ms-size-lg: 0.95rem; /* detail post titles */
+  --ms-size-xl: 1.15rem; /* header logo / CRT profile name */
+  --ms-size-2xl: 1.35rem; /* profile display name */
+
+  --ms-leading-tight: 1.2;
+  --ms-leading: 1.4;
+  --ms-leading-loose: 1.55;
+  --ms-weight-normal: 400;
+  --ms-weight-bold: 700;
+
+  font-family: var(--ms-font);
+  font-size: 12.1px;
+  font-weight: var(--ms-weight-normal);
+  line-height: var(--ms-leading);
+  color: var(--ms-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ——— Base text ——— */
+
+.ms-root p,
+.ms-root li,
+.ms-root span,
+.ms-root label,
+.ms-root input,
+.ms-root button {
+  font-family: inherit;
+}
+
+.ms-root strong,
+.ms-root b {
+  font-weight: var(--ms-weight-bold);
+}
+
+/* ——— Links (page content) ———
+   One look for every in-page link: same blue, underline, orange hover.
+   Chrome (header / sub-nav) opts out below. */
+
+.ms-root a,
+.ms-root .ms-link,
+.ms-root .ms-blog__link,
+.ms-root .ms-blog__more,
+.ms-root .ms-contact__link,
+.ms-root .ms-detail__back,
+.ms-root .ms-profile__view-link,
+.ms-root .ms-detail__footer a,
+.ms-root .ms-module__body a {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  color: var(--ms-link);
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+  cursor: pointer;
+}
+
+.ms-root a:visited,
+.ms-root .ms-link:visited,
+.ms-root .ms-blog__link:visited,
+.ms-root .ms-blog__more:visited,
+.ms-root .ms-module__body a:visited,
+.ms-root .ms-detail__footer a:visited {
+  color: var(--ms-link);
+}
+
+.ms-root a:hover,
+.ms-root a.is-hover,
+.ms-root .ms-link:hover,
+.ms-root .ms-link.is-hover,
+.ms-root .ms-blog__link:hover,
+.ms-root .ms-blog__link.is-hover,
+.ms-root .ms-blog__more:hover,
+.ms-root .ms-blog__more.is-hover,
+.ms-root .ms-contact__link:hover,
+.ms-root .ms-contact__link.is-hover,
+.ms-root .ms-detail__back:hover,
+.ms-root .ms-detail__back.is-hover,
+.ms-root .ms-profile__view-link:hover,
+.ms-root .ms-profile__view-link.is-hover,
+.ms-root .ms-module__body a:hover,
+.ms-root .ms-module__body a.is-hover,
+.ms-root .ms-detail__footer a:hover,
+.ms-root .ms-detail__footer a.is-hover {
+  color: var(--ms-link-hover);
+  background: none;
+  background-image: none;
+  text-shadow: none;
+  box-shadow: none;
+  outline: none;
+  border: none;
+  /* Keep layout identical — color only. */
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+}
+
+/* ——— Chrome: header + tabs (white on blue bars) ——— */
+
+.ms-header,
+.ms-nav {
+  font-family: var(--ms-font);
+  color: var(--ms-chrome);
+}
+
+.ms-header__logo {
+  font-size: var(--ms-size-xl);
+  font-weight: var(--ms-weight-bold);
+  line-height: var(--ms-leading-tight);
+  color: var(--ms-chrome);
+  text-decoration: none;
+}
+
+.ms-header__logo:hover,
+.ms-header__logo.is-hover,
+.ms-header__logo:visited {
+  color: var(--ms-chrome);
+  text-decoration: none;
+}
+
+.ms-header__tag,
+.ms-header__search-label,
+.ms-header__account {
+  font-size: var(--ms-size-xs);
+  font-weight: var(--ms-weight-normal);
+  line-height: var(--ms-leading);
+}
+
+.ms-header__account a,
+.ms-header__account a:visited,
+.ms-header__account a:hover {
+  color: var(--ms-chrome);
+  text-decoration: none;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.ms-header__search-input,
+.ms-header__search-btn {
+  font-family: var(--ms-font);
+  font-size: var(--ms-size-xs);
+  font-weight: var(--ms-weight-normal);
+  line-height: 1.2;
+  color: var(--ms-text);
+}
+
+.ms-nav {
+  font-size: var(--ms-size-xs);
+  font-weight: var(--ms-weight-normal);
+  line-height: var(--ms-leading);
+}
+
+.ms-nav__item,
+a.ms-nav__item,
+a.ms-nav__item:visited {
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  color: var(--ms-chrome);
+  text-decoration: none;
+}
+
+a.ms-nav__item:hover,
+a.ms-nav__item.is-hover {
+  color: var(--ms-chrome-active);
+  text-decoration: underline;
+}
+
+.ms-nav__item.is-active {
+  color: var(--ms-chrome-active);
+  font-weight: var(--ms-weight-bold);
+}
+
+.ms-nav__sep {
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+  opacity: 0.65;
+}
+
+.ms-root--crt .ms-nav {
+  font-size: var(--ms-size-2xs);
+}
+
+/* ——— Profile column ——— */
+
+.ms-profile__name {
+  font-size: var(--ms-size-2xl);
+  font-weight: var(--ms-weight-bold);
+  line-height: var(--ms-leading-tight);
+  color: var(--ms-text);
+}
+
+.ms-root--crt .ms-profile__name {
+  font-size: var(--ms-size-xl);
+}
+
+.ms-profile__tagline {
+  font-size: var(--ms-size-sm);
+  font-weight: var(--ms-weight-bold);
+  line-height: var(--ms-leading);
+  color: var(--ms-text-soft);
+}
+
+.ms-profile__meta,
+.ms-profile__meta li {
+  font-size: var(--ms-size-sm);
+  font-weight: var(--ms-weight-normal);
+  line-height: var(--ms-leading);
+  color: var(--ms-text);
+}
+
+.ms-profile__mood,
+.ms-profile__login,
+.ms-profile__view {
+  font-size: var(--ms-size-sm);
+  font-weight: var(--ms-weight-normal);
+  line-height: var(--ms-leading);
+  color: var(--ms-text);
+}
+
+.ms-profile__view-link {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+/* ——— Module titles (section bars) ——— */
+
+.ms-module__title {
+  font-size: var(--ms-size-sm);
+  font-weight: var(--ms-weight-bold);
+  line-height: var(--ms-leading);
+  color: var(--ms-chrome);
+}
+
+.ms-section-title {
+  font-size: var(--ms-size-sm);
+  font-weight: var(--ms-weight-bold);
+  line-height: var(--ms-leading);
+  color: var(--ms-chrome);
+}
+
+/* ——— Body copy ——— */
+
+.ms-module__body,
+.ms-blurb__text,
+.ms-friends__count,
+.ms-comment__text,
+.ms-interests__value,
+.ms-detail__body,
+.ms-detail__p {
+  font-size: var(--ms-size-md);
+  font-weight: var(--ms-weight-normal);
+  line-height: var(--ms-leading-loose);
+  color: var(--ms-text);
+}
+
+.ms-blurb__label,
+.ms-interests__label {
+  font-size: var(--ms-size-sm);
+  font-weight: var(--ms-weight-bold);
+  line-height: var(--ms-leading);
+  color: var(--ms-link);
+}
+
+.ms-contact__link {
+  font-size: var(--ms-size-sm);
+  font-weight: var(--ms-weight-normal);
+  line-height: var(--ms-leading);
+}
+
+.ms-comment__author {
+  font-size: var(--ms-size-sm);
+  font-weight: var(--ms-weight-bold);
+  line-height: var(--ms-leading);
+  color: var(--ms-link);
+}
+
+.ms-friend__name {
+  font-size: var(--ms-size-xs);
+  font-weight: var(--ms-weight-normal);
+  line-height: var(--ms-leading-tight);
+  color: var(--ms-link);
+  text-decoration: underline;
+}
+
+/* ——— Blog list ——— */
+
+.ms-blog__link {
+  font-size: var(--ms-size-md);
+  font-weight: var(--ms-weight-bold);
+  line-height: var(--ms-leading);
+}
+
+.ms-blog__title {
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  color: inherit;
+  text-decoration: inherit;
+}
+
+.ms-blog__meta {
+  font-size: var(--ms-size-xs);
+  font-weight: var(--ms-weight-normal);
+  line-height: var(--ms-leading);
+  color: var(--ms-text-muted);
+}
+
+.ms-blog__preview {
+  font-size: var(--ms-size-sm);
+  font-weight: var(--ms-weight-normal);
+  line-height: var(--ms-leading);
+  color: var(--ms-text-soft);
+}
+
+.ms-blog__more {
+  font-size: var(--ms-size-xs);
+  font-weight: var(--ms-weight-normal);
+  line-height: var(--ms-leading);
+}
+
+/* ——— Detail / blog post ——— */
+
+.ms-detail__back {
+  font-size: var(--ms-size-sm);
+  font-weight: var(--ms-weight-normal);
+  line-height: var(--ms-leading);
+}
+
+.ms-detail__title {
+  font-size: var(--ms-size-lg);
+  font-weight: var(--ms-weight-bold);
+  line-height: var(--ms-leading-tight);
+  color: var(--ms-link);
+}
+
+.ms-detail__date,
+.ms-detail__meta-row,
+.ms-detail__footer {
+  font-size: var(--ms-size-sm);
+  font-weight: var(--ms-weight-normal);
+  line-height: var(--ms-leading);
+  color: var(--ms-text);
+}
+
+.ms-detail__footer a {
+  font-size: inherit;
+  font-weight: inherit;
+}

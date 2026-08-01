@@ -1,7 +1,7 @@
-import { findContentById } from "../../content/myspace-content.js";
+import { findContentById, resolveMySpaceNavId } from "../../content/myspace-content.js";
 import { buildMySpacePage } from "./buildMySpacePage.js";
 
-/** Base CRT capture typography — matches `.ms-root` in myspace-page.css (+10%). */
+/** Base CRT capture typography — matches `--ms-size` root in myspace-type.css. */
 const MS_CAPTURE_BASE_FONT_PX = 12.1;
 const MS_CAPTURE_MIN_FONT_PX = 8.8;
 
@@ -30,12 +30,12 @@ export class MySpacePageView {
       const link = event.target.closest("[data-ms-link]");
       if (!link) return;
       event.preventDefault();
-      const id = link.dataset.msLink;
-      if (id === "__back") {
+      const navId = resolveMySpaceNavId(link.dataset.msLink);
+      if (navId === "__back") {
         this.onNavigate?.(null);
         return;
       }
-      this.onNavigate?.(id);
+      this.onNavigate?.(navId);
     });
 
     this.render();
@@ -92,12 +92,16 @@ export class MySpacePageView {
 
     this.viewport.querySelectorAll("[data-ms-link]").forEach((el) => {
       const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
       regions.push({
         id: el.dataset.msLink,
         x: rect.left - base.left,
         y: rect.top - base.top,
         w: rect.width,
-        h: rect.height
+        h: rect.height,
+        text: (el.textContent || "").replace(/\s+/g, " ").trim(),
+        font: `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`,
+        lineHeight: Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) || 12
       });
     });
 

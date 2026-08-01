@@ -1,13 +1,23 @@
 import * as THREE from "three";
 import { toCanvas } from "html-to-image";
-import { MYSPACE_PROFILE, findContentById } from "../content/myspace-content.js";
+import {
+  MYSPACE_PROFILE,
+  findContentById,
+  resolveMySpaceNavId
+} from "../content/myspace-content.js";
 import {
   applyScreenMapSettings,
   computeScreenWindowRect,
   screenUvToCanvas,
   SCREEN_MAP_PLANE
 } from "../scene/vignettes/screenTextureMap.js";
-import { buildIeLayout, drawIeChrome, insetWindowRect } from "./myspace/ieChrome.js";
+import {
+  buildIeLayout,
+  collectIeChromeHitRegions,
+  drawIeChrome,
+  IE_HOME_TOOL_IDS,
+  insetWindowRect
+} from "./myspace/ieChrome.js";
 import { MySpacePageView } from "./myspace/MySpacePageView.js";
 import { XpBootMonitor } from "./xpBoot/XpBootMonitor.js";
 import { XP_BOOT_STATES } from "./xpBoot/config.js";
@@ -21,6 +31,11 @@ const CRT_BEZEL_INSET_X_RATIO = 0.038;
 const CRT_BEZEL_INSET_Y_RATIO = 0.042;
 /** Scanline + vignette strength on the canvas texture (0.6 = 40% softer overlays). */
 const CRT_OVERLAY_INTENSITY = 0.6;
+/** Classic MySpace link hover — painted on the CRT canvas, never via DOM re-capture. */
+const LINK_HOVER_ORANGE = { r: 255, g: 102, b: 0 }; // #ff6600
+/** Minimum blue-vs-red/green delta to treat a pixel as link ink (incl. AA fringes). */
+const LINK_BLUE_DELTA = 25;
+const LINK_PAGE_BG = "#ffffff";
 
 export class MySpaceScreen {
   constructor() {
@@ -37,6 +52,9 @@ export class MySpaceScreen {
     this.view = "dashboard";
     this.selectedId = null;
     this.hoverId = null;
+    /** Page-local link regions (relative to content origin + scroll). */
+    this._pageHitRegions = [];
+    /** Merged page + IE chrome regions used by hitTest / hover. */
     this.hitRegions = [];
     this.onChange = null;
     this.powerOnProgress = 0;
@@ -58,6 +76,15 @@ export class MySpaceScreen {
     this._captureGen = 0;
     this._capturePending = false;
     this._captureDirty = false;
+    /** Dev/stress counter — html-to-image runs (must stay near-zero during hover). */
+    this._captureCount = 0;
+    this._hoverPaintCount = 0;
+    /** Hover-neutral CRT frame — hover blits this then paints orange overlay. */
+    this._baseFrameCanvas = document.createElement("canvas");
+    this._baseFrameCanvas.width = WIDTH;
+    this._baseFrameCanvas.height = HEIGHT;
+    this._baseFrameCtx = this._baseFrameCanvas.getContext("2d");
+    this._baseFrameValid = false;
 
     this._crtHost =
       document.getElementById("myspace-crt-host") ?? this._createCrtHost();
@@ -77,6 +104,16 @@ export class MySpaceScreen {
     this.powerOnPlayed = false;
     this.drawOff();
     this.xpBoot.prepare();
+  }
+
+  /** @returns {{ captureCount: number, hoverPaintCount: number, hoverId: string | null }} */
+  debugPerf() {
+    return {
+      captureCount: this._captureCount,
+      hoverPaintCount: this._hoverPaintCount,
+      hoverId: this.hoverId,
+      capturePending: this._capturePending
+    };
   }
 
   _createCrtHost() {
@@ -148,7 +185,9 @@ export class MySpaceScreen {
   drawOff() {
     if (this.isMonitorBooting || this.monitorLedOn) return;
 
+    this._pageHitRegions = [];
     this.hitRegions = [];
+    this._baseFrameValid = false;
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.fillStyle = "#030403";
     this.ctx.fillRect(0, 0, WIDTH, HEIGHT);
@@ -175,13 +214,14 @@ export class MySpaceScreen {
   }
 
   openItem(id) {
-    if (!findContentById(id)) return;
+    const navId = resolveMySpaceNavId(id);
+    if (!navId || !findContentById(navId)) return;
     playXpLinkClick();
-    this.selectedId = id;
+    this.selectedId = navId;
     this.view = "detail";
     this.scrollY = 0;
     this.draw();
-    this.onChange?.(findContentById(id));
+    this.onChange?.(findContentById(navId));
   }
 
   backToDashboard() {
@@ -189,14 +229,27 @@ export class MySpaceScreen {
     this.view = "dashboard";
     this.selectedId = null;
     this.scrollY = 0;
+    this.hoverId = null;
     this.draw();
     this.onChange?.(null);
   }
 
+  /** IE Back / Refresh / Home — always return to the main profile in-window. */
+  goHome() {
+    if (this.view === "dashboard" && this.scrollY === 0) {
+      playXpLinkClick();
+      this.hoverId = null;
+      this.draw();
+      return;
+    }
+    this.backToDashboard();
+  }
+
   /** Sync DOM view state used by CRT capture and mobile panel. */
-  syncPageView() {
+  syncPageView({ includeHover = false } = {}) {
     this.pageView.setView(this.view, this.selectedId);
-    this.pageView.setHover(this.hoverId);
+    // CRT bitmap is hover-neutral; hover is a cheap canvas overlay.
+    this.pageView.setHover(includeHover ? this.hoverId : null);
     this.pageView.setScrollTop(this.scrollY);
   }
 
@@ -206,13 +259,19 @@ export class MySpaceScreen {
     const next = Math.max(0, Math.min(maxScroll, this.scrollY + deltaY * 0.9));
     if (next === this.scrollY) return true;
     this.scrollY = next;
-    this.syncPageView();
+    this.pageView.setScrollTop(this.scrollY);
+    this._baseFrameValid = false;
     this._paintFrame(this._pageBitmap);
     return true;
   }
 
   get maxScroll() {
     return Math.max(0, this.pageHeight - this.layout.content.h);
+  }
+
+  _rebuildHitRegions() {
+    const chrome = this.isPoweredOn ? collectIeChromeHitRegions(this.layout) : [];
+    this.hitRegions = [...this._pageHitRegions, ...chrome];
   }
 
   hitTest(uv) {
@@ -229,11 +288,29 @@ export class MySpaceScreen {
       return null;
     }
 
-    const { content } = this.layout;
-    const pageX = x - content.x;
-    const pageY = y - content.y + this.scrollY;
+    // IE chrome is in canvas space (above the content window).
     for (let i = this.hitRegions.length - 1; i >= 0; i -= 1) {
       const region = this.hitRegions[i];
+      if (!IE_HOME_TOOL_IDS.has(region.id)) continue;
+      if (
+        x >= region.x &&
+        x <= region.x + region.w &&
+        y >= region.y &&
+        y <= region.y + region.h
+      ) {
+        return region.id;
+      }
+    }
+
+    const { content } = this.layout;
+    if (x < content.x || x > content.x + content.w || y < content.y || y > content.y + content.h) {
+      return null;
+    }
+
+    const pageX = x - content.x;
+    const pageY = y - content.y + this.scrollY;
+    for (let i = this._pageHitRegions.length - 1; i >= 0; i -= 1) {
+      const region = this._pageHitRegions[i];
       if (
         pageX >= region.x &&
         pageX <= region.x + region.w &&
@@ -255,8 +332,8 @@ export class MySpaceScreen {
 
     const id = this.hitTest(uv);
     if (!id) return false;
-    if (id === "__back") {
-      this.backToDashboard();
+    if (id === "__back" || IE_HOME_TOOL_IDS.has(id)) {
+      this.goHome();
       return true;
     }
     this.openItem(id);
@@ -277,9 +354,15 @@ export class MySpaceScreen {
     const next = uv ? this.hitTest(uv) : null;
     if (next === this.hoverId) return;
     this.hoverId = next;
-    this.draw();
+    this._hoverPaintCount += 1;
+    // Hover must never trigger html-to-image — blit cached base + orange overlay.
+    this._compositeHoverFrame();
   }
 
+  /**
+   * Full content refresh (view change / power-on). Schedules DOM→canvas capture.
+   * Hover and scroll use `_paintFrame` / `_compositeHoverFrame` and must not call this.
+   */
   draw() {
     if (this.xpBoot?.active) return;
 
@@ -288,13 +371,16 @@ export class MySpaceScreen {
       return;
     }
 
-    this._paintFrame(this._pageBitmap);
+    if (this._pageBitmap) {
+      this._paintFrame(this._pageBitmap);
+    }
     this._scheduleCapture();
   }
 
+  /** Rebuild hover-neutral CRT frame (page + chrome + scanlines). */
   _paintFrame(pageBitmap) {
     const { content } = this.layout;
-    this.hitRegions = [];
+    this._rebuildHitRegions();
 
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.fillStyle = "#030403";
@@ -320,7 +406,7 @@ export class MySpaceScreen {
         captureH
       );
     } else {
-      this.ctx.fillStyle = "#ffffff";
+      this.ctx.fillStyle = LINK_PAGE_BG;
       this.ctx.fillRect(content.x, content.y, content.w, content.h);
     }
 
@@ -334,7 +420,82 @@ export class MySpaceScreen {
       this._drawCrtPowerOn();
     }
 
+    this._baseFrameCtx.drawImage(this.canvas, 0, 0);
+    this._baseFrameValid = true;
+    this._compositeHoverFrame();
+  }
+
+  /** Blit cached base frame, then paint hover highlight if any. */
+  _compositeHoverFrame() {
+    if (this._baseFrameValid) {
+      this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      this.ctx.drawImage(this._baseFrameCanvas, 0, 0);
+    } else if (this._pageBitmap) {
+      this._paintFrame(this._pageBitmap);
+      return;
+    }
+
+    if (this.hoverId) {
+      this.ctx.save();
+      const { content } = this.layout;
+      this.ctx.beginPath();
+      this.ctx.rect(content.x, content.y, content.w, content.h);
+      this.ctx.clip();
+      this._paintLinkHoverOverlay();
+      this.ctx.restore();
+      this._paintIeToolHover();
+    }
+
     this.texture.needsUpdate = true;
+  }
+
+  /** Orange link hover — recolor existing link pixels only (no fill, no text redraw). */
+  _paintLinkHoverOverlay() {
+    if (!this.hoverId || IE_HOME_TOOL_IDS.has(this.hoverId)) return;
+
+    const region = this._pageHitRegions.find((r) => r.id === this.hoverId);
+    if (!region || region.w <= 0 || region.h <= 0) return;
+
+    const { content } = this.layout;
+    const x = Math.round(content.x + region.x);
+    const y = Math.round(content.y + region.y - this.scrollY);
+    const w = Math.max(1, Math.ceil(region.w));
+    const h = Math.max(1, Math.ceil(region.h));
+    if (y + h < content.y || y > content.y + content.h) return;
+
+    const clipY = Math.max(y, content.y);
+    const clipBottom = Math.min(y + h, content.y + content.h);
+    const clipH = clipBottom - clipY;
+    if (clipH <= 0) return;
+
+    const img = this.ctx.getImageData(x, clipY, w, clipH);
+    const data = img.data;
+    const or = LINK_HOVER_ORANGE.r;
+    const og = LINK_HOVER_ORANGE.g;
+    const ob = LINK_HOVER_ORANGE.b;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      // Classic link blue (#0000ee) and anti-aliased fringes on white.
+      if (b <= r + LINK_BLUE_DELTA || b <= g + LINK_BLUE_DELTA || b < 80) continue;
+      const ink = Math.min(1, (255 - Math.min(r, g)) / 255);
+      if (ink < 0.04) continue;
+      data[i] = Math.round(or * ink + 255 * (1 - ink));
+      data[i + 1] = Math.round(og * ink + 255 * (1 - ink));
+      data[i + 2] = Math.round(ob * ink + 255 * (1 - ink));
+    }
+
+    this.ctx.putImageData(img, x, clipY);
+  }
+
+  _paintIeToolHover() {
+    if (!this.hoverId || !IE_HOME_TOOL_IDS.has(this.hoverId)) return;
+    const region = this.hitRegions.find((r) => r.id === this.hoverId);
+    if (!region) return;
+    this.ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
+    this.ctx.fillRect(region.x + 1, region.y + 1, region.w - 2, region.h - 2);
   }
 
   _scheduleCapture() {
@@ -363,8 +524,10 @@ export class MySpaceScreen {
     const captureH = content.h;
     this._captureW = captureW;
     this._captureH = captureH;
+    this._captureCount += 1;
 
-    this.syncPageView();
+    // Capture is always hover-neutral so hover can be a cheap overlay.
+    this.syncPageView({ includeHover: false });
     this.pageView.setScrollTop(0);
     this.scrollY = Math.min(this.scrollY, this.maxScroll);
 
@@ -388,21 +551,25 @@ export class MySpaceScreen {
     const fullH = Math.max(captureH, captureEl.scrollHeight);
 
     const regions = this.pageView.collectHitRegions();
-    this.hitRegions = regions.map((region) => ({
+    this._pageHitRegions = regions.map((region) => ({
       id: region.id,
       x: region.x,
       y: region.y,
       w: region.w,
-      h: region.h
+      h: region.h,
+      text: region.text,
+      font: region.font,
+      lineHeight: region.lineHeight
     }));
+    this._rebuildHitRegions();
 
     try {
       const captured = await toCanvas(captureEl, {
         width: captureW,
         height: fullH,
         pixelRatio: 1,
-        backgroundColor: "#ffffff",
-        cacheBust: true,
+        backgroundColor: LINK_PAGE_BG,
+        cacheBust: false,
         useCORS: true,
         style: {
           overflow: "visible",

@@ -1,5 +1,5 @@
 import { toCanvas } from "html-to-image";
-import { isSiteAudioMuted } from "../../audio/siteAudio.js";
+import { isSiteAudioMuted, playSiteSfx } from "../../audio/siteAudio.js";
 import { playCrtPowerOnAnimation } from "../crtPowerOnCanvas.js";
 import { XP_BOOT_CONFIG, XP_BOOT_STATES } from "./config.js";
 import { buildXpBootCrtRoot } from "./buildXpBootDom.js";
@@ -26,6 +26,8 @@ export class XpBootMonitor {
     this._timers = [];
     this._captureRaf = 0;
     this._captureBusy = false;
+    this._captureCount = 0;
+    this._baseLoginBitmap = null;
     this._muted = isSiteAudioMuted();
 
     const host =
@@ -87,7 +89,7 @@ export class XpBootMonitor {
   /** Prepare boot UI offscreen; monitor stays off until zoom triggers boot. */
   prepare() {
     this._clearTimers();
-    this._stopCaptureLoop();
+    this._stopBootPaintLoop();
     this.state = XP_BOOT_STATES.POWER;
     this.active = false;
     this._bootStarted = false;
@@ -219,8 +221,8 @@ export class XpBootMonitor {
 
     this.screen.notifyMonitorPowerLed("on");
     this._goTo(XP_BOOT_STATES.BOOT);
-    await this._captureToScreen();
-    this._startCaptureLoop();
+    this._paintBootFrame(performance.now());
+    this._startBootPaintLoop();
     this._scheduleBootPhases();
   }
 
@@ -229,14 +231,14 @@ export class XpBootMonitor {
       this.root.classList.add("xp-crt--fade");
       await this._delay(this.cfg.bootFadeMs);
       this.root.classList.remove("xp-crt--fade");
+      this._stopBootPaintLoop();
       this._goTo(XP_BOOT_STATES.WELCOME);
       this._playStartup();
-      await this._captureToScreen();
+      this._paintWelcomeFrame();
 
       this._schedule(async () => {
         this._goTo(XP_BOOT_STATES.LOGIN);
         await this._captureToScreen();
-        this._stopCaptureLoop();
         this._updateHitRegions();
       }, this.cfg.welcomeDuration);
     }, this.cfg.bootDuration);
@@ -263,13 +265,13 @@ export class XpBootMonitor {
 
   _skipToMyspace() {
     this._clearTimers();
-    this._stopCaptureLoop();
+    this._stopBootPaintLoop();
     this._finish();
   }
 
   _finish() {
     this._clearTimers();
-    this._stopCaptureLoop();
+    this._stopBootPaintLoop();
     this.state = XP_BOOT_STATES.DONE;
     this.active = false;
     sessionStorage.setItem(this.cfg.storageKey, "1");
@@ -283,7 +285,10 @@ export class XpBootMonitor {
     this.screen.view = "dashboard";
     this.screen.selectedId = null;
     this.screen.scrollY = 0;
+    this.screen.hoverId = null;
+    this.screen._pageHitRegions = [];
     this.screen.hitRegions = [];
+    this._baseLoginBitmap = null;
     this.screen.draw();
     this.screen.onPoweredOn?.();
   }
@@ -373,36 +378,78 @@ export class XpBootMonitor {
 
     if (hovered === this._hoveredUser) return;
     this._hoveredUser = hovered;
-
-    this._els.userTiles?.forEach((tile) => {
-      tile.classList.toggle(
-        "is-hover",
-        tile.dataset.user === hovered && !tile.classList.contains("is-selected")
-      );
-    });
-    void this._captureToScreen();
+    this._paintLoginHoverOverlay();
   }
 
   clearHover() {
     if (!this._hoveredUser) return;
     this._hoveredUser = null;
-    this._els.userTiles?.forEach((tile) => tile.classList.remove("is-hover"));
-    void this._captureToScreen();
+    this._paintLoginHoverOverlay();
+  }
+
+  /** Cheap hover — blit cached login frame + highlight; never re-run html-to-image. */
+  _paintLoginHoverOverlay() {
+    const ctx = this.screen.ctx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    if (this._baseLoginBitmap) {
+      ctx.drawImage(this._baseLoginBitmap, 0, 0, this.width, this.height);
+    }
+
+    if (this._hoveredUser) {
+      for (const tile of this._els.userTiles ?? []) {
+        if (tile.dataset.user !== this._hoveredUser) continue;
+        if (tile.classList.contains("xp-user-tile--disabled")) continue;
+        let x = tile.offsetLeft;
+        let y = tile.offsetTop;
+        let w = tile.offsetWidth;
+        let h = tile.offsetHeight;
+        if (w <= 0 || h <= 0) {
+          const rect = tile.getBoundingClientRect();
+          const base = this.root.getBoundingClientRect();
+          x = rect.left - base.left;
+          y = rect.top - base.top;
+          w = rect.width;
+          h = rect.height;
+        }
+        ctx.fillStyle = "rgba(255, 255, 255, 0.16)";
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+        break;
+      }
+    }
+
+    this.screen._drawScanlines?.();
+    this.screen.texture.needsUpdate = true;
   }
 
   async _captureToScreen() {
+    this._captureCount += 1;
     try {
+      // Clear transient hover classes so the cached bitmap stays hover-neutral.
+      this._els.userTiles?.forEach((tile) => tile.classList.remove("is-hover"));
+
       const captured = await toCanvas(this.root, {
         width: this.width,
         height: this.height,
         pixelRatio: 1,
-        cacheBust: true,
+        cacheBust: false,
         useCORS: true
       });
+
+      if (this.state === XP_BOOT_STATES.LOGIN) {
+        this._baseLoginBitmap = captured;
+      }
 
       const ctx = this.screen.ctx;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(captured, 0, 0, this.width, this.height);
+      if (this._hoveredUser && this.state === XP_BOOT_STATES.LOGIN) {
+        this._paintLoginHoverOverlay();
+        return;
+      }
       this.screen._drawScanlines?.();
       this.screen.texture.needsUpdate = true;
     } catch (error) {
@@ -420,6 +467,7 @@ export class XpBootMonitor {
 
     if (this.state === XP_BOOT_STATES.BOOT && this._bootImg?.complete) {
       ctx.drawImage(this._bootImg, 0, 0, this.width, this.height);
+      this._paintBootProgressBar(performance.now());
     } else if (this.state === XP_BOOT_STATES.WELCOME && this._welcomeImg?.complete) {
       ctx.drawImage(this._welcomeImg, 0, 0, this.width, this.height);
     }
@@ -428,26 +476,86 @@ export class XpBootMonitor {
     this.screen.texture.needsUpdate = true;
   }
 
-  _startCaptureLoop() {
-    this._stopCaptureLoop();
-    this._captureBusy = false;
-    const tick = () => {
+  /** Boot screen + sliding progress blocks — canvas only, no html-to-image. */
+  _paintBootFrame(nowMs) {
+    const ctx = this.screen.ctx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "#050505";
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    if (this._bootImg?.complete) {
+      ctx.drawImage(this._bootImg, 0, 0, this.width, this.height);
+    }
+
+    this._paintBootProgressBar(nowMs);
+    this.screen._drawScanlines?.();
+    this.screen.texture.needsUpdate = true;
+  }
+
+  /** Match .xp-boot-bar CSS — three blocks sliding across a bordered track. */
+  _paintBootProgressBar(nowMs) {
+    const ctx = this.screen.ctx;
+    const barW = 240;
+    const barH = 16;
+    const barX = (this.width - barW) / 2;
+    const barY = this.height * 0.63;
+    const blockW = 44;
+    const blockH = 10;
+    const cycleMs = 1600;
+    const delays = [0, 350, 700];
+
+    ctx.fillStyle = "#1a1a1a";
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(barX + 0.5, barY + 0.5, barW - 1, barH - 1);
+
+    for (let i = 0; i < 3; i += 1) {
+      const local = ((nowMs - delays[i]) % cycleMs + cycleMs) % cycleMs;
+      const u = local / cycleMs;
+      const x = barX - blockW + u * (barW + blockW);
+      let alpha = 1;
+      if (u < 0.08) alpha = u / 0.08;
+      else if (u > 0.92) alpha = (1 - u) / 0.08;
+
+      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+      const grad = ctx.createLinearGradient(x, barY + 2, x, barY + 2 + blockH);
+      grad.addColorStop(0, "#7ec8ff");
+      grad.addColorStop(0.45, "#2a84d4");
+      grad.addColorStop(1, "#1a6eb5");
+      ctx.fillStyle = grad;
+      ctx.fillRect(x, barY + 3, blockW, blockH);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  _paintWelcomeFrame() {
+    const ctx = this.screen.ctx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "#245edb";
+    ctx.fillRect(0, 0, this.width, this.height);
+    if (this._welcomeImg?.complete) {
+      ctx.drawImage(this._welcomeImg, 0, 0, this.width, this.height);
+    }
+    this.screen._drawScanlines?.();
+    this.screen.texture.needsUpdate = true;
+  }
+
+  /** Cheap RAF paint for the boot progress bar — never html-to-image. */
+  _startBootPaintLoop() {
+    this._stopBootPaintLoop();
+    const tick = (now) => {
       if (!this.active || this.state !== XP_BOOT_STATES.BOOT) {
         this._captureRaf = 0;
         return;
       }
-      if (!this._captureBusy) {
-        this._captureBusy = true;
-        void this._captureToScreen().finally(() => {
-          this._captureBusy = false;
-        });
-      }
+      this._paintBootFrame(now);
       this._captureRaf = requestAnimationFrame(tick);
     };
     this._captureRaf = requestAnimationFrame(tick);
   }
 
-  _stopCaptureLoop() {
+  _stopBootPaintLoop() {
     if (this._captureRaf) {
       cancelAnimationFrame(this._captureRaf);
       this._captureRaf = 0;
@@ -469,14 +577,12 @@ export class XpBootMonitor {
 
   _playStartup() {
     if (this._muted) return;
-    this._startupAudio.currentTime = 0;
-    this._startupAudio.play().catch(() => {});
+    playSiteSfx(this._startupAudio, { volume: 1 });
   }
 
   _playLogin() {
     if (this._muted) return;
-    this._loginAudio.currentTime = 0;
-    this._loginAudio.play().catch(() => {});
+    playSiteSfx(this._loginAudio, { volume: 0.85 });
   }
 
   _schedule(fn, ms) {

@@ -39,16 +39,28 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
+/** Split plain text into <p> blocks — classic MySpace blog body layout. */
+function formatBodyHtml(body) {
+  return String(body)
+    .trim()
+    .split(/\n\s*\n/)
+    .map((para) => `<p class="ms-detail__p">${escapeHtml(para).replace(/\n/g, "<br />")}</p>`)
+    .join("");
+}
+
 function buildChrome(firstName) {
-  const nav = NAV_TABS.map(
-    (tab) =>
-      `<span class="ms-nav__item${tab === "Home" ? " is-active" : ""}">${escapeHtml(tab)}</span>`
-  ).join('<span class="ms-nav__sep">|</span>');
+  const nav = NAV_TABS.map((tab) => {
+    const active = tab === "Home" ? " is-active" : "";
+    if (tab === "Home") {
+      return `<a class="ms-nav__item${active}" href="#" data-ms-link="__back">${escapeHtml(tab)}</a>`;
+    }
+    return `<span class="ms-nav__item${active}">${escapeHtml(tab)}</span>`;
+  }).join('<span class="ms-nav__sep">|</span>');
 
   return `
       <header class="ms-header">
         <div class="ms-header__brand">
-          <strong class="ms-header__logo">myspace</strong>
+          <span class="ms-header__logo">myspace</span>
           <span class="ms-header__tag">a place for friends</span>
         </div>
         <form class="ms-header__search" action="#" onsubmit="return false">
@@ -83,11 +95,17 @@ function buildLeftColumn(firstName) {
     (label) => `<span class="ms-contact__link">${escapeHtml(label)}</span>`
   ).join("");
 
-  const viewLinks = VIEW_MY_LINKS.map((l) => escapeHtml(l)).join(" | ");
+  const viewLinks = VIEW_MY_LINKS.map(
+    (l) => `<a class="ms-profile__view-link" href="#" tabindex="-1">${escapeHtml(l)}</a>`
+  ).join(" | ");
+  const tagline = MYSPACE_PROFILE.tagline
+    ? `<p class="ms-profile__tagline">${escapeHtml(MYSPACE_PROFILE.tagline)}</p>`
+    : "";
 
   return `
       <aside class="ms-col ms-col--left">
         <h1 class="ms-profile__name">${escapeHtml(firstName)}</h1>
+        ${tagline}
         <div class="ms-profile__card">
           <img class="ms-profile__photo" src="${escapeHtml(MYSPACE_PROFILE.photo)}" alt="" width="120" height="102" />
           <ul class="ms-profile__meta">
@@ -97,8 +115,8 @@ function buildLeftColumn(firstName) {
             <li>Hometown: ${escapeHtml(MYSPACE_PROFILE.hometown)}</li>
           </ul>
         </div>
-        <p class="ms-profile__mood">Mood: ${escapeHtml(MYSPACE_PROFILE.mood)}</p>
-        <p class="ms-profile__login">Last Login: ${escapeHtml(MYSPACE_PROFILE.lastLogin)}</p>
+        <p class="ms-profile__mood"><strong>Mood:</strong> ${escapeHtml(MYSPACE_PROFILE.mood)}</p>
+        <p class="ms-profile__login"><strong>Last Login:</strong> ${escapeHtml(MYSPACE_PROFILE.lastLogin)}</p>
         <p class="ms-profile__view">View My: ${viewLinks}</p>
 
         <section class="ms-module ms-module--blue">
@@ -125,13 +143,19 @@ function buildLeftColumn(firstName) {
  */
 function buildDashboard(firstName, hoverId) {
   const blogRows = blogs
-    .map(
-      (item) => `
-        <a class="ms-blog__link${hoverId === item.id ? " is-hover" : ""}" href="#" data-ms-link="${escapeHtml(item.id)}">
-          <span class="ms-blog__title">${escapeHtml(item.title)}</span>
-          <span class="ms-blog__meta">${escapeHtml(item.date)} — ${escapeHtml(item.preview)}</span>
-        </a>`
-    )
+    .map((item, index) => {
+      const titleId = `${item.id}#title`;
+      const moreId = `${item.id}#more`;
+      return `
+        <div class="ms-blog__entry">
+          <a class="ms-blog__link${hoverId === titleId ? " is-hover" : ""}" href="#" data-ms-link="${escapeHtml(titleId)}">
+            <span class="ms-blog__title">${index + 1}. ${escapeHtml(item.title)}</span>
+          </a>
+          <span class="ms-blog__meta">[${escapeHtml(item.date)}]</span>
+          <span class="ms-blog__preview">${escapeHtml(item.preview)}</span>
+          <a class="ms-blog__more${hoverId === moreId ? " is-hover" : ""}" href="#" data-ms-link="${escapeHtml(moreId)}">[view more]</a>
+        </div>`;
+    })
     .join("");
 
   const friendCells = topFriends
@@ -192,19 +216,43 @@ function buildDashboard(firstName, hoverId) {
     `;
 }
 
-/** @param {{ title: string, date: string, body: string }} item */
+/** @param {{ id: string, title: string, date: string, body: string, mood?: string, music?: string }} item */
 function buildDetail(item, firstName) {
+  const isBlog = blogs.some((b) => b.id === item.id);
+  const sectionTitle = isBlog
+    ? `${firstName}'s Blog`
+    : `${firstName}'s Bulletin`;
+  const backLabel = isBlog ? "Back to Blog" : "Back to Profile";
+  const moodRow = item.mood
+    ? `<p class="ms-detail__meta-row"><strong>Current Mood:</strong> ${escapeHtml(item.mood)}</p>`
+    : "";
+  const musicRow = item.music
+    ? `<p class="ms-detail__meta-row"><strong>Current Music:</strong> ${escapeHtml(item.music)}</p>`
+    : "";
+
   return `
       ${buildChrome(firstName)}
       <div class="ms-body">
         ${buildLeftColumn(firstName)}
         <main class="ms-col ms-col--right">
-          <article class="ms-detail">
-            <a class="ms-detail__back" href="#" data-ms-link="__back">&larr; Back to Profile</a>
-            <h2 class="ms-detail__title">${escapeHtml(item.title)}</h2>
-            <p class="ms-detail__date">${escapeHtml(item.date)}</p>
-            <div class="ms-detail__body">${escapeHtml(item.body)}</div>
-          </article>
+          <section class="ms-module ms-module--orange ms-detail">
+            <h2 class="ms-module__title">${escapeHtml(sectionTitle)}</h2>
+            <div class="ms-module__body">
+              <a class="ms-detail__back" href="#" data-ms-link="__back">&larr; Back to Profile</a>
+              <h3 class="ms-detail__title">${escapeHtml(item.title)}</h3>
+              <p class="ms-detail__date"><strong>Date Posted:</strong> ${escapeHtml(item.date)}</p>
+              ${moodRow}
+              ${musicRow}
+              <hr class="ms-detail__rule" />
+              <div class="ms-detail__body">${formatBodyHtml(item.body)}</div>
+              <hr class="ms-detail__rule" />
+              <p class="ms-detail__footer">
+                <a href="#" data-ms-link="__back">&lt;&lt; Previous</a>
+                &nbsp;|&nbsp;
+                <a href="#" data-ms-link="__back">${escapeHtml(backLabel)}</a>
+              </p>
+            </div>
+          </section>
         </main>
       </div>
     `;
@@ -216,7 +264,7 @@ function buildDetail(item, firstName) {
  * @returns {string}
  */
 export function buildMySpacePage({ view, selectedId = null, hoverId = null }) {
-  const firstName = MYSPACE_PROFILE.name.split(" ")[0];
+  const firstName = MYSPACE_PROFILE.displayName || MYSPACE_PROFILE.name.split(" ")[0];
   const isDetail = view === "detail" && selectedId;
   const detail = isDetail ? findContentById(selectedId) : null;
 

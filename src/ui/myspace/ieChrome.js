@@ -3,8 +3,8 @@
 export const IE_CHROME_RATIO = {
   title: 22 / 768,
   menu: 19 / 768,
-  toolbar: 26 / 768,
-  address: 22 / 768,
+  /** Single shared row for toolbar buttons + address field. */
+  toolbar: 28 / 768,
   status: 18 / 768
 };
 
@@ -149,14 +149,16 @@ export function insetWindowRect(win, padX, padY) {
 
 export function buildIeLayout(windowRect) {
   const win = windowRect;
+  const toolH = Math.max(20, Math.round(IE_CHROME_RATIO.toolbar * win.h));
   const ie = {
     titleH: Math.max(14, Math.round(IE_CHROME_RATIO.title * win.h)),
     menuH: Math.max(12, Math.round(IE_CHROME_RATIO.menu * win.h)),
-    toolH: Math.max(16, Math.round(IE_CHROME_RATIO.toolbar * win.h)),
-    addressH: Math.max(14, Math.round(IE_CHROME_RATIO.address * win.h)),
+    toolH,
+    // Address field shares the toolbar row — same height for vertical metrics.
+    addressH: toolH,
     statusH: Math.max(12, Math.round(IE_CHROME_RATIO.status * win.h))
   };
-  ie.topH = ie.titleH + ie.menuH + ie.toolH + ie.addressH;
+  ie.topH = ie.titleH + ie.menuH + ie.toolH;
   const content = {
     x: win.x,
     y: win.y + ie.topH,
@@ -164,6 +166,77 @@ export function buildIeLayout(windowRect) {
     h: Math.max(1, win.h - ie.topH - ie.statusH)
   };
   return { window: win, content, ie };
+}
+
+/** Toolbar buttons that navigate back to the main MySpace profile. */
+export const IE_HOME_TOOL_IDS = new Set(["__ie-back", "__ie-refresh", "__ie-home"]);
+
+/**
+ * Layout IE toolbar buttons in canvas space (same math as drawIeChrome).
+ * @returns {{ buttons: { type: string, id: string | null, enabled: boolean, x: number, y: number, w: number, h: number }[], separators: { x: number, y0: number, y1: number }[], endX: number }}
+ */
+export function layoutToolbarButtons(win, ie, toolBarY) {
+  const toolBtnH = ie.toolH - 6;
+  const toolBtnW = toolBtnH + 2;
+  let toolX = win.x + 4;
+  const toolY = toolBarY + 3;
+  const tools = [
+    ["back", true, "__ie-back"],
+    ["forward", false, null],
+    ["stop", true, null],
+    ["refresh", true, "__ie-refresh"],
+    ["home", true, "__ie-home"],
+    ["search", true, null],
+    ["favorites", true, null],
+    ["print", true, null]
+  ];
+
+  const buttons = [];
+  const separators = [];
+
+  tools.forEach(([type, enabled, id], index) => {
+    if (index === 2 || index === 5) {
+      toolX += 4;
+      separators.push({
+        x: toolX,
+        y0: toolY + 2,
+        y1: toolY + toolBtnH - 2
+      });
+      toolX += 4;
+    }
+    buttons.push({
+      type,
+      id,
+      enabled,
+      x: toolX,
+      y: toolY,
+      w: toolBtnW,
+      h: toolBtnH
+    });
+    toolX += toolBtnW + 2;
+  });
+
+  return { buttons, separators, endX: toolX };
+}
+
+/**
+ * Hit regions for interactive IE chrome (canvas pixel space).
+ * @param {{ window: { x: number, y: number, w: number, h: number }, ie: { titleH: number, menuH: number, toolH: number } }} layout
+ * @returns {{ id: string, x: number, y: number, w: number, h: number }[]}
+ */
+export function collectIeChromeHitRegions(layout) {
+  const { window: win, ie } = layout;
+  const toolBarY = win.y + ie.titleH + ie.menuH;
+  const { buttons } = layoutToolbarButtons(win, ie, toolBarY);
+  return buttons
+    .filter((btn) => btn.id && btn.enabled)
+    .map((btn) => ({
+      id: btn.id,
+      x: btn.x,
+      y: btn.y,
+      w: btn.w,
+      h: btn.h
+    }));
 }
 
 /** @param {CanvasRenderingContext2D} ctx */
@@ -224,62 +297,52 @@ export function drawIeChrome(ctx, layout, profileUrl) {
   });
 
   y += ie.menuH;
+  // Toolbar buttons + address field share one row.
   ctx.fillRect(win.x + 2, y, win.w - 4, ie.toolH);
-  const toolBtnH = ie.toolH - 6;
-  const toolBtnW = toolBtnH + 2;
-  let toolX = win.x + 4;
-  const toolY = y + 3;
-  [
-    ["back", true],
-    ["forward", false],
-    ["stop", true],
-    ["refresh", true],
-    ["home", true],
-    ["search", true],
-    ["favorites", true],
-    ["print", true]
-  ].forEach(([type, enabled], index) => {
-    if (index === 2 || index === 5) {
-      toolX += 4;
-      ctx.strokeStyle = IE.frameDark;
-      ctx.beginPath();
-      ctx.moveTo(toolX, toolY + 2);
-      ctx.lineTo(toolX, toolY + toolBtnH - 2);
-      ctx.stroke();
-      toolX += 4;
-    }
-    drawRaisedRect(ctx, toolX, toolY, toolBtnW, toolBtnH);
-    drawToolbarIcon(ctx, type, toolX + 1, toolY + 1, toolBtnW - 2, enabled);
-    toolX += toolBtnW + 2;
-  });
+  const toolbar = layoutToolbarButtons(win, ie, y);
+  for (const btn of toolbar.buttons) {
+    drawRaisedRect(ctx, btn.x, btn.y, btn.w, btn.h);
+    drawToolbarIcon(ctx, btn.type, btn.x + 1, btn.y + 1, btn.w - 2, btn.enabled);
+  }
+  for (const sep of toolbar.separators) {
+    ctx.strokeStyle = IE.frameDark;
+    ctx.beginPath();
+    ctx.moveTo(sep.x, sep.y0);
+    ctx.lineTo(sep.x, sep.y1);
+    ctx.stroke();
+  }
 
-  y += ie.toolH;
-  ctx.fillRect(win.x + 2, y, win.w - 4, ie.addressH);
+  const rowMid = y + ie.toolH / 2;
+  const addrLabelX = toolbar.endX + 6;
   ctx.fillStyle = IE.addressLabel;
-  ctx.font = `${Math.max(10, Math.round(ie.addressH * 0.5))}px Tahoma, Arial, sans-serif`;
+  ctx.font = `${Math.max(10, Math.round(ie.toolH * 0.42))}px Tahoma, Arial, sans-serif`;
   ctx.textAlign = "left";
-  ctx.fillText("Address", win.x + 8, y + ie.addressH / 2 + 1);
-
-  const logoSize = Math.min(22, ie.addressH - 4);
-  const logoX = win.x + win.w - logoSize - 6;
-  const fieldX = win.x + 68;
-  const fieldW = logoX - fieldX - 28;
-  const fieldH = ie.addressH - 6;
-  const fieldY = y + 3;
-  drawSunkenRect(ctx, fieldX, fieldY, fieldW, fieldH);
-  ctx.fillStyle = IE.urlText;
-  ctx.font = `${Math.max(10, Math.round(ie.addressH * 0.52))}px Arial, sans-serif`;
   ctx.textBaseline = "middle";
-  ctx.fillText(`http://www.${profileUrl}/`, fieldX + 5, fieldY + fieldH / 2);
+  const addrLabel = "Address";
+  ctx.fillText(addrLabel, addrLabelX, rowMid + 1);
+  const addrLabelW = ctx.measureText(addrLabel).width;
 
+  const logoSize = Math.min(22, ie.toolH - 6);
+  const logoX = win.x + win.w - logoSize - 6;
+  const fieldH = ie.toolH - 8;
+  const fieldY = y + (ie.toolH - fieldH) / 2;
+  const fieldX = addrLabelX + addrLabelW + 8;
   const goW = 22;
   const goX = logoX - goW - 4;
+  const fieldW = Math.max(40, goX - fieldX - 4);
+  drawSunkenRect(ctx, fieldX, fieldY, fieldW, fieldH);
+  ctx.fillStyle = IE.urlText;
+  ctx.font = `${Math.max(10, Math.round(ie.toolH * 0.4))}px Arial, sans-serif`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  ctx.fillText(`http://www.${profileUrl}/`, fieldX + 5, fieldY + fieldH / 2);
+
   drawRaisedRect(ctx, goX, fieldY, goW, fieldH);
   ctx.fillStyle = "#006600";
   ctx.font = `bold ${Math.max(11, Math.round(fieldH * 0.55))}px Arial, sans-serif`;
   ctx.textAlign = "center";
   ctx.fillText("→", goX + goW / 2, fieldY + fieldH / 2);
-  drawIeLogo(ctx, logoX, y + (ie.addressH - logoSize) / 2, logoSize);
+  drawIeLogo(ctx, logoX, y + (ie.toolH - logoSize) / 2, logoSize);
 
   const statusY = content.y + content.h;
   ctx.fillStyle = IE.frame;
