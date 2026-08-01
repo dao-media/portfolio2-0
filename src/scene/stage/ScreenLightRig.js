@@ -56,6 +56,9 @@ export class ScreenLightRig {
     this.maxSpillIntensity = maxSpillIntensity;
     this.maxGlowIntensity = maxGlowIntensity;
     this._intensityScale = 1;
+    /** 0 = off (black screen / powered down); 1 = full spill. */
+    this._power = 0;
+    this._powerTarget = 0;
 
     this._rt = new THREE.WebGLRenderTarget(1, 1, {
       minFilter: THREE.LinearFilter,
@@ -76,7 +79,7 @@ export class ScreenLightRig {
     this.spill.lookAt(0, 0, flipForward ? -1 : 1);
     this.group.add(this.spill);
 
-    this.glow = new THREE.PointLight(0xffffff, 0, screenWidth * 6, 2);
+    this.glow = new THREE.PointLight(0xffffff, 0, screenWidth * 7.5, 1.85);
     this.glow.position.set(0, 0, -Math.abs(glowDepth));
     this.group.add(this.glow);
 
@@ -102,16 +105,34 @@ export class ScreenLightRig {
     this.maxGlowIntensity = this._baseMaxGlowIntensity * s;
   }
 
+  /**
+   * Soft power gate — 0 while the CRT is off, 1 once lit.
+   * @param {number} power
+   */
+  setPower(power) {
+    this._powerTarget = THREE.MathUtils.clamp(power, 0, 1);
+  }
+
   /** Call once per frame from your render loop. */
   update() {
+    this._power += (this._powerTarget - this._power) * 0.08;
+    if (this._power < 0.002 && this._powerTarget < 0.002) {
+      this.spill.intensity *= 0.85;
+      this.glow.intensity *= 0.85;
+      if (this.spill.intensity < 0.01) this.spill.intensity = 0;
+      if (this.glow.intensity < 0.01) this.glow.intensity = 0;
+      return;
+    }
+
     this._frame++;
     if (this._frame % this.sampleInterval === 0) this._sample();
 
     this.spill.color.lerp(this._targetColor, this.smoothing);
     this.glow.color.copy(this.spill.color);
 
-    const targetSpill = this._targetLuma * this.maxSpillIntensity;
-    const targetGlow = this._targetLuma * this.maxGlowIntensity;
+    const power = this._power;
+    const targetSpill = this._targetLuma * this.maxSpillIntensity * power;
+    const targetGlow = this._targetLuma * this.maxGlowIntensity * power;
     this.spill.intensity += (targetSpill - this.spill.intensity) * this.smoothing;
     this.glow.intensity += (targetGlow - this.glow.intensity) * this.smoothing;
   }
@@ -132,7 +153,7 @@ export class ScreenLightRig {
     this._targetLuma = THREE.MathUtils.clamp(
       0.2126 * (pr / 255) + 0.7152 * (pg / 255) + 0.0722 * (pb / 255),
       0,
-      0.62
+      0.78
     );
 
     c.getHSL(this._hsl);
@@ -140,10 +161,11 @@ export class ScreenLightRig {
       c.setHSL(
         this._hsl.h,
         Math.min(1, this._hsl.s * this.saturationBoost),
-        THREE.MathUtils.clamp(this._hsl.l, 0.35, 0.6)
+        THREE.MathUtils.clamp(this._hsl.l, 0.32, 0.62)
       );
     } else {
-      c.setHSL(0.58, 0.08, 0.55);
+      // Near-neutral UI (MySpace white) — warm CRT phosphor tint.
+      c.setHSL(0.12, 0.12, 0.58);
     }
   }
 

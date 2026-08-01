@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { springTo, springVec3To } from "./spring.js";
-import { TWO_PI, mod, shortestAngleDelta } from "./ringLayout.js";
+import { TWO_PI, mod, pointOnRing, shortestAngleDelta } from "./ringLayout.js";
 import { createScrollAdvance } from "./scrollAdvance.js";
 import { createParallax } from "./parallax.js";
 
@@ -8,45 +8,53 @@ const SETTLE_VALUE_EPS = 1.5e-3;
 const SETTLE_VELOCITY_EPS = 1e-3;
 
 const _parallaxOffset = new THREE.Vector3();
-const _viewDir = new THREE.Vector3();
+const _lookScratch = new THREE.Vector3();
 
 /**
- * Turntable ring camera — matches the original stage travel model:
- * - Camera stays on a fixed POV outside the ring (facing +Z / LOOK)
- * - The world group rotates so vignettes travel around the circular path
- * - Pageload = height spring; zoom = pull along the view axis toward LOOK
+ * Orbital ring camera — vignettes stay fixed; only the camera moves.
  *
- * `theta` is the stage angle of the active vignette (0 at +Z). World Y rotation
- * is `-theta`, same as the old vignetteAnchorRotation convention.
+ * Camera orbits outside the vignette ring. During travel, look-at is pinned to
+ * the vignette ring at the *current* theta so the first lap (and every lap)
+ * stays circular — destination look-at springs cut a chord through center and
+ * make the first Monolith→Desktop hop feel broken.
  */
 export class CameraRig {
   constructor(
     camera,
     ring,
     {
-      world,
-      lookAt = new THREE.Vector3(0, 2.35, 18),
-      restPosition = new THREE.Vector3(0, 2.85, 28),
+      center = [0, 0, 0],
+      restRadius,
+      restHeight,
       pageloadHeight,
-      zoomDistance = 4.2,
+      zoomRadius,
       zoomHeight,
+      lookAtHeight,
+      vignetteRadius,
       startIndex = 0,
-      omegaTheta = 4.5,
-      omegaRadius = 3.0,
-      omegaHeight = 2.5,
-      omegaLookAt = 5.5,
+      // Snappier ring hops — old 4.5 felt like the wheel did nothing.
+      omegaTheta = 6.2,
+      omegaRadius = 4.0,
+      omegaHeight = 3.6,
+      omegaLookAt = 6.0,
       parallax
     } = {}
   ) {
     this.camera = camera;
     this.ring = ring;
-    this.world = world;
+    this.center = center;
     this.enabled = true;
 
-    this.lookAtRest = lookAt.clone();
-    this.restPosition = restPosition.clone();
-    this.zoomDistance = zoomDistance;
-    this.zoomHeight = zoomHeight ?? restPosition.y - 0.7;
+    this.restRadius = restRadius;
+    this.restHeight = restHeight;
+    this.zoomRadius = zoomRadius;
+    this.zoomHeight = zoomHeight;
+    this.lookAtHeight = lookAtHeight ?? ring[startIndex]?.lookAt?.y ?? restHeight - 0.5;
+    const measuredRadius = ring.reduce(
+      (max, stop) => Math.max(max, stop.horizontalRadius ?? 0),
+      0
+    );
+    this.vignetteRadius = vignetteRadius ?? (measuredRadius || restRadius * 0.65);
 
     this.omegaTheta = omegaTheta;
     this.omegaRadius = omegaRadius;
@@ -54,47 +62,58 @@ export class CameraRig {
     this.omegaLookAt = omegaLookAt;
 
     const start = ring[startIndex];
-    // Stage angle of vignette i — world.rotation.y = -theta brings it to +Z.
-    const startTheta = start.angle;
+    const startLook = this._lookOnRing(start.angle);
 
     this.state = {
-      theta: startTheta,
+      theta: start.angle,
       thetaVelocity: 0,
-      thetaTarget: startTheta,
+      thetaTarget: start.angle,
 
-      // 0 at rest; negative pulls the camera toward LOOK (zoom in).
+      radius: restRadius,
+      radiusVelocity: 0,
+      radiusTarget: restRadius,
+
       radialOffset: 0,
       radialOffsetVelocity: 0,
       radialOffsetTarget: 0,
 
-      height: pageloadHeight ?? restPosition.y,
+      height: pageloadHeight ?? restHeight,
       heightVelocity: 0,
-      heightTarget: restPosition.y,
+      // Hold at aerial height until StageExperience arms the descent spring.
+      heightTarget: pageloadHeight ?? restHeight,
 
-      lookAt: this.lookAtRest.clone(),
+      lookAt: startLook.clone(),
       lookAtVelocity: new THREE.Vector3(),
-      lookAtTarget: this.lookAtRest.clone(),
+      lookAtTarget: startLook.clone(),
 
       index: startIndex,
       isZoomed: false,
       isSettled: false
     };
 
-    // Pageload: freeze orientation at the resting look; only height animates.
-    const introPos = this.restPosition.clone();
-    introPos.y = this.state.heightTarget;
-    const introMatrix = new THREE.Matrix4().lookAt(introPos, this.lookAtRest, camera.up);
-    this._introQuaternion = new THREE.Quaternion().setFromRotationMatrix(introMatrix);
+    // Pageload is a pure vertical dolly: lock the resting look for the entire
+    // drop. Live lookAt while descending pitches the camera upward as height
+    // falls — that is the tilt we must never do.
+    const introPos = pointOnRing(start.angle, restRadius, this.restHeight, center);
+    const savedPos = camera.position.clone();
+    const savedQuat = camera.quaternion.clone();
+    camera.position.copy(introPos);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(startLook);
+    this._introQuaternion = camera.quaternion.clone();
+    camera.position.copy(savedPos);
+    camera.quaternion.copy(savedQuat);
     this._introActive = true;
+    /** Spring look-at back to the ring after zoom-out instead of snapping. */
+    this._zoomLookRecovering = false;
 
-    this.scrollAdvance = createScrollAdvance({ onAdvance: (dir) => this.advance(dir) });
+    this.scrollAdvance = createScrollAdvance({
+      onAdvance: (dir) => this.advance(dir),
+      isSettled: () => Boolean(this.state.isSettled)
+    });
     this.parallax = createParallax(parallax);
     this._scrollEl = null;
     this._pointerEl = null;
-
-    if (this.world) {
-      this.world.rotation.y = -this.state.theta;
-    }
   }
 
   attachScroll(el) {
@@ -112,18 +131,47 @@ export class CameraRig {
     if (this._pointerEl) this.parallax.detach(this._pointerEl);
   }
 
+  _lookOnRing(theta, out = _lookScratch) {
+    return out.copy(
+      pointOnRing(theta, this.vignetteRadius, this.lookAtHeight, this.center)
+    );
+  }
+
+  /**
+   * Pageload freezes orientation until height settles. Only interrupt that
+   * freeze here — never snap height/look after intro, or zoom-out jumps.
+   */
+  _beginTravelFromIntro() {
+    if (!this._introActive) return;
+    const s = this.state;
+    this._introActive = false;
+    // Don't compound the first ring hop with leftover pageload height spring.
+    s.height = this.restHeight;
+    s.heightVelocity = 0;
+    s.heightTarget = this.restHeight;
+    this._lookOnRing(s.theta, s.lookAt);
+    s.lookAtTarget.copy(s.lookAt);
+    s.lookAtVelocity.set(0, 0, 0);
+  }
+
   advance(direction) {
     const s = this.state;
+    if (!s.isSettled) return;
     const n = this.ring.length;
     const nextIndex = mod(s.index + direction, n);
-    const delta = shortestAngleDelta(mod(s.thetaTarget, TWO_PI), this.ring[nextIndex].angle);
-    s.thetaTarget += delta;
+    // Step by the signed scroll direction, not shortest-path — first lap and
+    // later laps must keep the same ring sense (no reverse "shortcut" hop).
+    const step = (TWO_PI / n) * direction;
+    this._beginTravelFromIntro();
+    s.thetaTarget += step;
     s.index = nextIndex;
-    s.lookAtTarget.copy(this.lookAtRest);
+    this._lookOnRing(s.thetaTarget, s.lookAtTarget);
+    s.isSettled = false;
     if (s.isZoomed) {
       s.radialOffsetTarget = 0;
-      s.heightTarget = this.restPosition.y;
+      s.heightTarget = this.restHeight;
       s.isZoomed = false;
+      this._zoomLookRecovering = true;
     }
   }
 
@@ -134,33 +182,47 @@ export class CameraRig {
     if (target === s.index && !s.isZoomed) return;
 
     const delta = shortestAngleDelta(mod(s.thetaTarget, TWO_PI), this.ring[target].angle);
+    this._beginTravelFromIntro();
     s.thetaTarget += delta;
     s.index = target;
-    s.lookAtTarget.copy(this.lookAtRest);
+    this._lookOnRing(s.thetaTarget, s.lookAtTarget);
+    s.isSettled = false;
     if (s.isZoomed) {
       s.radialOffsetTarget = 0;
-      s.heightTarget = this.restPosition.y;
+      s.heightTarget = this.restHeight;
       s.isZoomed = false;
+      this._zoomLookRecovering = true;
     }
   }
 
-  zoomIn(_index) {
+  /** Begin the pageload height spring (call after the aerial hold). */
+  armIntroDescent() {
+    this.state.heightTarget = this.restHeight;
+    this.state.isSettled = false;
+  }
+
+  zoomIn(index) {
     const s = this.state;
     if (s.isZoomed) return;
-    // Pull toward LOOK along the rest view axis (active vignette is at +Z).
-    s.radialOffsetTarget = -this.zoomDistance;
+    this._beginTravelFromIntro();
+    this._zoomLookRecovering = false;
+    s.radialOffsetTarget = this.zoomRadius - this.restRadius;
     s.heightTarget = this.zoomHeight;
-    s.lookAtTarget.copy(this.lookAtRest);
+    s.lookAtTarget.copy(this.ring[index].focusPoint);
     s.isZoomed = true;
+    s.isSettled = false;
   }
 
   zoomOut() {
     const s = this.state;
     if (!s.isZoomed) return;
+    this._beginTravelFromIntro();
     s.radialOffsetTarget = 0;
-    s.heightTarget = this.restPosition.y;
-    s.lookAtTarget.copy(this.lookAtRest);
+    s.heightTarget = this.restHeight;
+    this._lookOnRing(s.thetaTarget, s.lookAtTarget);
     s.isZoomed = false;
+    this._zoomLookRecovering = true;
+    s.isSettled = false;
   }
 
   update(delta) {
@@ -174,6 +236,13 @@ export class CameraRig {
       s.thetaVelocity,
       s.thetaTarget,
       this.omegaTheta,
+      dt
+    );
+    [s.radius, s.radiusVelocity] = springTo(
+      s.radius,
+      s.radiusVelocity,
+      s.radiusTarget,
+      this.omegaRadius,
       dt
     );
     [s.radialOffset, s.radialOffsetVelocity] = springTo(
@@ -190,41 +259,74 @@ export class CameraRig {
       this.omegaHeight,
       dt
     );
-    springVec3To(s.lookAt, s.lookAtVelocity, s.lookAtTarget, this.omegaLookAt, dt);
 
-    // Turntable: vignettes travel the ring; camera stays on the fixed POV.
-    if (this.world) {
-      this.world.rotation.y = -s.theta;
+    if (s.isZoomed) {
+      springVec3To(s.lookAt, s.lookAtVelocity, s.lookAtTarget, this.omegaLookAt, dt);
+    } else if (this._zoomLookRecovering) {
+      // Leave zoom by springing aim back to the ring — pinning instantly here
+      // was the Sidekick zoom-out framing jump.
+      this._lookOnRing(s.theta, s.lookAtTarget);
+      springVec3To(s.lookAt, s.lookAtVelocity, s.lookAtTarget, this.omegaLookAt, dt);
+      if (
+        s.lookAt.distanceToSquared(s.lookAtTarget) < 1e-4 &&
+        s.lookAtVelocity.lengthSq() < 1e-4
+      ) {
+        this._zoomLookRecovering = false;
+        s.lookAt.copy(s.lookAtTarget);
+        s.lookAtVelocity.set(0, 0, 0);
+      }
+    } else {
+      // Pin look-at to the ring at current theta — same path every lap.
+      this._lookOnRing(s.theta, s.lookAtTarget);
+      s.lookAt.copy(s.lookAtTarget);
+      s.lookAtVelocity.set(0, 0, 0);
     }
 
-    // Rest pose on +Z outside the ring; zoom pulls horizontally toward LOOK.
-    _viewDir.subVectors(this.lookAtRest, this.restPosition);
-    _viewDir.y = 0;
-    if (_viewDir.lengthSq() > 1e-8) _viewDir.normalize();
+    const effectiveRadius = s.radius + s.radialOffset;
     this.camera.position.set(
-      this.restPosition.x + _viewDir.x * s.radialOffset,
+      this.center[0] + effectiveRadius * Math.sin(s.theta),
       s.height,
-      this.restPosition.z + _viewDir.z * s.radialOffset
+      this.center[2] + effectiveRadius * Math.cos(s.theta)
     );
 
     s.isSettled =
       Math.abs(s.thetaVelocity) < SETTLE_VELOCITY_EPS &&
       Math.abs(s.theta - s.thetaTarget) < SETTLE_VALUE_EPS &&
+      Math.abs(s.radiusVelocity) < SETTLE_VELOCITY_EPS &&
+      Math.abs(s.radius - s.radiusTarget) < SETTLE_VALUE_EPS &&
       Math.abs(s.radialOffsetVelocity) < SETTLE_VELOCITY_EPS &&
       Math.abs(s.radialOffset - s.radialOffsetTarget) < SETTLE_VALUE_EPS &&
       Math.abs(s.heightVelocity) < SETTLE_VELOCITY_EPS &&
       Math.abs(s.height - s.heightTarget) < SETTLE_VALUE_EPS;
 
+    // Unlock only after the descent has landed at rest height. During the
+    // aerial hold the rig is also "settled" (height == pageload target) — if
+    // we unlock then, lookAt runs for the whole drop and pitches upward.
+    const landedAtRest =
+      s.isSettled && Math.abs(s.heightTarget - this.restHeight) < SETTLE_VALUE_EPS;
+    if (this._introActive && landedAtRest) {
+      this._introActive = false;
+      this._lookOnRing(s.theta, s.lookAt);
+      s.lookAtTarget.copy(s.lookAt);
+      s.lookAtVelocity.set(0, 0, 0);
+    }
+
     if (this._introActive) {
+      this.camera.up.set(0, 1, 0);
       this.camera.quaternion.copy(this._introQuaternion);
-      if (s.isSettled) this._introActive = false;
     } else {
       this.camera.lookAt(s.lookAt);
     }
 
     this.camera.updateMatrixWorld();
     this.parallax.update(dt);
+    // Parallax stays live during pageload — translation only on the locked
+    // intro quat (never lookAt), so aim doesn't pitch while height falls.
     this.parallax.getOffset(this.camera, _parallaxOffset);
     this.camera.position.add(_parallaxOffset);
+
+    if (s.isSettled) {
+      this.scrollAdvance?.notifySettled?.();
+    }
   }
 }

@@ -26,3 +26,9 @@ export const SCROLL_CAPTURE_MESH_IDS = {
   /** Sidekick body — blocks turntable scroll; click to slide the screen open. */
   sidekick: "sidekick-phone"
 };
+
+/** Parallax damp-zone ids (registered via createParallaxDampZones). */
+export const PARALLAX_DAMP_ZONE_IDS = {
+  /** CRT monitor — softens cursor parallax while hovering the screen. */
+  pcMonitor: "pc-monitor"
+};

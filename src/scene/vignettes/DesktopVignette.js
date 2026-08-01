@@ -4,14 +4,19 @@ import {
   alignModelToBlockout,
   buildPcSceneBlockout
 } from "./pcSceneBlockout.js";
-import { createCrtScreenMaterial } from "./CrtScreenMaterial.js";
+import { createCrtScreenMaterial, setCrtScreenGlow, CRT_SCREEN_GLOW_MAX } from "./CrtScreenMaterial.js";
 import { applyScreenMapSettings, computeScreenUvBounds, deriveCrtScreenMap, SCREEN_MAP_CRT, SCREEN_MAP_PLANE } from "./screenTextureMap.js";
-import { SCROLL_CAPTURE_MESH_IDS } from "../stage/scrollCaptureTargets.js";
+import {
+  PARALLAX_DAMP_ZONE_IDS,
+  SCROLL_CAPTURE_MESH_IDS
+} from "../stage/scrollCaptureTargets.js";
+import { PARALLAX_DAMP_INSIDE_SCALE } from "../camera/parallaxDampZones.js";
 
 import {
   preparePcModelMaterials,
   preparePcModelMaterialsChunked,
   preloadPcTextures,
+  warmPcTexturesOnGpu,
   SCREEN_MATERIAL_NAME
 } from "./pcProductionMaterials.js";
 import { PcPowerLed } from "./PcPowerLed.js";
@@ -41,19 +46,21 @@ export const desktopVignetteMeta = {
 export class DesktopVignette {
   /**
    * @param {THREE.Group} group
-   * @param {{ mySpace: import("../../ui/MySpaceScreen.js").MySpaceScreen, scrollCapture?: import("../stage/StageScrollCapture.js").StageScrollCapture, vignetteIndex?: number, onAligned?: () => void, renderer?: THREE.WebGLRenderer, liveEnv?: import("../stage/LiveStageEnvironment.js").LiveStageEnvironment, introGate?: () => boolean, getCamera?: () => THREE.PerspectiveCamera | null }} deps
+   * @param {{ mySpace: import("../../ui/MySpaceScreen.js").MySpaceScreen, scrollCapture?: import("../stage/StageScrollCapture.js").StageScrollCapture, parallaxDampZones?: ReturnType<import("../camera/parallaxDampZones.js").createParallaxDampZones>, vignetteIndex?: number, onAligned?: () => void, renderer?: THREE.WebGLRenderer, liveEnv?: import("../stage/LiveStageEnvironment.js").LiveStageEnvironment, introGate?: () => boolean, getCamera?: () => THREE.PerspectiveCamera | null }} deps
    */
   constructor(group, deps) {
     this.group = group;
     this.deps = deps;
     this.mySpace = deps.mySpace;
     this.scrollCapture = deps.scrollCapture ?? null;
+    this.parallaxDampZones = deps.parallaxDampZones ?? null;
     this.vignetteIndex = deps.vignetteIndex ?? 1;
     this.onAligned = deps.onAligned ?? null;
     this.introGate = deps.introGate ?? null;
     this.getCamera = deps.getCamera ?? null;
     this.renderer = deps.renderer ?? null;
     this.reducedMotion = deps.reducedMotion ?? false;
+    this._modelLoadStarted = false;
     this.interactives = [];
     this.screenMesh = null;
     this.screenHitMesh = null;
@@ -80,6 +87,15 @@ export class DesktopVignette {
 
     /** Invisible blockout — same footprint/height as Monolith & Orbit placeholders. */
     this.blockoutRef = buildPcSceneBlockout(this.group, { hidden: true });
+    if (!deps.deferModelLoad) {
+      this.startModelLoad();
+    }
+  }
+
+  /** Begin GLB fetch — deferred during pageload so parse doesn't hitch the open beat. */
+  startModelLoad() {
+    if (this._modelLoadStarted) return;
+    this._modelLoadStarted = true;
     this._loadModel();
   }
 
@@ -111,38 +127,52 @@ export class DesktopVignette {
     const eased = focus * focus;
 
     setCrtGlassFocusScale(this.glassMesh?.material, focus);
-    this.screenLightRig?.setIntensityScale(THREE.MathUtils.lerp(1, 0.42, eased));
+    // Keep most of the content-matched spill when zoomed — only ease off ~35%.
+    this.screenLightRig?.setIntensityScale(THREE.MathUtils.lerp(1, 0.65, eased));
+    if (focus <= 0.02) {
+      this.mySpace.setHover(null);
+    }
     this._syncPowerLedState();
+    this._syncScreenGlow();
   }
 
   playPowerOn() {
     return this.mySpace.playPowerOn()?.then?.((result) => {
       this._ensurePowerLed();
       this._syncPowerLedState();
+      this._syncScreenGlow();
       return result;
     });
   }
 
-  async integrateAfterIntro({ yieldFrame = async () => {}, revealHidden = false } = {}) {
-    if (!this._holdForIntro) return;
-    // GLB may still be in flight — wait until pending scene exists (or load failed).
+  async integrateAfterIntro({
+    yieldFrame = async () => {},
+    revealHidden = false,
+    batchSize = 1,
+    yieldFrames = 2
+  } = {}) {
+    // Ensure the fetch was kicked even if the intro tick skipped the fetch gate.
+    this.startModelLoad();
+
+    // Wait for an in-flight GLB whether or not `_holdForIntro` was set yet —
+    // integrate can race ahead of the load callback and previously bailed out
+    // forever, leaving the desktop stop empty.
     let spins = 0;
-    while (this._holdForIntro && !this._pendingScene && spins < 180) {
+    while (!this.pcRoot && !this._pendingScene && this._modelLoadStarted && spins < 180) {
       await yieldFrame();
       spins += 1;
     }
-    if (!this._pendingScene) return;
+    if (!this._pendingScene || this.pcRoot) return;
+
     this._holdForIntro = false;
-    await this._commitModel({ yieldFrame, revealHidden });
+    await this._commitModel({ yieldFrame, revealHidden, batchSize, yieldFrames });
   }
 
   /** Decode PC textures during the intro descent — keeps the settle hitch smaller. */
   async warmIntroAssets(renderer) {
-    if (!this._holdForIntro || !this._pendingScene || this._introAssetsWarmed) return;
+    if (this._introAssetsWarmed) return;
     this._introAssetsWarmed = true;
-    if (renderer) {
-      await preloadPcTextures();
-    }
+    await warmPcTexturesOnGpu(renderer);
   }
 
   async _loadModel() {
@@ -164,22 +194,34 @@ export class DesktopVignette {
     }
   }
 
-  async _commitModel({ yieldFrame = async () => {}, revealHidden = false } = {}) {
+  async _commitModel({
+    yieldFrame = async () => {},
+    revealHidden = false,
+    batchSize = 1,
+    yieldFrames = 2
+  } = {}) {
     if (!this._pendingScene) return;
 
     this.pcRoot = this._pendingScene;
     this._pendingScene = null;
     this._pcSceneReady = false;
 
+    // Parent BEFORE align — alignModelToBlockout measures in parent space; if the
+    // GLB is still detached it uses the model itself as space and the PC lands
+    // meters away from the desktop stop (invisible at the camera).
     this.group.add(this.pcRoot);
     alignModelToBlockout(this.pcRoot, this.blockoutRef);
-    this._captureAlignedRestPosition();
-    await yieldFrame();
+    await yieldFrame(yieldFrames);
 
     if (this.renderer) {
-      await preparePcModelMaterialsChunked(this.pcRoot, this.renderer, yieldFrame, 2);
+      await preparePcModelMaterialsChunked(
+        this.pcRoot,
+        this.renderer,
+        () => yieldFrame(yieldFrames),
+        batchSize
+      );
     }
-    await yieldFrame();
+    await yieldFrame(yieldFrames);
 
     const sourceMesh = this._findScreenMesh(this.pcRoot);
     if (sourceMesh) {
@@ -193,7 +235,10 @@ export class DesktopVignette {
     if (revealHidden) {
       hideGroupForReveal(this.pcRoot);
     }
+
+    this._captureAlignedRestPosition();
     this._pcSceneReady = true;
+    this._notifyScreenReady();
     this.onAligned?.();
   }
 
@@ -290,11 +335,13 @@ export class DesktopVignette {
       this.mySpace.setMonitorPowerLedHandler(() => {
         this._ensurePowerLed();
         this._syncPowerLedState();
+        this._syncScreenGlow();
       });
       this._powerLedHandlerRegistered = true;
     }
 
     this._syncPowerLedState();
+    this._syncScreenGlow();
   }
 
   _syncPowerLedState() {
@@ -303,6 +350,7 @@ export class DesktopVignette {
     const zoomedIn =
       this._focusBlend > 0.02 || this.mySpace.isMonitorBooting;
 
+    // Monitor + speaker solids follow CRT power; HDD orange blink only while on.
     if (!zoomedIn) {
       this.powerLed.setIdle();
       return;
@@ -313,6 +361,32 @@ export class DesktopVignette {
     } else {
       this.powerLed.setIdle();
     }
+  }
+
+  /**
+   * CRT phosphor + room spill — off while black, ramps with boot/power,
+   * color always sampled from the live screen texture.
+   */
+  _syncScreenGlow() {
+    const powered =
+      this.mySpace.isPoweredOn ||
+      this.mySpace.monitorLedOn ||
+      this.mySpace.isMonitorBooting;
+
+    const bootProgress = THREE.MathUtils.clamp(this.mySpace.powerOnProgress ?? 0, 0, 1);
+    const power = powered ? Math.max(bootProgress, this.mySpace.monitorLedOn ? 1 : 0) : 0;
+
+    // Screen face emissive — lit phosphor matching the canvas (no diffuse wash).
+    const mats = this.screenMesh?.material
+      ? Array.isArray(this.screenMesh.material)
+        ? this.screenMesh.material
+        : [this.screenMesh.material]
+      : [];
+    for (const mat of mats) {
+      setCrtScreenGlow(mat, power * CRT_SCREEN_GLOW_MAX);
+    }
+
+    this.screenLightRig?.setPower(power);
   }
 
   _mountScreenOnMesh(sourceMesh) {
@@ -347,6 +421,7 @@ export class DesktopVignette {
     this._ensurePowerLed();
     this._attachScreenLightRig(sourceMesh);
     this._mountGlassShell(sourceMesh);
+    this._syncScreenGlow();
     this._notifyScreenReady();
     if (this._focusBlend > 0.85 && this.mySpace.xpBoot?.canStartBoot) {
       void this.mySpace.playPowerOn();
@@ -421,6 +496,8 @@ export class DesktopVignette {
   }
 
   _createScreenHitMesh(screenMesh) {
+    // Must stay 1:1 with the visible CRT — any scale skews raycast UVs vs. the
+    // painted MySpace texture (hover/click feel shifted down-and-in).
     const hitMesh = new THREE.Mesh(
       screenMesh.geometry,
       new THREE.MeshBasicMaterial({
@@ -429,25 +506,23 @@ export class DesktopVignette {
       })
     );
     hitMesh.name = "pc-screen-scroll-capture";
-    hitMesh.scale.setScalar(1.04);
+    hitMesh.scale.setScalar(1);
     hitMesh.renderOrder = screenMesh.renderOrder + 1;
     screenMesh.add(hitMesh);
     return hitMesh;
   }
 
-  /** Monitor content is live only after zoom-in or once boot/power-on has started. */
+  /** CRT UI (click / scroll / hover) only while zoomed in — zoom-out is stage-only. */
   _contentInteractive() {
-    return (
-      this._focusBlend > 0.02 ||
-      this.mySpace.isPoweredOn ||
-      Boolean(this.mySpace.xpBoot?.isBooting)
-    );
+    return this._focusBlend > 0.02;
   }
 
   _registerScrollCapture() {
     if (!this.screenMesh || !this.scrollCapture) return;
 
-    const meshes = [this.screenHitMesh, this.screenMesh].filter(Boolean);
+    // Prefer the visible screen mesh so UV hit-tests match the painted texture.
+    // Hit mesh is a DoubleSide fallback for grazing angles only.
+    const meshes = [this.screenMesh, this.screenHitMesh].filter(Boolean);
 
     this.scrollCapture.registerMesh(SCROLL_CAPTURE_MESH_IDS.finalPcScreen, {
       vignetteIndex: this.vignetteIndex,
@@ -465,6 +540,19 @@ export class DesktopVignette {
       onPointerDown: (hit) => this.handlePointerDown(hit),
       onPointerMove: (hit) => this.handlePointerMove(hit),
       onPointerLeave: () => this.handlePointerLeave()
+    });
+
+    this._registerParallaxDampZone(meshes);
+  }
+
+  /** Soften cursor parallax 80% while hovering the CRT face. */
+  _registerParallaxDampZone(meshes) {
+    if (!this.parallaxDampZones || !meshes?.length) return;
+
+    this.parallaxDampZones.register(PARALLAX_DAMP_ZONE_IDS.pcMonitor, {
+      vignetteIndex: this.vignetteIndex,
+      meshes,
+      scale: PARALLAX_DAMP_INSIDE_SCALE
     });
   }
 
@@ -535,6 +623,9 @@ export class DesktopVignette {
   handlePointerDown(hit) {
     if (!hit) return false;
 
+    // Zoomed out: don't consume — stage click zooms in.
+    if (!this._contentInteractive()) return false;
+
     const pressedPowerButton =
       this.powerButton?.isHit(hit.point) === true;
 
@@ -548,24 +639,21 @@ export class DesktopVignette {
       return this.mySpace.handlePointer(hit.uv);
     }
 
-    if (this._focusBlend > 0.02) {
-      if (this.mySpace.isPoweredOn) {
-        return this.mySpace.handlePointer(hit.uv);
-      }
-      if (pressedPowerButton && this.mySpace.xpBoot?.canStartBoot) {
-        void this.playPowerOn();
-        return true;
-      }
-      return false;
+    if (this.mySpace.isPoweredOn) {
+      return this.mySpace.handlePointer(hit.uv);
     }
 
-    return true;
+    if (pressedPowerButton && this.mySpace.xpBoot?.canStartBoot) {
+      void this.playPowerOn();
+      return true;
+    }
+
+    return false;
   }
 
   handlePointerMove(hit) {
     if (!this._contentInteractive()) {
       this.mySpace.setHover(null);
-      if (this.powerButton?.isHit(hit?.point)) return true;
       return false;
     }
 
@@ -589,7 +677,7 @@ export class DesktopVignette {
   }
 
   handleWheel(deltaY) {
-    if (!this.mySpace.isPoweredOn) return false;
+    if (!this._contentInteractive() || !this.mySpace.isPoweredOn) return false;
     return this.mySpace.handleWheel(deltaY);
   }
 
@@ -599,5 +687,6 @@ export class DesktopVignette {
     const focus = THREE.MathUtils.clamp(this._focusBlend, 0, 1);
     const wobble = Math.sin(time * 0.15) * 0.01 * (1 - focus);
     this.pcRoot.rotation.y = this.blockoutRef.rotation.y + wobble;
+    this._syncScreenGlow();
   }
 }

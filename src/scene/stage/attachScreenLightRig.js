@@ -6,13 +6,13 @@ import { ScreenLightRig } from "./ScreenLightRig.js";
 /** Presets tuned per device — Sidekick uses the same helper when wired up. */
 export const SCREEN_LIGHT_PRESETS = {
   pc: {
-    maxSpillIntensity: 4.5,
-    maxGlowIntensity: 0.45,
-    sampleInterval: 4,
-    smoothing: 0.08,
+    maxSpillIntensity: 4.2,
+    maxGlowIntensity: 0.7,
+    sampleInterval: 2,
+    smoothing: 0.12,
     saturationBoost: 1.35,
-    forwardOffset: 0.012,
-    glowDepth: 0.12,
+    forwardOffset: 0.014,
+    glowDepth: 0.1,
     flipForward: false
   },
   sidekick: {

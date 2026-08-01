@@ -35,9 +35,79 @@ const SWIVEL_DURATION = 0.88 * 0.7;
  * SFX leads the swivel by a fixed offset so the click is locked to motion.
  * Open needs more lead; close only compensates play-start latency.
  */
-const OPEN_SFX_LEAD = 0.25;
+const OPEN_SFX_LEAD = 0.2;
 const CLOSE_SFX_LEAD = 0.04;
 const SWIVEL_CLOSED_SLIDE_Z = -Math.PI;
+
+/** Black-bg / colored-glyph label atlases on the Sidekick body. */
+const KEYBOARD_LABEL_MESHES = new Set(["KeyboardText", "sideButtons"]);
+
+/**
+ * Bake luminance into the map alpha so black atlas bg cuts out.
+ * Prefer this over alphaMap = map: alphaMap samples only the green channel, which
+ * kills red/cyan accent glyphs, and glTF metalness defaults (1) wipe diffuse labels.
+ * @param {THREE.Texture} texture
+ */
+function ensureLabelTextureAlpha(texture) {
+  if (!texture || texture.userData.__labelAlphaReady) return texture;
+  const img = texture.image;
+  if (!img?.width || !img?.height) return texture;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return texture;
+
+  ctx.drawImage(img, 0, 0);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const { data } = imageData;
+  for (let i = 0; i < data.length; i += 4) {
+    data[i + 3] = Math.max(data[i], data[i + 1], data[i + 2]);
+  }
+  ctx.putImageData(imageData, 0, 0);
+
+  texture.image = canvas;
+  texture.needsUpdate = true;
+  texture.userData.__labelAlphaReady = true;
+  return texture;
+}
+
+/**
+ * Unlit cutout decals — PhysicalMaterial + metalness 1 made keyboard glyphs vanish
+ * into the black environment; depthTest must stay off so keys don't occlude the plane.
+ * @param {THREE.Mesh} mesh
+ */
+function applySidekickLabelMaterial(mesh) {
+  const prior = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+  if (!prior?.map) return;
+
+  ensureLabelTextureAlpha(prior.map);
+
+  const mat = new THREE.MeshBasicMaterial({
+    map: prior.map,
+    name: prior.name || mesh.name,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    alphaTest: 0.08,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+    fog: false
+  });
+  mat.polygonOffset = true;
+  mat.polygonOffsetFactor = -2;
+  mat.polygonOffsetUnits = -2;
+
+  if (Array.isArray(mesh.material)) {
+    mesh.material.forEach((m) => m?.dispose?.());
+  } else {
+    prior.dispose?.();
+  }
+  mesh.material = mat;
+  mesh.renderOrder = 2;
+  mesh.castShadow = false;
+}
 const CLOSED_HINGE_TILT_X = -0.048;
 const _HINGE_AXIS = new THREE.Vector3(0, 0, 1);
 const _TILT_AXIS = new THREE.Vector3(1, 0, 0);
@@ -114,6 +184,7 @@ export class SidekickVignette {
     this.onAligned = deps.onAligned ?? null;
     this.introGate = deps.introGate ?? null;
     this.reducedMotion = deps.reducedMotion ?? false;
+    this._modelLoadStarted = false;
 
     this.sidekickRoot = null;
     this.phoneRoot = null;
@@ -151,19 +222,39 @@ export class SidekickVignette {
 
     this.group.userData.skipFloorSnap = true;
     this.blockoutRef = buildPcSceneBlockout(this.group, { hidden: true });
+    if (!deps.deferModelLoad) {
+      this.startModelLoad();
+    }
+  }
+
+  /** Begin GLB fetch — deferred during pageload so parse doesn't hitch the open beat. */
+  startModelLoad() {
+    if (this._modelLoadStarted) return;
+    this._modelLoadStarted = true;
     this._loadModel();
   }
 
-  async integrateAfterIntro({ yieldFrame = async () => {}, revealHidden = false } = {}) {
-    if (!this._holdForIntro) return;
+  async integrateAfterIntro({
+    yieldFrame = async () => {},
+    revealHidden = false,
+    deferScreenTextureMs = 0
+  } = {}) {
+    this.startModelLoad();
+
     let spins = 0;
-    while (this._holdForIntro && !this._pendingScene && spins < 180) {
+    while (
+      !this.sidekickRoot &&
+      !this._pendingScene &&
+      this._modelLoadStarted &&
+      spins < 180
+    ) {
       await yieldFrame();
       spins += 1;
     }
-    if (!this._pendingScene) return;
+    if (!this._pendingScene || this.sidekickRoot) return;
+
     this._holdForIntro = false;
-    await this._commitModel({ yieldFrame, revealHidden });
+    await this._commitModel({ yieldFrame, revealHidden, deferScreenTextureMs });
   }
 
   async _loadModel() {
@@ -184,7 +275,11 @@ export class SidekickVignette {
     }
   }
 
-  async _commitModel({ yieldFrame = async () => {}, revealHidden = false } = {}) {
+  async _commitModel({
+    yieldFrame = async () => {},
+    revealHidden = false,
+    deferScreenTextureMs = 0
+  } = {}) {
     if (!this._pendingScene) return;
 
     this.sidekickRoot = this._pendingScene;
@@ -238,6 +333,7 @@ export class SidekickVignette {
     this._alignPhone();
     this._collectHitMeshes();
     this._registerScrollCapture();
+    this._configureKeyboardLabels();
     this._aligned = true;
     preloadSidekickSfx();
 
@@ -246,7 +342,13 @@ export class SidekickVignette {
     }
 
     this.onAligned?.();
-    void this._applyScreenTexture();
+
+    const bake = () => void this._applyScreenTexture();
+    if (deferScreenTextureMs > 0) {
+      window.setTimeout(bake, deferScreenTextureMs);
+    } else {
+      bake();
+    }
 
     if (this._pendingOpen) {
       this._pendingOpen = false;
@@ -275,6 +377,14 @@ export class SidekickVignette {
       this._screenFrame.castShadow = false;
       this._screenFrame.receiveShadow = false;
     }
+  }
+
+  /** Keyboard / side-button glyph atlases — unlit cutouts so letters show on the keys. */
+  _configureKeyboardLabels() {
+    this.sidekickRoot?.traverse((obj) => {
+      if (!obj.isMesh || !KEYBOARD_LABEL_MESHES.has(obj.name)) return;
+      applySidekickLabelMaterial(obj);
+    });
   }
 
   _applyOpenSwivelBase() {

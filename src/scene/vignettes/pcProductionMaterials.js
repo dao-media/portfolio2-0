@@ -122,6 +122,23 @@ export function preloadPcTextures() {
   });
 }
 
+/**
+ * After preload, upload decoded maps to the GPU so commit doesn't stall on first use.
+ * @param {THREE.WebGLRenderer} [renderer]
+ */
+export async function warmPcTexturesOnGpu(renderer) {
+  await preloadPcTextures();
+  if (!renderer) return;
+  for (const entry of textureCache.values()) {
+    try {
+      const tex = entry?.then ? await entry : entry;
+      if (tex?.isTexture) renderer.initTexture(tex);
+    } catch {
+      /* skip missing */
+    }
+  }
+}
+
 function buildPbrMaterial(params, matName) {
   const cc = getMaterialClearcoat(matName);
   params.envMapIntensity = getMaterialEnvIntensity(matName);
@@ -341,22 +358,27 @@ export async function preparePcModelMaterialsChunked(
   root,
   renderer,
   yieldFrame,
-  batchSize = 2
+  batchSize = 1
 ) {
   await preloadPcTextures();
+  if (renderer) {
+    await warmPcTexturesOnGpu(renderer);
+    if (yieldFrame) await yieldFrame();
+  }
 
   const meshes = [];
   root.traverse((obj) => {
     if (!obj.isMesh) return;
     obj.castShadow = true;
     obj.receiveShadow = true;
-    obj.frustumCulled = false;
+    // Keep frustum culling on during intro; disable only after reveal if needed.
+    obj.frustumCulled = true;
     meshes.push(obj);
   });
 
   for (let i = 0; i < meshes.length; i += 1) {
     await enhanceMeshMaterial(meshes[i], renderer);
-    if ((i + 1) % batchSize === 0) {
+    if (yieldFrame && (i + 1) % Math.max(1, batchSize) === 0) {
       await yieldFrame();
     }
   }

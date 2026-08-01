@@ -53,6 +53,10 @@ export function isParallaxSuppressed(_stage) {
  * }} stage
  */
 export function canStartDesktopBoot(stage) {
+  // Spring camera zoom is the focus gate now — don't require the old focusBlend tween.
+  if (stage.cameraRig?.state?.isZoomed && stage.cameraRig?.state?.index === 1) {
+    return true;
+  }
   if (stage._focusPhase === STAGE_FOCUS_PHASE.ENTERING) return false;
   if (stage._focusPhase === STAGE_FOCUS_PHASE.FOCUSED) return true;
   return (stage.focusBlend ?? 0) > FOCUS_BLEND_THRESHOLD;

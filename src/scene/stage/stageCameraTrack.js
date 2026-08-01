@@ -16,11 +16,11 @@ export const INTRO_PARALLAX_TRACK_START = 0.78;
 /** Extra settle time after the main drop — brief parallax blend only (ms). */
 export const INTRO_TRACK_SETTLE_MS = 420;
 
-/** Track progress when silent model integration may begin. */
-export const INTRO_MODEL_INTEGRATE_TRACK = 0.38;
+/** Track progress when silent model integration may begin (legacy timed track). */
+export const INTRO_MODEL_INTEGRATE_TRACK = 1;
 
-/** Track progress when mounted models begin fading in. */
-export const INTRO_MODEL_REVEAL_TRACK = 0.58;
+/** Track progress when mounted models begin fading in (post-settle reveal). */
+export const INTRO_MODEL_REVEAL_TRACK = 1;
 
 /**
  * @param {Array<[number, number]>} keyframes — [t, value] pairs, t in 0→1

@@ -97,18 +97,26 @@ export const PARALLAX_POST_TRANSITION_MS = 620;
 /** Brief ramp after intro — parallax influence eases onto the resting POV (ms). */
 export const INTRO_HANDOFF_MS = 680;
 export const INTRO_PARALLAX_HANDOFF_FOLLOW = 0.14;
+/** Brief pause at aerial POV so first-frame GPU compile doesn't hitch the drop. */
+export const INTRO_SPRING_HOLD_MS = 240;
+/** Start GLB fetches after the drop is mostly done (avoids parse hitch mid-descent). */
+export const INTRO_MODEL_FETCH_TRACK = 0.62;
+/** Decode/upload PC textures near the end of the descent — not in the opening beat. */
+export const INTRO_ASSET_WARM_TRACK = 0.82;
 /** Keep the post-intro frame lean until deferred integration finishes. */
 export const INTRO_SETTLE_GRACE_MS = 1200;
 /** Extra pause after handoff + settle before model integration begins. */
 export const INTRO_INTEGRATION_DELAY_MS = 500;
 /** Delay CRT / screen-light GPU work until models have been visible for a beat. */
 export const INTRO_HEAVY_EFFECTS_DELAY_MS = 2000;
-/** Defer Sidekick anchor bake — not needed until the user visits that stop. */
+/** Defer Sidekick screen atlas bake until after the intro reveal. */
 export const INTRO_SIDEKICK_BAKE_DELAY_MS = 4500;
 /** Max wait before deferred intro work runs (avoid idle firing mid-handoff). */
 export const INTRO_DEFERRED_IDLE_TIMEOUT_MS = 5000;
 /** Meshes upgraded per frame during PC material integration. */
-export const INTRO_MATERIAL_BATCH_SIZE = 2;
+export const INTRO_MATERIAL_BATCH_SIZE = 1;
+/** Extra display frames to yield between material batches (spreads GPU upload). */
+export const INTRO_MATERIAL_YIELD_FRAMES = 2;
 
 /** Desktop click-to-focus — boot gating and parallax lock threshold. */
 export const FOCUS_BLEND_THRESHOLD = 0.85;

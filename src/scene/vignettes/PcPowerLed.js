@@ -1,21 +1,19 @@
 import * as THREE from "three";
 
-/** Materials whose emissive maps include the tower/monitor power LED. */
+/** Materials whose emissive maps include tower/speaker (pc_1) or monitor (pc_2) LEDs. */
 export const POWER_LED_MATERIAL_NAMES = new Set(["pc_1", "pc_2"]);
 
-/** Tower HDD LED — orange through pc_emission1. */
-const TOWER_LED_ON = { color: 0xff7a18, intensity: 3.1 };
+/** Manic orange for the cylinder / HDD activity LED only. */
+const ACTIVITY_ON = { color: new THREE.Color(0xff7a18), intensity: 3.4 };
+const ACTIVITY_DIM = { color: new THREE.Color(0xff5a10), intensity: 0.45 };
 
-/** Speaker LEDs — green through pc_emission1 (shared atlas with tower). */
-const SPEAKER_LED_ON = { color: 0x66ff55, intensity: 2.4 };
+/** Solid green for speaker (and any other non-activity) islands on pc_1. */
+const SPEAKER_SOLID = { color: new THREE.Color(0x66ff55), intensity: 2.4 };
 
-/** Monitor bezel power ring — solid green in zoom/boot. */
+/** Monitor bezel power LED — solid green when CRT is on. */
 const MONITOR_LED_ON = { color: 0x66ff55, intensity: 2.8 };
 
 const LED_OFF = { color: 0x000000, intensity: 0 };
-
-/** Speakers follow tower + monitor power by this delay (seconds). */
-const SPEAKER_LED_DELAY_S = 1;
 
 /** @param {THREE.Object3D} pcRoot @returns {THREE.MeshPhysicalMaterial[]} */
 function collectPowerLedMaterials(pcRoot) {
@@ -33,8 +31,10 @@ function collectPowerLedMaterials(pcRoot) {
 }
 
 /**
- * Drives the CRT / tower / speaker emissive LEDs (pc_1 + pc_2).
- * Solid states only while zoomed/booted — idle when zoomed out.
+ * Split pc_1 emissive into:
+ *  - manic orange HDD / activity blink (red island on pc_emission1)
+ *  - solid green for speakers (green island on the same atlas)
+ * pc_2 (monitor) stays a simple solid on/off — never blinks.
  */
 export class PcPowerLed {
   /**
@@ -48,11 +48,13 @@ export class PcPowerLed {
     this.reducedMotion = options.reducedMotion ?? false;
     /** @type {'off' | 'on'} */
     this.mode = "off";
-    /** @type {'idle' | 'active'} */
-    this._phase = "idle";
-    this._speakersOn = false;
-    /** @type {ReturnType<typeof setTimeout> | null} */
-    this._speakerTimer = null;
+    this._activityLit = false;
+    this._nextActivityFlipAt = -1;
+    this._burstFlipsLeft = 0;
+    /** @type {{ uActivity: { value: number }, uSolid: { value: number }, uActivityColor: { value: THREE.Color }, uSolidColor: { value: THREE.Color } } | null} */
+    this._towerUniforms = null;
+
+    this._installTowerShader();
     this.setIdle();
   }
 
@@ -81,14 +83,14 @@ export class PcPowerLed {
     return this.mode === "on";
   }
 
-  /** Zoom-out / standby — all emissive islands off, no animation. */
+  /** Powered down — all LEDs off, no activity blink. */
   setIdle() {
-    this._clearSpeakerTimer();
-    this._phase = "idle";
-    this._speakersOn = false;
     this.mode = "off";
+    this._nextActivityFlipAt = -1;
+    this._burstFlipsLeft = 0;
+    this._activityLit = false;
+    this._setTowerGlow(0, 0, ACTIVITY_ON.color);
     this._applyMonitor(LED_OFF);
-    this._applyTowerMaterials(LED_OFF);
   }
 
   setOff() {
@@ -103,64 +105,175 @@ export class PcPowerLed {
     this.setIdle();
   }
 
-  /** Zoom/boot — solid monitor green, solid tower orange, speakers after delay. */
+  /** CRT on — solid monitor + speaker greens; HDD activity starts manic orange blink. */
   setMonitorOn() {
-    const wasActive = this._phase === "active" && this.mode === "on";
-
-    this._phase = "active";
+    const wasOff = this.mode === "off";
     this.mode = "on";
+    this._setTowerGlow(0, SPEAKER_SOLID.intensity, SPEAKER_SOLID.color);
     this._applyMonitor(MONITOR_LED_ON);
+    if (wasOff) {
+      this._activityLit = true;
+      this._applyActivityState(true);
+      this._nextActivityFlipAt = -1;
+    }
+  }
 
-    if (!wasActive) {
-      this._speakersOn = false;
-      this._applyTowerMaterials(TOWER_LED_ON);
-      this._scheduleSpeakers();
+  /** @param {number} time Scene elapsed seconds */
+  update(time) {
+    if (this.mode !== "on" || !this.towerMaterials.length) return;
+
+    if (this._nextActivityFlipAt < 0) {
+      this._scheduleActivityFlip(time, true);
       return;
     }
 
-    this._applyTowerMaterials(this._speakersOn ? SPEAKER_LED_ON : TOWER_LED_ON);
-  }
+    if (time < this._nextActivityFlipAt) return;
 
-  /** @param {number} _time Scene elapsed seconds — reserved; LEDs are state-driven. */
-  update(_time) {}
-
-  _clearSpeakerTimer() {
-    if (this._speakerTimer != null) {
-      clearTimeout(this._speakerTimer);
-      this._speakerTimer = null;
+    if (this._burstFlipsLeft > 0) {
+      this._burstFlipsLeft -= 1;
+      this._activityLit = !this._activityLit;
+      this._applyActivityState(this._activityLit);
+      this._nextActivityFlipAt = time + this._activityBurstDelay();
+      return;
     }
+
+    const roll = Math.random();
+    if (roll < 0.24) {
+      this._activityLit = true;
+      this._applyActivityState(true);
+      this._burstFlipsLeft = 3 + Math.floor(Math.random() * 6);
+      this._nextActivityFlipAt = time + this._activityBurstDelay();
+      return;
+    }
+
+    if (roll < 0.34) {
+      this._activityLit = false;
+      this._applyActivityState(false);
+      this._nextActivityFlipAt = time + this._activityRestDelay();
+      return;
+    }
+
+    this._activityLit = !this._activityLit;
+    this._applyActivityState(this._activityLit);
+    this._scheduleActivityFlip(time, false);
   }
 
-  _scheduleSpeakers() {
-    this._clearSpeakerTimer();
-    const delayMs = (this.reducedMotion ? 0.35 : SPEAKER_LED_DELAY_S) * 1000;
-    this._speakerTimer = setTimeout(() => {
-      this._speakerTimer = null;
-      if (this._phase !== "active" || this.mode !== "on") return;
-      this._speakersOn = true;
-      this._applyTowerMaterials(SPEAKER_LED_ON);
-    }, delayMs);
-  }
+  /**
+   * pc_emission1 already encodes LED roles by color (red = HDD, green = speakers).
+   * Mask on that so only the red island gets the manic orange blink.
+   */
+  _installTowerShader() {
+    if (!this.towerMaterials.length) return;
 
-  /** @param {{ color: number, intensity: number }} cfg */
-  _applyTowerMaterials(cfg) {
+    const uniforms = {
+      uActivity: { value: 0 },
+      uSolid: { value: 0 },
+      uActivityColor: { value: ACTIVITY_ON.color.clone() },
+      uSolidColor: { value: SPEAKER_SOLID.color.clone() }
+    };
+    this._towerUniforms = uniforms;
+
     for (const mat of this.towerMaterials) {
-      this._applyMaterial(mat, cfg);
+      mat.emissive.setHex(0xffffff);
+      mat.emissiveIntensity = 1;
+      mat.toneMapped = false;
+      mat.userData.pcTowerLeds = true;
+
+      const prev = mat.onBeforeCompile;
+      mat.onBeforeCompile = (shader, renderer) => {
+        prev?.(shader, renderer);
+        Object.assign(shader.uniforms, uniforms);
+        shader.fragmentShader = shader.fragmentShader
+          .replace(
+            "#include <common>",
+            /* glsl */ `
+            #include <common>
+            uniform float uActivity;
+            uniform float uSolid;
+            uniform vec3 uActivityColor;
+            uniform vec3 uSolidColor;
+            `
+          )
+          .replace(
+            "#include <emissivemap_fragment>",
+            /* glsl */ `
+            #ifdef USE_EMISSIVEMAP
+              vec4 pcLedTexel = texture2D( emissiveMap, vEmissiveMapUv );
+              float pcLedLum = max( pcLedTexel.r, max( pcLedTexel.g, pcLedTexel.b ) );
+              float pcActivityMask = smoothstep( 0.2, 0.45, pcLedTexel.r - max( pcLedTexel.g, pcLedTexel.b ) );
+              float pcSolidMask = smoothstep( 0.2, 0.45, pcLedTexel.g - max( pcLedTexel.r, pcLedTexel.b ) );
+              pcActivityMask *= step( 0.04, pcLedLum );
+              pcSolidMask *= step( 0.04, pcLedLum );
+              totalEmissiveRadiance =
+                uActivityColor * uActivity * pcActivityMask
+                + uSolidColor * uSolid * pcSolidMask;
+            #endif
+            `
+          );
+      };
+      const priorKeyFn = mat.customProgramCacheKey?.bind(mat);
+      mat.customProgramCacheKey = () =>
+        `${priorKeyFn?.() ?? "pc_1"}|pc-tower-led-split-v2`;
+      mat.needsUpdate = true;
     }
+  }
+
+  /**
+   * @param {number} activityIntensity
+   * @param {number} solidIntensity
+   * @param {THREE.Color} [activityColor]
+   */
+  _setTowerGlow(activityIntensity, solidIntensity, activityColor) {
+    if (!this._towerUniforms) return;
+    this._towerUniforms.uActivity.value = activityIntensity;
+    this._towerUniforms.uSolid.value = solidIntensity;
+    if (activityColor) {
+      this._towerUniforms.uActivityColor.value.copy(activityColor);
+    }
+  }
+
+  /** @param {boolean} lit */
+  _applyActivityState(lit) {
+    const solid = this.mode === "on" ? SPEAKER_SOLID.intensity : 0;
+    if (!lit && Math.random() < 0.2) {
+      this._setTowerGlow(ACTIVITY_DIM.intensity, solid, ACTIVITY_DIM.color);
+      return;
+    }
+    this._setTowerGlow(lit ? ACTIVITY_ON.intensity : 0, solid, ACTIVITY_ON.color);
+  }
+
+  /** @param {number} time @param {boolean} initial */
+  _scheduleActivityFlip(time, initial) {
+    this._nextActivityFlipAt = time + (initial ? Math.random() * 0.1 : this._activityFlipDelay());
+  }
+
+  _activityBurstDelay() {
+    if (this.reducedMotion) return 0.1 + Math.random() * 0.16;
+    return 0.018 + Math.random() * 0.048;
+  }
+
+  _activityFlipDelay() {
+    if (this.reducedMotion) {
+      return 0.2 + Math.random() * 0.55;
+    }
+    const roll = Math.random();
+    if (roll < 0.5) return 0.028 + Math.random() * 0.07;
+    if (roll < 0.82) return 0.07 + Math.random() * 0.14;
+    return 0.12 + Math.random() * 0.26;
+  }
+
+  _activityRestDelay() {
+    if (this.reducedMotion) return 0.4 + Math.random() * 0.85;
+    return 0.06 + Math.random() * 0.28;
   }
 
   /** @param {{ color: number, intensity: number }} cfg */
   _applyMonitor(cfg) {
     for (const mat of this.monitorMaterials) {
-      this._applyMaterial(mat, cfg);
+      mat.emissive.setHex(cfg.color);
+      mat.emissiveIntensity = cfg.intensity;
+      mat.toneMapped = false;
+      mat.needsUpdate = true;
     }
-  }
-
-  /** @param {THREE.MeshPhysicalMaterial} mat @param {{ color: number, intensity: number }} cfg */
-  _applyMaterial(mat, cfg) {
-    mat.emissive.setHex(cfg.color);
-    mat.emissiveIntensity = cfg.intensity;
-    mat.toneMapped = false;
-    mat.needsUpdate = true;
   }
 }

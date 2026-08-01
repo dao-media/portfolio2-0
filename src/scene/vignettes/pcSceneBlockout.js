@@ -275,8 +275,9 @@ export function alignModelToBlockout(model, blockoutSetup) {
   model.updateMatrixWorld(true);
   blockoutSetup.updateMatrixWorld(true);
 
-  const parent = model.parent;
-  const space = parent ?? model;
+  // Prefer the shared vignette group — never fall back to the detached model
+  // as the measure space (that places the GLB in the wrong world location).
+  const space = blockoutSetup.parent ?? model.parent ?? model;
   space.updateMatrixWorld(true);
 
   const targetBox = measureBlockoutReferenceBounds(blockoutSetup, space);

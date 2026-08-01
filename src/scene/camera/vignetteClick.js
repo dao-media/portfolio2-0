@@ -35,8 +35,11 @@ export function createVignetteClick({ camera, meshes, cameraRig }) {
     // (hitIndex === s.index) redirects the in-flight motion straight to its
     // zoom anchor — see CameraRig.zoomIn().
     if (hitIndex === s.index) {
-      if (s.isZoomed) cameraRig.zoomOut();
-      else cameraRig.zoomIn(hitIndex);
+      if (s.isZoomed) {
+        // Stay zoomed — interactive content (desktop boot / UI) owns the click.
+        return;
+      }
+      cameraRig.zoomIn(hitIndex);
       return;
     }
 
