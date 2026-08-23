@@ -17,7 +17,17 @@ export function setGroupRenderOpacity(root, opacity) {
     const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
     materials.forEach((mat) => {
       if (!mat) return;
-      if (!mat.userData.__revealAuthored) {
+      // Keypad plastic is pinned opaque. Never snapshot phong3's alpha-0 MASK
+      // as the fade restore target or the keys vanish after intro.
+      if (mat.userData.sidekickKeypadProtected) {
+        mat.userData.__revealAuthored = {
+          transparent: false,
+          depthWrite: true,
+          depthTest: true,
+          opacity: 1,
+          alphaTest: 0
+        };
+      } else if (!mat.userData.__revealAuthored) {
         mat.userData.__revealAuthored = {
           transparent: Boolean(mat.transparent),
           depthWrite: mat.depthWrite !== false,

@@ -1,111 +1,96 @@
 import * as THREE from "three";
+import {
+  BloomEffect,
+  EffectComposer,
+  EffectPass,
+  RenderPass
+} from "postprocessing";
+import { NEON_BLOOM } from "./constants.js";
+import { FilmGrainEffect } from "./FilmGrainEffect.js";
 
 /**
- * Film grain over the lit beauty pass — no fake spotlight mask.
- * Scene lighting uses SpotLight.castShadow for the POV pool.
+ * One live composer: RenderPass → bloom → film grain.
+ * Grain stays last so it isn't bloomed. Do not add a second composer.
  */
 export class PostPass {
   /**
    * @param {THREE.WebGLRenderer} renderer
    * @param {number} pixelRatio
    * @param {number} grain
+   * @param {THREE.Camera} camera
+   * @param {{ bloom?: boolean }} [options]
    */
-  constructor(renderer, pixelRatio, grain = 0.05) {
+  constructor(renderer, pixelRatio, grain = 0.05, camera, options = {}) {
     this.renderer = renderer;
     this.pixelRatio = pixelRatio;
     this.grain = grain;
-
+    this.camera = camera;
     this._width = 1;
     this._height = 1;
-    this._createTarget(1, 1);
+    this._scene = options.scene ?? null;
 
-    this.scene = new THREE.Scene();
-    this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-
-    this.uniforms = {
-      tDiffuse: { value: this.target.texture },
-      uTime: { value: 0 },
-      uGrain: { value: grain }
-    };
-
-    this.material = new THREE.ShaderMaterial({
-      uniforms: this.uniforms,
-      vertexShader: `
-        varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = vec4(position.xy, 0.0, 1.0);
-        }
-      `,
-      fragmentShader: `
-        uniform sampler2D tDiffuse;
-        uniform float uTime;
-        uniform float uGrain;
-
-        varying vec2 vUv;
-
-        float rand(vec2 co) {
-          return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
-        }
-
-        void main() {
-          vec4 col = texture2D(tDiffuse, vUv);
-          float g = (rand(vUv * (uTime + 1.0)) - 0.5) * uGrain;
-          col.rgb += g;
-          gl_FragColor = col;
-        }
-      `
+    this.composer = new EffectComposer(renderer, {
+      frameBufferType: THREE.HalfFloatType,
+      multisampling: 0
     });
 
-    this.scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material));
+    this.renderPass = new RenderPass(this._scene ?? new THREE.Scene(), camera);
+    this.bloomEffect = new BloomEffect({
+      mipmapBlur: true,
+      luminanceThreshold: NEON_BLOOM.luminanceThreshold,
+      luminanceSmoothing: NEON_BLOOM.luminanceSmoothing,
+      intensity: options.bloom === false ? 0 : NEON_BLOOM.intensity,
+      radius: NEON_BLOOM.radius
+    });
+    this.bloomPass = new EffectPass(camera, this.bloomEffect);
+    this.grainEffect = new FilmGrainEffect({ grain });
+    this.grainPass = new EffectPass(camera, this.grainEffect);
+
+    this.composer.addPass(this.renderPass);
+    this.composer.addPass(this.bloomPass);
+    this.composer.addPass(this.grainPass);
+
     this.setSize(window.innerWidth, window.innerHeight);
   }
 
-  _createTarget(width, height) {
-    this.target?.dispose();
-
-    this.target = new THREE.WebGLRenderTarget(width, height);
-    this.target.texture.colorSpace = THREE.SRGBColorSpace;
-
-    if (this.uniforms) {
-      this.uniforms.tDiffuse.value = this.target.texture;
-    }
-  }
-
   setSize(width, height) {
-    const w = Math.floor(width * this.pixelRatio);
-    const h = Math.floor(height * this.pixelRatio);
+    const w = Math.max(1, Math.floor(width));
+    const h = Math.max(1, Math.floor(height));
     if (w === this._width && h === this._height) return;
     this._width = w;
     this._height = h;
-    this._createTarget(w, h);
+    this.composer.setSize(w, h);
   }
 
+  /**
+   * @param {THREE.Scene} scene
+   * @param {THREE.Camera} camera
+   * @param {number} time
+   * @param {{ grainStrength?: number }} [options]
+   */
   render(scene, camera, time, options = {}) {
     const grainStrength =
       typeof options.grainStrength === "number"
         ? THREE.MathUtils.clamp(options.grainStrength, 0, 1)
         : 1;
 
-    this.uniforms.uTime.value = time;
-    this.uniforms.uGrain.value = this.grain * grainStrength;
-
-    this.renderer.setRenderTarget(this.target);
-    this.renderer.render(scene, camera);
-    this.renderer.setRenderTarget(null);
-    this.renderer.render(this.scene, this.camera);
+    this._scene = scene;
+    this.renderPass.mainScene = scene;
+    this.renderPass.mainCamera = camera;
+    this.grainEffect.uniforms.get("uTime").value = time;
+    this.grainEffect.uniforms.get("uGrain").value = this.grain * grainStrength;
+    this.composer.render();
   }
 
-  /** Apply grain over an already-composed frame. */
-  renderComposed(sourceTexture, time) {
-    this.uniforms.uTime.value = time;
-    this.uniforms.tDiffuse.value = sourceTexture;
-    this.renderer.setRenderTarget(null);
-    this.renderer.render(this.scene, this.camera);
+  /** Throwaway composed frame — warms bloom + grain programs. */
+  warm() {
+    if (!this._scene) return;
+    this.composer.render();
   }
 
   dispose() {
-    this.target.dispose();
-    this.material.dispose();
+    this.composer.dispose();
+    this.bloomEffect.dispose();
+    this.grainEffect.dispose();
   }
 }

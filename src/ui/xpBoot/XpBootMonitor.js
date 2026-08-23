@@ -510,15 +510,17 @@ export class XpBootMonitor {
     ctx.lineWidth = 1;
     ctx.strokeRect(barX + 0.5, barY + 0.5, barW - 1, barH - 1);
 
+    // Clip bricks to the inner track — same as CSS overflow:hidden on .xp-boot-bar.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(barX + 1, barY + 1, barW - 2, barH - 2);
+    ctx.clip();
+
     for (let i = 0; i < 3; i += 1) {
       const local = ((nowMs - delays[i]) % cycleMs + cycleMs) % cycleMs;
       const u = local / cycleMs;
       const x = barX - blockW + u * (barW + blockW);
-      let alpha = 1;
-      if (u < 0.08) alpha = u / 0.08;
-      else if (u > 0.92) alpha = (1 - u) / 0.08;
 
-      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
       const grad = ctx.createLinearGradient(x, barY + 2, x, barY + 2 + blockH);
       grad.addColorStop(0, "#7ec8ff");
       grad.addColorStop(0.45, "#2a84d4");
@@ -526,7 +528,7 @@ export class XpBootMonitor {
       ctx.fillStyle = grad;
       ctx.fillRect(x, barY + 3, blockW, blockH);
     }
-    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
   _paintWelcomeFrame() {

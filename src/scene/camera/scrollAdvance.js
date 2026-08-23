@@ -65,11 +65,15 @@ export function createScrollAdvance({
     scheduleIdleArm();
   }
 
-  /** Call from the camera update loop when settle state may have flipped. */
+  /**
+   * Call when settle state may have flipped (ideally on the false→true edge).
+   * Must not reset an in-flight quiet timer — CameraRig used to call this every
+   * settled frame, which permanently postponed re-arm after the first hop.
+   */
   function notifySettled() {
     if (!isSettled()) return;
-    if (!pendingPostSettleIdle && armed) return;
-    // Landed — require a fresh quiet gap. Never auto-advance on the settle frame.
+    if (armed) return;
+    if (quietTimer != null) return;
     pendingPostSettleIdle = false;
     accum = 0;
     scheduleIdleArm();

@@ -3,6 +3,14 @@ import * as THREE from "three";
 export const SCREEN_MATERIAL_NAME = "pc_3";
 const TEXTURE_DIR = "/assets/models/pc-source/";
 
+/** Shared with the stage load gate so PC maps count toward boot progress. */
+let textureLoadingManager = null;
+
+/** @param {THREE.LoadingManager | null} manager */
+export function setPcTextureLoadingManager(manager) {
+  textureLoadingManager = manager;
+}
+
 /** Curled cords share the black cable texture set with the main power cord. */
 const MATERIAL_ALIASES = {
   cable: "cable_black"
@@ -85,7 +93,7 @@ function loadTextureFile(filename) {
   if (textureCache.has(filename)) return textureCache.get(filename);
 
   const promise = new Promise((resolve, reject) => {
-    const loader = new THREE.TextureLoader();
+    const loader = new THREE.TextureLoader(textureLoadingManager ?? undefined);
     loader.load(
       `${TEXTURE_DIR}${filename}`,
       (tex) => {

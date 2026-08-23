@@ -103,9 +103,16 @@ function _installResinGlowShader(material) {
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uScrollGlow = { value: IDLE_GLOW };
 
-    shader.fragmentShader = shader.fragmentShader.replace(
-      "#include <emissivemap_fragment>",
-      /* glsl */ `
+    // Three no longer auto-injects custom uniform declarations into PhysicalMaterial.
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        /* glsl */ `#include <common>
+uniform float uScrollGlow;`
+      )
+      .replace(
+        "#include <emissivemap_fragment>",
+        /* glsl */ `
         #include <emissivemap_fragment>
         float resinView = clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0);
         // Thick-center glow: LED pools in the middle, thins at the rim.
@@ -114,12 +121,12 @@ function _installResinGlowShader(material) {
         float resinFilter = corePool * 0.92 + rimFilter;
         totalEmissiveRadiance += emissive * uScrollGlow * resinFilter;
       `
-    );
+      );
 
     material.userData.scrollGlowUniform = shader.uniforms.uScrollGlow;
   };
 
-  material.customProgramCacheKey = () => "sidekick_scrollball_resin_v3";
+  material.customProgramCacheKey = () => "sidekick_scrollball_resin_v4";
 }
 
 function createLedCoreMaterial() {

@@ -289,6 +289,7 @@ export class CameraRig {
       this.center[2] + effectiveRadius * Math.cos(s.theta)
     );
 
+    const wasSettled = s.isSettled;
     s.isSettled =
       Math.abs(s.thetaVelocity) < SETTLE_VELOCITY_EPS &&
       Math.abs(s.theta - s.thetaTarget) < SETTLE_VALUE_EPS &&
@@ -325,7 +326,7 @@ export class CameraRig {
     this.parallax.getOffset(this.camera, _parallaxOffset);
     this.camera.position.add(_parallaxOffset);
 
-    if (s.isSettled) {
+    if (s.isSettled && !wasSettled) {
       this.scrollAdvance?.notifySettled?.();
     }
   }

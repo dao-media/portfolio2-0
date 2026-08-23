@@ -40,6 +40,7 @@ const MODEL_URL = "/assets/models/pc-source/pc-from-source.glb";
 export const desktopVignetteMeta = {
   name: "Retro Desktop",
   tint: 0x7ad0ff,
+  neonColors: ["#00e5ff", "#7cff6b"],
   desc: "MySpace profile on the CRT — click the monitor to zoom in and boot."
 };
 
@@ -59,6 +60,7 @@ export class DesktopVignette {
     this.introGate = deps.introGate ?? null;
     this.getCamera = deps.getCamera ?? null;
     this.renderer = deps.renderer ?? null;
+    this.loadingManager = deps.loadingManager ?? null;
     this.reducedMotion = deps.reducedMotion ?? false;
     this._modelLoadStarted = false;
     this.interactives = [];
@@ -176,7 +178,7 @@ export class DesktopVignette {
   }
 
   async _loadModel() {
-    const loader = new GLTFLoader();
+    const loader = new GLTFLoader(this.loadingManager ?? undefined);
     try {
       const gltf = await loader.loadAsync(MODEL_URL);
       this._pendingScene = gltf.scene;

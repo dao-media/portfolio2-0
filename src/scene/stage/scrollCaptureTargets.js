@@ -24,7 +24,9 @@ export const SCROLL_CAPTURE_MESH_IDS = {
   /** CRT monitor face — blocks turntable scroll while zoomed; wheel scrolls MySpace. */
   finalPcScreen: "final-pc-screen",
   /** Sidekick body — click target only. Does NOT capture wheel (too large a hit area). */
-  sidekick: "sidekick-phone"
+  sidekick: "sidekick-phone",
+  /** Travel pack + T-rex — click opens the pack. Does NOT capture wheel. */
+  travelPack: "travel-pack"
 };
 
 /** Parallax damp-zone ids (registered via createParallaxDampZones). */

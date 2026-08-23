@@ -284,8 +284,21 @@ body {
   z-index: 5;
 }
 
+.fader.is-gating {
+  pointer-events: auto;
+}
+
 .fader.gone {
   opacity: 0;
+  pointer-events: none;
+}
+
+.fader.gone .fader__xp-bar {
+  display: none;
+}
+
+.fader__xp-bar {
+  top: 50%;
 }
 
 .myspace-panel {

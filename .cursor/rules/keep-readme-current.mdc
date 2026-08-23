@@ -1,0 +1,25 @@
+---
+description: Keep README.md as the living source of truth whenever the stage, camera, neon, boot gate, scripts, or stack change.
+alwaysApply: true
+---
+
+# Keep README.md current
+
+`README.md` is the canonical project document. `docs/PROJECT.md` is only a pointer — do not put new facts there.
+
+When a change affects any of the following, **update `README.md` in the same turn** (constants, file paths, scripts, stop count, knobs, landmines):
+
+- Tech stack / `package.json` / Vite pages
+- Camera rig, ring layout, scroll, parallax, intro drop
+- Lighting, post stack (bloom / grain), neon tubes / fog bake
+- Vignettes, GLB paths, screen pipelines (XP / MySpace / SMS)
+- Load / boot gate, interaction lock
+- npm or Python scripts, asset pipeline, Git LFS
+- Dev probes (`window.__stage…`)
+
+Rules:
+
+- Describe **what is running**, not dead prototypes.
+- Prefer numbers copied from `src/scene/stage/constants.js` and the owning module — do not invent tunables.
+- If you rename a file or constant, grep README and fix every mention.
+- Bump the **Last verified** date at the top of README when you edit it.

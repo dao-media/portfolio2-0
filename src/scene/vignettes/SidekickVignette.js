@@ -18,8 +18,10 @@ import { playSidekickClose, playSidekickOpen, preloadSidekickSfx } from "../../a
 import { SidekickSmsScreen } from "../../ui/sidekickSms/SidekickSmsScreen.js";
 import {
   assertSidekickChassisMaterials,
-  ownMeshMaterial,
-  ownTexture
+  debugSidekickKeypad,
+  ensureSidekickKeypadMaterials,
+  ownTexture,
+  repairSidekickKeypadMaterials
 } from "./gltfMaterialOwnership.js";
 import "./sidekickMotionEasing.js";
 
@@ -182,6 +184,7 @@ function isSidekickDisplayClosed(progress) {
 export const sidekickVignetteMeta = {
   name: "Sidekick",
   tint: 0xc9a0ff,
+  neonColors: ["#ff2d95", "#7b2dff", "#00e5ff"],
   desc: "Tap the Sidekick — the screen swivels up and around into place."
 };
 
@@ -206,6 +209,7 @@ export class SidekickVignette {
     this.onAligned = deps.onAligned ?? null;
     this.onRequestClose = deps.onRequestClose ?? null;
     this.introGate = deps.introGate ?? null;
+    this.loadingManager = deps.loadingManager ?? null;
     this.reducedMotion = deps.reducedMotion ?? false;
     this._modelLoadStarted = false;
 
@@ -284,7 +288,7 @@ export class SidekickVignette {
   }
 
   async _loadModel() {
-    const loader = new GLTFLoader();
+    const loader = new GLTFLoader(this.loadingManager ?? undefined);
     try {
       const gltf = await loader.loadAsync(MODEL_URL);
       this._pendingScene = gltf.scene;
@@ -321,6 +325,10 @@ export class SidekickVignette {
     });
 
     this.phoneRoot = this.sidekickRoot.getObjectByName(PHONE_ROOT_NAME);
+    // Split phong3 before any early-return or cover/reveal mutation. The GLB
+    // authors Buttons + transparentCover on the same alpha-0 MASK material.
+    if (this.phoneRoot) repairSidekickKeypadMaterials(this.phoneRoot);
+
     this.swivel = this.phoneRoot?.getObjectByName(SWIVEL_NODE_NAME) ?? null;
     this.slideNode = this.swivel?.getObjectByName(SLIDE_NODE_NAME) ?? this.swivel;
     this.screenMesh = this._findScreenMesh(this.sidekickRoot);
@@ -333,6 +341,7 @@ export class SidekickVignette {
     await yieldFrame();
 
     this._hideChassisRigMeshes();
+    ensureSidekickKeypadMaterials(this.phoneRoot);
     this.scrollballLed = SidekickScrollballLed.attach(this.phoneRoot, {
       reducedMotion: this.reducedMotion
     });
@@ -341,14 +350,6 @@ export class SidekickVignette {
     this._screenFrame = this.slideNode.getObjectByName(SCREEN_FRAME_NAME);
     this._displayCover = this.slideNode.getObjectByName("transparentCover");
     if (this._displayCover?.isMesh) {
-      // CRITICAL: transparentCover shares phong3 with the physical Buttons mesh.
-      // Mutating the shared material makes the keypad vanish. Own a private copy.
-      const coverMat = ownMeshMaterial(this._displayCover);
-      const mat = Array.isArray(coverMat) ? coverMat[0] : coverMat;
-      if (mat) {
-        mat.depthWrite = false;
-        mat.transparent = true;
-      }
       this._coverAuthoredX = this._displayCover.rotation.x;
     }
 
@@ -366,13 +367,14 @@ export class SidekickVignette {
     this._collectHitMeshes();
     this._registerScrollCapture();
     this._configureKeyboardLabels();
-    assertSidekickChassisMaterials(this.phoneRoot);
-    this._aligned = true;
-    preloadSidekickSfx();
-
     if (revealHidden) {
       hideGroupForReveal(this.sidekickRoot);
     }
+    // Reveal fade + label swap must not put Buttons back on phong3.
+    ensureSidekickKeypadMaterials(this.phoneRoot);
+    assertSidekickChassisMaterials(this.phoneRoot);
+    this._aligned = true;
+    preloadSidekickSfx();
 
     this.onAligned?.();
 
@@ -745,12 +747,9 @@ export class SidekickVignette {
   }
 
   _collectHitMeshes() {
-    this.hitMeshes = [];
-    this.phoneRoot?.traverse((obj) => {
-      if (obj.isMesh && obj.visible) {
-        this.hitMeshes.push(obj);
-      }
-    });
+    // One root + recursive raycast — listing every leaf made wheel hover raycasts
+    // stutter the turntable whenever the cursor was near the phone.
+    this.hitMeshes = this.phoneRoot ? [this.phoneRoot] : [];
   }
 
   _registerScrollCapture() {
@@ -1057,7 +1056,12 @@ export class SidekickVignette {
 
   update(time) {
     if (!this._aligned || !this.sidekickRoot) return;
+    ensureSidekickKeypadMaterials(this.phoneRoot);
     this.scrollballLed?.update(time);
+  }
+
+  debugKeypad() {
+    return debugSidekickKeypad(this.phoneRoot);
   }
 
   _findScreenMesh(root) {

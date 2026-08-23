@@ -11,7 +11,8 @@
     "test:cursor": "node scripts/water-cursor-stress.mjs",
     "test:scroll": "node scripts/stage-scroll-stress.mjs",
     "test:parallax": "node scripts/stage-parallax-stress.mjs",
-    "test:motion": "npm run test:cursor && npm run test:scroll && npm run test:parallax"
+    "test:sidekick": "node scripts/sidekick-keypad-stress.mjs",
+    "test:motion": "npm run test:cursor && npm run test:scroll && npm run test:parallax && npm run test:sidekick"
   },
   "devDependencies": {
     "vite": "^6.3.5"
@@ -19,6 +20,8 @@
   "dependencies": {
     "gsap": "^3.15.0",
     "html-to-image": "^1.11.13",
-    "three": "^0.172.0"
+    "postprocessing": "^6.39.4",
+    "three": "^0.172.0",
+    "three-custom-shader-material": "^6.4.0"
   }
 }

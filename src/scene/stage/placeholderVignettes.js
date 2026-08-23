@@ -5,6 +5,7 @@ import { STAGE_LABEL_RADIUS } from "./constants.js";
 export const monolithVignette = {
   name: "Monolith",
   tint: 0xffb37a,
+  neonColors: ["#ffb37a", "#ff5c33"],
   desc: "Single subject, hard key light. The arrival vignette.",
   build(group) {
     buildPcSceneBlockout(group, { tint: 0xa8a8a8 });
@@ -23,10 +24,30 @@ export const orbitVignette = {
   }
 };
 
+export const cubeVignette = {
+  name: "Cube",
+  tint: 0x8ecae6,
+  desc: "Placeholder stop — a cube until this vignette is built.",
+  build(group) {
+    const size = 1.8;
+    const cube = new THREE.Mesh(
+      new THREE.BoxGeometry(size, size, size),
+      new THREE.MeshStandardMaterial({
+        color: 0xc8c4ba,
+        roughness: 0.45,
+        metalness: 0.12
+      })
+    );
+    cube.name = "cube-placeholder";
+    cube.position.y = size / 2;
+    group.add(cube);
+  }
+};
+
 export function addDegreeLabels(world) {
   for (let d = 0; d < 360; d += 15) {
     const angle = THREE.MathUtils.degToRad(d);
-    const major = d % 120 === 0;
+    const major = d % 90 === 0;
     const label = makeDegreeLabel(`${d}°`);
     label.position.set(Math.sin(angle) * STAGE_LABEL_RADIUS, 0.02, Math.cos(angle) * STAGE_LABEL_RADIUS);
     label.rotation.order = "YXZ";

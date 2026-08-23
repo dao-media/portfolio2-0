@@ -4,7 +4,13 @@ import { HUDController } from "../ui/HUDController.js";
 import { DesktopVignette, desktopVignetteMeta } from "./vignettes/DesktopVignette.js";
 import { monolithVignette, addDegreeLabels } from "./stage/placeholderVignettes.js";
 import { SidekickVignette, sidekickVignetteMeta } from "./vignettes/SidekickVignette.js";
+import { TravelVignette, travelVignetteMeta } from "./vignettes/TravelVignette.js";
 import { PostPass } from "./stage/PostPass.js";
+import { createStageLoadGate } from "./stage/StageLoadGate.js";
+import { StageBootSequence } from "../ui/xpBoot/StageBootSequence.js";
+import { bakeFogAtlas } from "./neon/bakeFogAtlas.js";
+import { createFogMaterial } from "./neon/createFogMaterial.js";
+import { NeonSystem } from "./neon/NeonSystem.js";
 import { configureSpotShadow } from "./stage/configureSpotShadow.js";
 import { LiveStageEnvironment } from "./stage/LiveStageEnvironment.js";
 import { buildStageStudioRoom } from "./stage/StageStudioRoom.js";
@@ -45,7 +51,8 @@ import {
   placeOnStage,
   STAGE_RADIUS,
   STAGE_BG,
-  EXPOSURE
+  EXPOSURE,
+  BOOT_MIN_MS
 } from "./stage/constants.js";
 import {
   normalizeWheelDelta,
@@ -60,6 +67,7 @@ import {
 import { INTRO_TRACK_DESCENT } from "./stage/stageCameraTrack.js";
 import { setGroupRenderOpacity } from "./stage/stageModelReveal.js";
 import { STAGE_FLOOR_Y, measureBlockoutReferenceBounds, measureSceneBounds, snapAllGroupsToFloor, snapGroupToFloor } from "./vignettes/pcSceneBlockout.js";
+import { preloadPcTextures, setPcTextureLoadingManager } from "./vignettes/pcProductionMaterials.js";
 import { WaterCursor } from "../cursor/WaterCursor.js";
 import { CameraRig } from "./camera/CameraRig.js";
 import { buildVignetteRing } from "./camera/ringLayout.js";
@@ -92,11 +100,18 @@ export class StageExperience {
     this.pixelRatio = Math.min(window.devicePixelRatio || 1, this.isCoarse ? 1.5 : 1.75);
 
     this.hud = new HUDController();
+    this.loadingManager = new THREE.LoadingManager();
+    this.bootSequence = new StageBootSequence({
+      fader: document.getElementById("fader"),
+      hud: this.hud
+    });
+    setPcTextureLoadingManager(this.loadingManager);
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
     this.animFns = [];
     this.current = 0;
-    this.locked = false;
+    this.locked = true;
+    this._interactionReady = false;
     this.introComplete = false;
     this.introRig = { descent: INTRO_TRACK_DESCENT };
     this._introTrackT = 0;
@@ -180,6 +195,7 @@ export class StageExperience {
     this._buildLighting();
     this.liveEnv = new LiveStageEnvironment(this.renderer);
     this.vignettes = this._buildVignettes();
+    this._mountNeonSystem();
     this._initCameraRig();
     this._updatePlaceholderVisibility(0);
 
@@ -190,8 +206,12 @@ export class StageExperience {
     this.post = new PostPass(
       this.renderer,
       this.pixelRatio,
-      this.reducedMotion ? 0.03 : 0.05
+      this.reducedMotion ? 0.03 : 0.05,
+      this.camera,
+      { scene: this.scene, bloom: !this.reducedMotion }
     );
+
+    this._initLoadGate();
 
     // Cursor waits until the pageload drop is done — init cost hitching the open beat.
     this.waterCursor = null;
@@ -335,6 +355,46 @@ export class StageExperience {
     this.spotTarget.position.copy(_SPOT_AIM_LOCAL);
   }
 
+  /**
+   * Per-stop neon tube + fog card. One PointLight follows the front-most tube
+   * (camera travels; vignettes stay put).
+   */
+  _mountNeonSystem() {
+    this.fogMaterial = createFogMaterial({ reducedMotion: this.reducedMotion });
+    this.neon = new NeonSystem({
+      scene: this.scene,
+      camera: this.camera,
+      fogMaterial: this.fogMaterial
+    });
+    this.vignettes.forEach((vig) => this.neon.attach(vig));
+  }
+
+  /** Shared LoadingManager → XP fader. Fog bake + min duration before input. */
+  _initLoadGate() {
+    this.loadGate = createStageLoadGate({
+      manager: this.loadingManager,
+      bootSequence: this.bootSequence,
+      renderer: this.renderer,
+      scene: this.scene,
+      camera: this.camera,
+      post: this.post,
+      fogMaterial: this.fogMaterial,
+      bakeFogAtlas,
+      bootMinMs: this.reducedMotion ? 400 : BOOT_MIN_MS,
+      onReady: () => this._enableInteraction()
+    });
+
+    void preloadPcTextures();
+    this._startIntroModelFetches();
+    this.loadGate.finishSeeding();
+  }
+
+  _enableInteraction() {
+    this.locked = false;
+    this._interactionReady = true;
+    this._ensureWaterCursor();
+  }
+
   /** Sync HUD / active vignette when the spring camera changes target index. */
   _syncCameraRigIndex() {
     if (!this.cameraRig) return;
@@ -364,6 +424,10 @@ export class StageExperience {
     const sidekick = this.vignettes[2]?.instance;
     if (sidekick) {
       sidekick.syncToCameraZoom?.(zoomed && index === 2);
+    }
+    const travel = this.vignettes[3]?.instance;
+    if (travel) {
+      travel.syncToCameraZoom?.(zoomed && index === 3);
     }
 
     if (zoomed === this._lastCameraZoomed) return;
@@ -436,7 +500,8 @@ export class StageExperience {
       swiveling: Boolean(sidekick?._swivelTween),
       sidekickRootPosition: sidekick?.sidekickRoot?.position?.toArray?.() ?? null,
       restPoseReady: sidekick?._restPoseReady ?? false,
-      sidekickScale: sidekick?.sidekickRoot?.scale?.x ?? null
+      sidekickScale: sidekick?.sidekickRoot?.scale?.x ?? null,
+      keypad: sidekick?.debugKeypad?.() ?? null
     };
   }
 
@@ -483,7 +548,7 @@ export class StageExperience {
   }
 
   _ensureWaterCursor() {
-    if (this.waterCursor || this.reducedMotion) return;
+    if (this.waterCursor || this.reducedMotion || !this._interactionReady) return;
     this.waterCursor = WaterCursor.tryCreate({
       renderer: this.renderer,
       ticker: gsap.ticker
@@ -533,6 +598,7 @@ export class StageExperience {
     this._introModelsFetchStarted = true;
     this.vignettes[1]?.instance?.startModelLoad?.();
     this.vignettes[2]?.instance?.startModelLoad?.();
+    this.vignettes[3]?.instance?.startModelLoad?.();
   }
 
   /** Texture decode during descent — must not wait for hold flags or motion complete. */
@@ -590,6 +656,7 @@ export class StageExperience {
 
     const desktop = this.vignettes[1]?.instance;
     const sidekick = this.vignettes[2]?.instance;
+    const travel = this.vignettes[3]?.instance;
     const yieldFrame = (frames) => this._yieldFrame(frames);
     let stillHolding = false;
 
@@ -612,7 +679,15 @@ export class StageExperience {
       });
       await yieldFrame();
 
-      stillHolding = Boolean(desktop?._holdForIntro || sidekick?._holdForIntro);
+      await travel?.integrateAfterIntro?.({
+        yieldFrame,
+        revealHidden: true
+      });
+      await yieldFrame();
+
+      stillHolding = Boolean(
+        desktop?._holdForIntro || sidekick?._holdForIntro || travel?._holdForIntro
+      );
 
       if (this._pendingFloorSnap) {
         this._snapAllVignettesToFloor(true);
@@ -633,6 +708,29 @@ export class StageExperience {
     window.setTimeout(() => {
       this._flushIntroDeferredWork();
     }, INTRO_HEAVY_EFFECTS_DELAY_MS);
+  }
+
+  _tickNeon(time) {
+    if (this.fogMaterial?.uniforms?.uTime) {
+      this.fogMaterial.uniforms.uTime.value = time;
+    }
+    if (!this.neon || !this.cameraRig) return;
+    this.neon.update(this.cameraRig.state.theta, this.vignettes.length);
+  }
+
+  debugNeon() {
+    return {
+      interactionReady: this._interactionReady,
+      locked: this.locked,
+      lightIntensity: this.neon?.light?.intensity ?? 0,
+      lightColor: this.neon?.light?.color?.getHexString?.() ?? null,
+      lightHeight: this.neon?.light?.position?.y ?? null,
+      tubes: this.vignettes.map((vig) => ({
+        name: vig.def.name,
+        colors: vig.def.neonColors ?? null,
+        emissive: vig.tube?.material?.emissiveIntensity ?? 0
+      }))
+    };
   }
 
   /** CRT env capture — runs well after models are visible; never on the settle frame. */
@@ -665,11 +763,13 @@ export class StageExperience {
     }
   }
 
-  /** Fade PC + Sidekick in after post-settle integration mounts them hidden. */
+  /** Fade GLB vignettes in after post-settle integration mounts them hidden. */
   _tickModelReveal(dt) {
     const desktopRoot = this.vignettes[1]?.instance?.pcRoot;
     const sidekickRoot = this.vignettes[2]?.instance?.sidekickRoot;
-    if (!desktopRoot && !sidekickRoot) return;
+    const travelPack = this.vignettes[3]?.instance?.packRoot;
+    const travelRex = this.vignettes[3]?.instance?.rexRoot;
+    if (!desktopRoot && !sidekickRoot && !travelPack && !travelRex) return;
 
     // Only reveal once intro motion is done and at least one model is mounted.
     if (!this._introMotionComplete) return;
@@ -685,6 +785,8 @@ export class StageExperience {
     const opacity = this._modelRevealOpacity;
     if (desktopRoot) setGroupRenderOpacity(desktopRoot, opacity);
     if (sidekickRoot) setGroupRenderOpacity(sidekickRoot, opacity);
+    if (travelPack) setGroupRenderOpacity(travelPack, opacity);
+    if (travelRex) setGroupRenderOpacity(travelRex, opacity);
   }
 
   _tickDesktopRestAnchor() {
@@ -697,7 +799,7 @@ export class StageExperience {
   }
 
   _buildVignettes() {
-    const defs = [monolithVignette, desktopVignetteMeta, sidekickVignetteMeta];
+    const defs = [monolithVignette, desktopVignetteMeta, sidekickVignetteMeta, travelVignetteMeta];
     const instances = [];
 
     defs.forEach((def, index) => {
@@ -719,6 +821,7 @@ export class StageExperience {
           liveEnv: this.liveEnv,
           introGate: () => !this.introComplete,
           deferModelLoad: !this.reducedMotion,
+          loadingManager: this.loadingManager,
           getCamera: () => this.camera,
           reducedMotion: this.reducedMotion,
           onAligned: () => this._snapAllVignettesToFloor()
@@ -731,6 +834,7 @@ export class StageExperience {
           reducedMotion: this.reducedMotion,
           introGate: () => !this.introComplete,
           deferModelLoad: !this.reducedMotion,
+          loadingManager: this.loadingManager,
           onRequestClose: () => {
             if (this.cameraRig?.state?.index !== 2) return;
             if (!this.cameraRig.state.isZoomed) return;
@@ -747,6 +851,17 @@ export class StageExperience {
           }
         });
         instances.push({ def, group, angle, stageDeg, instance: sidekick });
+      } else if (index === 3) {
+        const travel = new TravelVignette(group, {
+          vignetteIndex: index,
+          scrollCapture: this.scrollCapture,
+          reducedMotion: this.reducedMotion,
+          introGate: () => !this.introComplete,
+          deferModelLoad: !this.reducedMotion,
+          loadingManager: this.loadingManager,
+          onAligned: () => this._snapAllVignettesToFloor()
+        });
+        instances.push({ def, group, angle, stageDeg, instance: travel });
       } else {
         def.build(group, this.animFns);
         snapGroupToFloor(group);
@@ -903,7 +1018,7 @@ export class StageExperience {
   }
 
   goTo(target, _dirHint, _options = {}) {
-    if (!this.cameraRig || !this.introComplete) return;
+    if (!this.cameraRig || !this.introComplete || this.locked) return;
     const n = this.vignettes.length;
     const index = ((target % n) + n) % n;
     if (index === this.cameraRig.state.index && !this.cameraRig.state.isZoomed) return;
@@ -919,7 +1034,7 @@ export class StageExperience {
    */
   advance(steps, _options = {}) {
     if (!steps || !this.cameraRig) return;
-    if (!this.introComplete) return;
+    if (!this.introComplete || this.locked) return;
     if (!this.cameraRig.state.isSettled) return;
     this._prepareForVignetteTransition(this.current);
     this.cameraRig.advance(Math.sign(steps));
@@ -930,10 +1045,21 @@ export class StageExperience {
 
   _bindInput() {
     this._onWheel = (event) => {
+      if (this.locked) {
+        event.preventDefault();
+        return;
+      }
       if (event._stageWheelHandled) return;
       event._stageWheelHandled = true;
 
-      this._updateHoverFromClient(event.clientX, event.clientY);
+      // Trackpads fire dozens of wheel events. Full mesh raycasts (Sidekick GLB)
+      // on every tick stutter ring travel — only refresh mesh hover while capture
+      // is already engaged (zoomed CRT). Pointermove keeps hover fresh otherwise.
+      if (this.captureBlend > SCROLL_CAPTURE_WHEEL_ON) {
+        this._updateHoverFromClient(event.clientX, event.clientY);
+      } else {
+        this.scrollCapture.updateDomHover(event.clientX, event.clientY);
+      }
 
       const blend = this.captureBlend;
 
@@ -1100,6 +1226,7 @@ export class StageExperience {
       this._pcScreenHovered =
         this.scrollCapture.activeMeshId === SCROLL_CAPTURE_MESH_IDS.finalPcScreen;
       const onSidekick = this.scrollCapture.activeMeshId === SCROLL_CAPTURE_MESH_IDS.sidekick;
+      const onTravel = this.scrollCapture.activeMeshId === SCROLL_CAPTURE_MESH_IDS.travelPack;
       if (!this.waterCursor) {
         const cursorMode = hovering
           ? "pointer"
@@ -1107,7 +1234,7 @@ export class StageExperience {
             ? this.focusBlend > 0.02
               ? "pointer"
               : "zoom-in"
-            : onSidekick
+            : onSidekick || onTravel
               ? "pointer"
               : "default";
         this.canvas.style.cursor = cursorMode === "default" ? "default" : cursorMode;
@@ -1170,6 +1297,9 @@ export class StageExperience {
     if (meshId === SCROLL_CAPTURE_MESH_IDS.sidekick) {
       return false;
     }
+    if (meshId === SCROLL_CAPTURE_MESH_IDS.travelPack) {
+      return false;
+    }
 
     return Boolean(this.scrollCapture.activeDomKey);
   }
@@ -1189,6 +1319,7 @@ export class StageExperience {
   }
 
   _onVignetteClick = (event) => {
+    if (this.locked) return;
     if (this._ignoreNextVignetteClick) {
       this._ignoreNextVignetteClick = false;
       event.stopImmediatePropagation();
@@ -1197,25 +1328,34 @@ export class StageExperience {
     this.vignetteClick?.handleClick?.(event);
   };
 
-  /** Sidekick open/close + camera zoom as one toggle — never split across pointerdown/click. */
-  _toggleSidekickZoom() {
+  /** Sidekick / travel pack open-close + camera zoom as one toggle. */
+  _toggleIndexedZoom(index) {
     const rig = this.cameraRig;
-    if (!rig || rig.state.index !== 2) return;
-
-    // Slide open/close is driven solely by _syncCameraRigZoom when isZoomed flips.
+    if (!rig || rig.state.index !== index) return;
     if (rig.state.isZoomed) {
       rig.zoomOut();
     } else {
-      rig.zoomIn(2);
+      rig.zoomIn(index);
     }
     this._syncCameraRigZoom();
   }
 
+  _toggleSidekickZoom() {
+    this._toggleIndexedZoom(2);
+  }
+
+  _toggleTravelZoom() {
+    this._toggleIndexedZoom(3);
+  }
+
   _onPointerDown = (event) => {
+    if (this.locked) return;
     this._updateHoverFromClient(event.clientX, event.clientY);
 
     const onSidekick =
       this.scrollCapture.activeMeshId === SCROLL_CAPTURE_MESH_IDS.sidekick;
+    const onTravel =
+      this.scrollCapture.activeMeshId === SCROLL_CAPTURE_MESH_IDS.travelPack;
     const onDesktop =
       this.scrollCapture.activeMeshId === SCROLL_CAPTURE_MESH_IDS.finalPcScreen;
     const rigZoomed = Boolean(this.cameraRig?.state?.isZoomed);
@@ -1235,6 +1375,14 @@ export class StageExperience {
         return;
       }
       this._toggleSidekickZoom();
+      this._ignoreNextVignetteClick = true;
+      event.stopImmediatePropagation();
+      return;
+    }
+
+    if (onTravel && this.cameraRig?.state?.index === 3) {
+      this.waterCursor?.setPressed(true);
+      this._toggleTravelZoom();
       this._ignoreNextVignetteClick = true;
       event.stopImmediatePropagation();
       return;
@@ -1317,11 +1465,7 @@ export class StageExperience {
   }
 
   _runIntro() {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        this.ui.fader?.classList.add("gone");
-      });
-    });
+    // Fader stays until StageLoadGate dismisses it (assets + fog bake + min duration).
   }
 
   _onResize = () => {
@@ -1351,14 +1495,18 @@ export class StageExperience {
     });
 
     const sidekick = this.vignettes[2]?.instance;
+    const travel = this.vignettes[3]?.instance;
     const active = this._getActiveInstance();
 
-    if (active !== sidekick) {
+    if (active !== sidekick && active !== travel) {
       active?.update?.(t);
     }
 
     if (sidekick?._aligned) {
       sidekick.update(t);
+    }
+    if (travel?._aligned) {
+      travel.update(t);
     }
   }
 
@@ -1422,6 +1570,7 @@ export class StageExperience {
     }
     this._tickModelReveal(dt);
     this._tickPostGrainStrength(dt);
+    this._tickNeon(t);
 
     if (this.ui.readout) {
       const deg = this._getDisplayStageDegrees();

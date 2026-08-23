@@ -78,6 +78,49 @@ export const SPOTLIGHT_BLOOM = {
   radius: 0.42
 };
 
+/**
+ * Neon fog lives on its own layer so the POV spot cannot wash it grey.
+ * SpotlightBloomPass (unused) occupies layer 1.
+ */
+export const NEON_FOG_LAYER = 2;
+
+/** Whole-strip emissive — must sit above bloom luminanceThreshold. */
+export const NEON_MAX_EMISSIVE = 3.0;
+/** Physical PointLight intensity. If the fog halos: raise height, then lower this. */
+export const NEON_MAX_LIGHT = 10.0;
+export const NEON_LIGHT_HEIGHT = 1.0;
+export const NEON_LIGHT_DISTANCE = 8;
+export const NEON_LIGHT_DECAY = 2;
+
+/** Bloom in the live composer, ahead of grain. Threshold 1 = only the active tube. */
+export const NEON_BLOOM = {
+  luminanceThreshold: 1.0,
+  luminanceSmoothing: 0.2,
+  intensity: 1.2,
+  radius: 0.7
+};
+
+/** Baked fog atlas — 8×8 tiles, density in .r. Keep N/TILE/COLS/ROWS in lockstep with the runtime shader. */
+export const FOG_ATLAS = {
+  N: 64,
+  TILE: 256,
+  COLS: 8,
+  ROWS: 8
+};
+
+export const NEON_FOG = {
+  planeSize: 10,
+  y: 0.05,
+  albedo: 0.75,
+  opacity: 0.85,
+  speed: 1.0,
+  uScale: 3.0,
+  uLoopRadius: 1.5
+};
+
+/** Page-load gate: assets + fog bake cannot beat this wall-clock minimum. */
+export const BOOT_MIN_MS = 2600;
+
 /** Ignore normalized deltas below this (trackpad noise). */
 export const WHEEL_MIN_DELTA = 1;
 
@@ -168,7 +211,7 @@ export function vignetteAngle(index, total) {
   return index * ((Math.PI * 2) / total);
 }
 
-/** Ring label / readout degrees for vignette stops (0°, 120°, 240°, …). */
+/** Ring label / readout degrees for vignette stops (0°, 90°, 180°, 270°, …). */
 export function vignetteStageDegrees(index, total) {
   return index * (360 / total);
 }
