@@ -1,11 +1,12 @@
 import * as THREE from "three";
 import gsap from "gsap";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { createGltfLoader } from "../loaders/createGltfLoader.js";
 import { SCROLL_CAPTURE_MESH_IDS } from "../stage/scrollCaptureTargets.js";
 import {
   buildPcSceneBlockout,
   findBlockoutPart,
-  measureSceneBounds
+  measureSceneBounds,
+  sceneMonitorHeightM
 } from "./pcSceneBlockout.js";
 import { LOOK } from "../stage/constants.js";
 import {
@@ -13,15 +14,18 @@ import {
   ensureSidekickScreenMapLocked
 } from "./sidekickScreenTexture.js";
 import { SidekickScrollballLed } from "./SidekickScrollballLed.js";
-import { hideGroupForReveal } from "../stage/stageModelReveal.js";
+import { hideGroupForReveal, holdRootOffCamera, releaseRootToCamera } from "../stage/stageModelReveal.js";
+import { spanFrame } from "../stage/frameBudget.js";
 import { playSidekickClose, playSidekickOpen, preloadSidekickSfx } from "../../audio/siteAudio.js";
 import { SidekickSmsScreen } from "../../ui/sidekickSms/SidekickSmsScreen.js";
 import {
+  applySidekickFusedButtonAtlas,
   assertSidekickChassisMaterials,
   debugSidekickKeypad,
   ensureSidekickKeypadMaterials,
   ownTexture,
-  repairSidekickKeypadMaterials
+  repairSidekickKeypadMaterials,
+  SIDEKICK_FUSED_BUTTON_MESH_NAMES
 } from "./gltfMaterialOwnership.js";
 import "./sidekickMotionEasing.js";
 
@@ -45,8 +49,8 @@ const OPEN_SFX_LEAD = 0.2;
 const CLOSE_SFX_LEAD = 0.04;
 const SWIVEL_CLOSED_SLIDE_Z = -Math.PI;
 
-/** Black-bg / colored-glyph label atlases — deck + chassis side-button icons. */
-const KEYBOARD_LABEL_MESHES = new Set(["KeyboardText", "sideButtons"]);
+/** Deck glyph cutout only. CALL/END/D-pad (`sideButtons`) is a fused atlas body. */
+const KEYBOARD_LABEL_MESHES = new Set(["KeyboardText"]);
 /** Deck atlas only — sits under the folded lid; hide while closed. */
 const DECK_LABEL_MESHES = new Set(["KeyboardText"]);
 
@@ -98,6 +102,16 @@ function applySidekickLabelMaterial(mesh) {
   const prior = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
   if (!prior?.map) return;
 
+  // Idempotent — keep the owned cutout if already applied (reveal/ensure must not re-strip).
+  if (
+    prior.userData?.sidekickLabelProtected &&
+    prior.isMeshBasicMaterial &&
+    prior.map &&
+    mesh.userData.sidekickLabelProtected
+  ) {
+    return;
+  }
+
   // Own copies so luminance→alpha / MeshBasic swap cannot touch shared GLTF data.
   const map = ownTexture(prior.map);
   ensureLabelTextureAlpha(map);
@@ -116,9 +130,11 @@ function applySidekickLabelMaterial(mesh) {
   mat.polygonOffset = true;
   mat.polygonOffsetFactor = -2;
   mat.polygonOffsetUnits = -2;
+  mat.userData.sidekickLabelProtected = true;
 
   // Replace without disposing `prior` — other meshes may still reference it.
   mesh.material = mat;
+  mesh.userData.sidekickLabelProtected = true;
   mesh.renderOrder = 2;
   mesh.castShadow = false;
 }
@@ -128,8 +144,18 @@ const _TILT_AXIS = new THREE.Vector3(1, 0, 0);
 
 /** Group +Z nudge toward the fixed POV — keep modest so the phone stays on the stop. */
 const SIDEKICK_POV_FORWARD = 2.4;
-/** Closed phone target width as a fraction of the viewport. */
-const REST_SCREEN_WIDTH = 0.22;
+/**
+ * Danger Sidekick II closed body — Phone Scoop: 130 × 66 × 22.1 mm.
+ * Height is the long axis when closed (5.12″).
+ */
+const SIDEKICK_II_HEIGHT_M = 0.13;
+/** Typical 17″ CRT chassis height (~16.4″ / 416 mm) — Desktop blockout monitor key. */
+const CRT_17_CHASSIS_HEIGHT_M = 0.416;
+/**
+ * Rest = zoom model scale. Close-up is camera dolly only — do not blow the phone
+ * up with viewport-fraction hero fits (that made it larger than the CRT).
+ */
+const ZOOM_SCALE_MULT = 1;
 /** Keyboard glyph planes stay hidden until the lid has cleared the deck. */
 const KEYBOARD_LABEL_REVEAL = 0.32;
 
@@ -184,7 +210,7 @@ function isSidekickDisplayClosed(progress) {
 export const sidekickVignetteMeta = {
   name: "Sidekick",
   tint: 0xc9a0ff,
-  neonColors: ["#ff2d95", "#7b2dff", "#00e5ff"],
+  neonColors: ["#8c2dff", "#ff2d95", "#00e5ff"],
   desc: "Tap the Sidekick — the screen swivels up and around into place."
 };
 
@@ -212,6 +238,7 @@ export class SidekickVignette {
     this.loadingManager = deps.loadingManager ?? null;
     this.reducedMotion = deps.reducedMotion ?? false;
     this._modelLoadStarted = false;
+    this._modelLoadSettled = false;
 
     this.sidekickRoot = null;
     this.phoneRoot = null;
@@ -235,6 +262,7 @@ export class SidekickVignette {
     this._swivelScratchQuat = new THREE.Quaternion();
     this._mechanicalBaseline = { position: new THREE.Vector3(), scale: 1 };
     this._restHeroPose = { position: new THREE.Vector3(), scale: 1 };
+    this._zoomHeroScale = 1;
     this._restPoseReady = false;
 
     this.isOpen = false;
@@ -258,9 +286,12 @@ export class SidekickVignette {
   }
 
   /** Begin GLB fetch — deferred during pageload so parse doesn't hitch the open beat. */
-  startModelLoad() {
-    if (this._modelLoadStarted) return;
+  startModelLoad({ retry = false } = {}) {
+    if (this.sidekickRoot || this._pendingScene) return;
+    if (this._modelLoadStarted && !retry) return;
     this._modelLoadStarted = true;
+    this._modelLoadSettled = false;
+    this._modelLoadError = null;
     this._loadModel();
   }
 
@@ -281,27 +312,42 @@ export class SidekickVignette {
       await yieldFrame();
       spins += 1;
     }
-    if (!this._pendingScene || this.sidekickRoot) return;
+    if (!this._pendingScene || this.sidekickRoot) {
+      if (!this.sidekickRoot && this._modelLoadSettled && !this._pendingScene) {
+        this.startModelLoad({ retry: true });
+        spins = 0;
+        while (
+          !this.sidekickRoot &&
+          !this._pendingScene &&
+          this._modelLoadStarted &&
+          spins < 180
+        ) {
+          await yieldFrame();
+          spins += 1;
+        }
+      }
+      if (!this._pendingScene || this.sidekickRoot) return;
+    }
 
     this._holdForIntro = false;
     await this._commitModel({ yieldFrame, revealHidden, deferScreenTextureMs });
   }
 
   async _loadModel() {
-    const loader = new GLTFLoader(this.loadingManager ?? undefined);
+    const loader = createGltfLoader(this.loadingManager ?? undefined);
     try {
-      const gltf = await loader.loadAsync(MODEL_URL);
+      const gltf = await spanFrame("sidekick-parse", () => loader.loadAsync(MODEL_URL));
       this._pendingScene = gltf.scene;
       this._pendingScene.name = "sidekick-root";
 
-      if (this.introGate?.()) {
-        this._holdForIntro = true;
-        return;
-      }
-
-      await this._commitModel();
+      // Always park for integrateAfterIntro — fetch often finishes after intro,
+      // and a one-shot commit on this callback would hitch the first hop.
+      this._holdForIntro = true;
     } catch (error) {
+      this._modelLoadError = String(error?.message || error);
       console.warn("[SidekickVignette] Failed to load Sidekick model.", error);
+    } finally {
+      this._modelLoadSettled = true;
     }
   }
 
@@ -316,6 +362,7 @@ export class SidekickVignette {
     this._pendingScene = null;
     this._pruneSidekickScene(this.sidekickRoot);
     this.group.add(this.sidekickRoot);
+    holdRootOffCamera(this.sidekickRoot);
 
     this.sidekickRoot.traverse((obj) => {
       if (obj.isMesh) {
@@ -335,6 +382,7 @@ export class SidekickVignette {
 
     if (!this.phoneRoot || !this.swivel || !this.slideNode || !this.screenMesh) {
       console.warn("[SidekickVignette] Missing phone rig or screen mesh.");
+      releaseRootToCamera(this.sidekickRoot);
       return;
     }
 
@@ -370,8 +418,10 @@ export class SidekickVignette {
     if (revealHidden) {
       hideGroupForReveal(this.sidekickRoot);
     }
-    // Reveal fade + label swap must not put Buttons back on phong3.
+    // Reveal fade must not put Buttons back on phong3 — and must not pave labels.
     ensureSidekickKeypadMaterials(this.phoneRoot);
+    // Re-stamp labels after hide/ensure so atlases survive opacity-0 reveal.
+    this._configureKeyboardLabels();
     assertSidekickChassisMaterials(this.phoneRoot);
     this._aligned = true;
     preloadSidekickSfx();
@@ -414,11 +464,19 @@ export class SidekickVignette {
     }
   }
 
-  /** Keyboard / side-button glyph atlases — unlit cutouts so letters show on the keys. */
+  /**
+   * QWERTY glyphs are a separate cutout (`KeyboardText`).
+   * CALL/END/D-pad are one fused atlas (`sideButtons`) — opaque, print kept.
+   */
   _configureKeyboardLabels() {
     this._keyboardLabelMeshes = [];
     this.sidekickRoot?.traverse((obj) => {
-      if (!obj.isMesh || !KEYBOARD_LABEL_MESHES.has(obj.name)) return;
+      if (!obj.isMesh) return;
+      if (SIDEKICK_FUSED_BUTTON_MESH_NAMES.includes(obj.name)) {
+        applySidekickFusedButtonAtlas(obj);
+        return;
+      }
+      if (!KEYBOARD_LABEL_MESHES.has(obj.name)) return;
       applySidekickLabelMaterial(obj);
       this._keyboardLabelMeshes.push(obj);
     });
@@ -549,9 +607,8 @@ export class SidekickVignette {
   }
 
   /**
-   * Scale the phone for resting hero size — stays on the vignette stop.
-   * No camera-space lateral nudges (those shoved the model off the ring when
-   * the camera wasn't already facing this stop).
+   * Scale the phone to Sidekick II real-world height vs the Desktop CRT.
+   * Scene CRT height / 17″ chassis height × 130 mm → prop-correct on the ring.
    */
   fitRestHeroPose(camera) {
     if (!camera || !this.phoneRoot || !this._aligned) return false;
@@ -559,15 +616,36 @@ export class SidekickVignette {
     this._resetToMechanicalBaseline();
     this._applyClosedSettledPose();
 
-    const scale = this._measureViewportScale(camera, REST_SCREEN_WIDTH);
-    if (scale == null) return false;
-
     this.sidekickRoot.position.set(0, this._mechanicalBaseline.position.y, SIDEKICK_POV_FORWARD);
+    this.sidekickRoot.scale.setScalar(this._mechanicalBaseline.scale);
+    this.sidekickRoot.updateMatrixWorld(true);
+
+    _BOX.setFromObject(this.phoneRoot);
+    if (_BOX.isEmpty()) return false;
+    const height = _BOX.max.y - _BOX.min.y;
+    if (height < 1e-5) return false;
+
+    const targetHeight =
+      SIDEKICK_II_HEIGHT_M * (sceneMonitorHeightM() / CRT_17_CHASSIS_HEIGHT_M);
+    const scale =
+      this._mechanicalBaseline.scale * (targetHeight / height);
+
     this.sidekickRoot.scale.setScalar(scale);
     this.sidekickRoot.updateMatrixWorld(true);
     this._restHeroPose.position.copy(this.sidekickRoot.position);
     this._restHeroPose.scale = scale;
+    this._zoomHeroScale = scale * ZOOM_SCALE_MULT;
     this._restPoseReady = true;
+
+    if (import.meta.env.DEV) {
+      console.info("[SidekickVignette] prop scale", {
+        sidekickII_mm: SIDEKICK_II_HEIGHT_M * 1000,
+        crt17_mm: CRT_17_CHASSIS_HEIGHT_M * 1000,
+        sceneMonitorH: Number(sceneMonitorHeightM().toFixed(3)),
+        targetHeight: Number(targetHeight.toFixed(3)),
+        scale: Number(scale.toFixed(4))
+      });
+    }
     return true;
   }
 
@@ -684,7 +762,7 @@ export class SidekickVignette {
     if (ndcWidth > 1e-4) {
       scale = this._mechanicalBaseline.scale * (targetNdcWidth / ndcWidth);
     }
-    return THREE.MathUtils.clamp(scale, 0.05, 8);
+    return THREE.MathUtils.clamp(scale, 0.05, 24);
   }
 
   _applyPovForward() {
@@ -1052,7 +1130,18 @@ export class SidekickVignette {
     }
   }
 
-  updateFocus() {}
+  /**
+   * Keep prop scale while the camera dollies (zoom is camera-only).
+   * @param {THREE.PerspectiveCamera} _camera
+   * @param {number} focusBlend
+   */
+  updateFocus(_camera, focusBlend) {
+    if (!this._restPoseReady || !this.sidekickRoot) return;
+
+    const t = THREE.MathUtils.clamp(focusBlend, 0, 1);
+    const scale = THREE.MathUtils.lerp(this._restHeroPose.scale, this._zoomHeroScale, t);
+    this.sidekickRoot.scale.setScalar(scale);
+  }
 
   update(time) {
     if (!this._aligned || !this.sidekickRoot) return;

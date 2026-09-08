@@ -41,6 +41,15 @@ export const AMBIENT_INTENSITY = 0.06;
 export const HEMI_INTENSITY = 0.04;
 export const FILL_INTENSITY = 0;
 export const EXPOSURE = 1.18;
+/**
+ * Neutral RoomEnvironment IBL on `scene.environment`.
+ * The CRT cube capture must not be applied to the scene (it recolors every
+ * MeshStandard material). Travel pack / T-rex are otherwise black silhouettes
+ * against STAGE_BG — they need *some* env fill, but not key light. Spot **118**
+ * + ACES **1.18** were tuned without IBL; full-strength RoomEnvironment (1.0)
+ * washed every MeshStandard prop to glowing white. Keep this a modest fill.
+ */
+export const STAGE_ENV_INTENSITY = 0.22;
 
 /** 10 ft above the viewer's head — spotlight origin. */
 export const SPOT_HEIGHT_FT = 10;
@@ -50,6 +59,12 @@ export const SPOT_ANGLE = Math.PI / 5.2;
 export const SPOT_PENUMBRA = 0.52;
 export const SPOT_DISTANCE = 52;
 export const SPOT_DECAY = 1.35;
+
+/**
+ * DEV work raster. 1 = full DPR cap. 0.6 draws objects at 60% buffer size.
+ * Screen canvases (XP / MySpace / Sidekick SMS) are not scaled.
+ */
+export const WORK_RENDER_SCALE = 0.6;
 
 /** Real-time shadow map for the POV spot. */
 export const SPOT_SHADOW = {
@@ -69,35 +84,28 @@ export const SPOT_MASK = {
 };
 
 /**
- * Default selective bloom tuning — for SpotlightBloomPass when the lighting pass is wired up.
- * @see stage/SpotlightBloomPass.js
- */
-export const SPOTLIGHT_BLOOM = {
-  threshold: 0,
-  strength: 0.52,
-  radius: 0.42
-};
-
-/**
  * Neon fog lives on its own layer so the POV spot cannot wash it grey.
- * SpotlightBloomPass (unused) occupies layer 1.
  */
 export const NEON_FOG_LAYER = 2;
 
 /** Whole-strip emissive — must sit above bloom luminanceThreshold. */
 export const NEON_MAX_EMISSIVE = 3.0;
-/** Physical PointLight intensity. If the fog halos: raise height, then lower this. */
+/** Physical PointLight intensity. If fog/CRT halos: raise height first, then lower this. */
 export const NEON_MAX_LIGHT = 10.0;
 export const NEON_LIGHT_HEIGHT = 1.0;
 export const NEON_LIGHT_DISTANCE = 8;
 export const NEON_LIGHT_DECAY = 2;
+/** Angular radius (rad) over which a stop light falls from 1 → 0. π = dark on the opposite arc. */
+export const NEON_LIGHT_FALLOFF = Math.PI;
 
 /** Bloom in the live composer, ahead of grain. Threshold 1 = only the active tube. */
 export const NEON_BLOOM = {
   luminanceThreshold: 1.0,
   luminanceSmoothing: 0.2,
   intensity: 1.2,
-  radius: 0.7
+  radius: 0.7,
+  /** Bloom internals at half res — soft glow hides the scale. Try 0.66 if edges stair-step. */
+  resolutionScale: 0.5
 };
 
 /** Baked fog atlas — 8×8 tiles, density in .r. Keep N/TILE/COLS/ROWS in lockstep with the runtime shader. */
@@ -109,13 +117,35 @@ export const FOG_ATLAS = {
 };
 
 export const NEON_FOG = {
-  planeSize: 10,
+  rInner: 14,
+  rOuter: 22,
   y: 0.05,
   albedo: 0.75,
   opacity: 0.85,
   speed: 1.0,
-  uScale: 3.0,
-  uLoopRadius: 1.5
+  /** Spatial scale of the FBM bake over the ~44 m footprint (old 3.0 × 10/44). */
+  uScale: 0.7,
+  uLoopRadius: 1.5,
+  footprint: 44,
+  feather: 2.5,
+  driftAmp: 4.0,
+  /**
+   * Soft-particle fade distance (m) vs opaque scene depth.
+   * Fog alpha → 0 as the ring approaches solid geometry (kills hard cuboid cuts).
+   */
+  softFade: 2.0,
+  /**
+   * Haze off (0) while judging the fog ring. The 5×6 m additive cards were
+   * misread as lit studio walls — the room is MeshBasic and never took neon.
+   * Restore **20** / **12** coarse + hazeOpacity **0.2** after the taste pass.
+   */
+  hazeCount: 0,
+  hazeCountCoarse: 0,
+  hazeHeight: 6,
+  hazeWidth: 5,
+  hazeRadius: 18,
+  hazeOpacity: 0.2,
+  hazeCull: 0.08
 };
 
 /** Page-load gate: assets + fog bake cannot beat this wall-clock minimum. */
@@ -143,10 +173,9 @@ export const INTRO_PARALLAX_HANDOFF_FOLLOW = 0.14;
 /** Brief pause at aerial POV so first-frame GPU compile doesn't hitch the drop. */
 export const INTRO_SPRING_HOLD_MS = 240;
 /**
- * Post-land delays — keep the ease-out / settle frames free of parse, GPU upload,
- * and cursor init (those used to fire as height asymptotes onto the ring).
+ * Post-land delays — keep the ease-out / settle frames free of GPU upload and
+ * cursor init. Deferred GLB fetch starts in `_initLoadGate`, not here.
  */
-export const INTRO_POST_LAND_FETCH_MS = 420;
 export const INTRO_POST_LAND_WARM_MS = 900;
 export const INTRO_POST_LAND_CURSOR_MS = 720;
 /** @deprecated — fetches no longer gate on descent progress; kept for stress docs. */
@@ -172,14 +201,8 @@ export const INTRO_MATERIAL_YIELD_FRAMES = 2;
 export const FOCUS_BLEND_THRESHOLD = 0.85;
 export const FOCUS_ENTER_DURATION = 0.72;
 export const FOCUS_EXIT_DURATION = 0.82;
-/** Camera dolly toward the monitor while focusBlend → 1 (meters). Lower = closer at full zoom. */
-export const DESKTOP_FOCUS_CAM_PULL = 0.95 * 0.9;
-/** Sidekick open zoom — camera pull fallback when viewport bake is unavailable (meters). */
-export const SIDEKICK_FOCUS_CAM_PULL = 1.35;
 /** Extra resting distance on the desktop vignette only — fades out during focus so boot zoom is unchanged. */
 export const DESKTOP_REST_EXTRA_BACK = 3 * FT_TO_M;
-/** Default desktop rest anchor — push the scene 10% away from the POV (object-side, not camera zoom). */
-export const DESKTOP_REST_ANCHOR_CAM_PUSH = 0.22;
 /** Parallax travel retained at full zoom — scene still follows the cursor, softly. */
 export const DESKTOP_FOCUS_PARALLAX_SCALE = 0.38;
 export const FOCUS_PARALLAX_EASE_DURATION = 0.28;

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { tagFrame } from "../stage/frameBudget.js";
 
 export const SCREEN_MATERIAL_NAME = "pc_3";
 const TEXTURE_DIR = "/assets/models/pc-source/";
@@ -134,16 +135,23 @@ export function preloadPcTextures() {
  * After preload, upload decoded maps to the GPU so commit doesn't stall on first use.
  * @param {THREE.WebGLRenderer} [renderer]
  */
-export async function warmPcTexturesOnGpu(renderer) {
+export async function warmPcTexturesOnGpu(renderer, yieldFrame) {
   await preloadPcTextures();
   if (!renderer) return;
+  let n = 0;
   for (const entry of textureCache.values()) {
     try {
       const tex = entry?.then ? await entry : entry;
-      if (tex?.isTexture) renderer.initTexture(tex);
+      if (tex?.isTexture) {
+        const t0 = performance.now();
+        renderer.initTexture(tex);
+        tagFrame(`tex-upload:${Math.round(performance.now() - t0)}ms`);
+      }
     } catch {
       /* skip missing */
     }
+    n += 1;
+    if (yieldFrame && n % 4 === 0) await yieldFrame();
   }
 }
 
@@ -370,8 +378,7 @@ export async function preparePcModelMaterialsChunked(
 ) {
   await preloadPcTextures();
   if (renderer) {
-    await warmPcTexturesOnGpu(renderer);
-    if (yieldFrame) await yieldFrame();
+    await warmPcTexturesOnGpu(renderer, yieldFrame);
   }
 
   const meshes = [];
@@ -386,6 +393,7 @@ export async function preparePcModelMaterialsChunked(
 
   for (let i = 0; i < meshes.length; i += 1) {
     await enhanceMeshMaterial(meshes[i], renderer);
+    tagFrame("material-warm");
     if (yieldFrame && (i + 1) % Math.max(1, batchSize) === 0) {
       await yieldFrame();
     }

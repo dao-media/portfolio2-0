@@ -1,9 +1,11 @@
 import gsap from "gsap";
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { hideGroupForReveal } from "../stage/stageModelReveal.js";
+import { createGltfLoader } from "../loaders/createGltfLoader.js";
+import { hideGroupForReveal, holdRootOffCamera } from "../stage/stageModelReveal.js";
+import { spanFrame } from "../stage/frameBudget.js";
+import { tagFrame } from "../stage/frameBudget.js";
 import { SCROLL_CAPTURE_MESH_IDS } from "../stage/scrollCaptureTargets.js";
-import { buildPcSceneBlockout, snapGroupToFloor } from "./pcSceneBlockout.js";
+import { buildPcSceneBlockout } from "./pcSceneBlockout.js";
 import { RexBoneTwitch } from "./rexBoneTwitch.js";
 
 const PACK_URL = "/assets/models/travel-pack/runtime/travel-pack.glb";
@@ -25,13 +27,59 @@ const _SIZE = new THREE.Vector3();
 export const travelVignetteMeta = {
   name: "Travel Pack",
   tint: 0xc4a574,
-  neonColors: ["#ffc14a", "#ff6b2d"],
+  neonColors: ["#ff3d1a", "#ffc14a"],
   desc: "Click the pack to open it. The bones don’t always stay still."
 };
 
 function findNamed(root, name) {
   if (root.name === name) return root;
   return root.getObjectByName(name);
+}
+
+function morphedWorldY(root) {
+  root.updateMatrixWorld(true);
+  let minY = Infinity;
+  let maxY = -Infinity;
+  root.traverse((obj) => {
+    if (!obj.isMesh || !obj.geometry?.attributes?.position) return;
+    const pos = obj.geometry.attributes.position;
+    const morphs = obj.morphTargetInfluences;
+    const attrs = obj.geometry.morphAttributes?.position;
+    const e = obj.matrixWorld.elements;
+    const step = Math.max(1, (pos.count / 1200) | 0);
+    for (let i = 0; i < pos.count; i += step) {
+      let x = pos.getX(i);
+      let y = pos.getY(i);
+      let z = pos.getZ(i);
+      if (morphs && attrs) {
+        for (let m = 0; m < morphs.length; m += 1) {
+          const w = morphs[m];
+          if (!w) continue;
+          const a = attrs[m];
+          x += a.getX(i) * w;
+          y += a.getY(i) * w;
+          z += a.getZ(i) * w;
+        }
+      }
+      const wy = e[1] * x + e[5] * y + e[9] * z + e[13];
+      if (wy < minY) minY = wy;
+      if (wy > maxY) maxY = wy;
+    }
+  });
+  return { minY, height: maxY - minY };
+}
+
+function fitMorphedHeightOnFloor(root, height) {
+  const before = morphedWorldY(root);
+  if (!(before.height > 1e-4)) {
+    fitHeightOnFloor(root, height);
+    return;
+  }
+  root.scale.multiplyScalar(height / before.height);
+  root.updateMatrixWorld(true);
+  const after = morphedWorldY(root);
+  if (Number.isFinite(after.minY)) root.position.y -= after.minY;
+  root.updateMatrixWorld(true);
 }
 
 function fitHeightOnFloor(root, height) {
@@ -47,16 +95,23 @@ function fitHeightOnFloor(root, height) {
   root.updateMatrixWorld(true);
 }
 
-function polishMesh(obj, { doubleSide = false } = {}) {
-  if (!obj.isMesh) return;
+function polishMesh(obj, { receiveShadow = true } = {}) {
+  if (!obj.isMesh || obj.userData._travelPolished) return;
+  obj.userData._travelPolished = true;
+  tagFrame("polish-mesh");
   obj.castShadow = true;
-  obj.receiveShadow = true;
+  obj.receiveShadow = receiveShadow;
   const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
   materials.forEach((mat) => {
     if (!mat) return;
-    if (mat.envMapIntensity == null) mat.envMapIntensity = 0.72;
-    if (mat.normalMap && mat.normalScale) mat.normalScale.set(1.05, 1.05);
-    mat.side = doubleSide ? THREE.DoubleSide : THREE.FrontSide;
+    // GLBs author doubleSided; FrontSide hid inverted bone shells as a black void.
+    mat.side = THREE.DoubleSide;
+    mat.envMapIntensity = 1;
+    if (typeof mat.metalness === "number") mat.metalness = Math.min(mat.metalness, 0.22);
+    if (typeof mat.roughness === "number") mat.roughness = Math.max(mat.roughness, 0.32);
+    // Runtime pack/rex GLBs point normalMap at bump/height atlases and ship no
+    // TANGENT. Even computed tangents leave MeshStandard lighting at zero.
+    if (mat.normalMap) mat.normalMap = null;
   });
 }
 
@@ -88,21 +143,28 @@ export class TravelVignette {
     this.isOpen = false;
     this._aligned = false;
     this._modelLoadStarted = false;
+    this._modelLoadSettled = false;
     this._holdForIntro = false;
     this._pendingPack = null;
     this._pendingRex = null;
     this._openTween = null;
     this._openBlend = { t: 0 };
 
+    // Own floor fit (morphed pack + rex). Group snap uses rest-pose AABBs
+    // (ignores morphs) and was lifting the whole stop ~2.7 m — rex floated.
+    this.group.userData.skipFloorSnap = true;
     this.blockoutRef = buildPcSceneBlockout(this.group, { hidden: true });
     if (!deps.deferModelLoad) {
       this.startModelLoad();
     }
   }
 
-  startModelLoad() {
-    if (this._modelLoadStarted) return;
+  startModelLoad({ retry = false } = {}) {
+    if (this.packRoot || this.rexRoot || this._pendingPack || this._pendingRex) return;
+    if (this._modelLoadStarted && !retry) return;
     this._modelLoadStarted = true;
+    this._modelLoadSettled = false;
+    this._modelLoadError = null;
     void this._loadModels();
   }
 
@@ -124,38 +186,56 @@ export class TravelVignette {
       spins += 1;
     }
     if (this.packRoot || this.rexRoot) return;
+    if (!this._pendingPack && !this._pendingRex && this._modelLoadSettled) {
+      this.startModelLoad({ retry: true });
+      spins = 0;
+      while (
+        !this.packRoot &&
+        !this.rexRoot &&
+        !this._pendingPack &&
+        !this._pendingRex &&
+        this._modelLoadStarted &&
+        spins < 180
+      ) {
+        await yieldFrame();
+        spins += 1;
+      }
+    }
     if (!this._pendingPack && !this._pendingRex) return;
     this._holdForIntro = false;
     await this._commitModels({ yieldFrame, revealHidden });
   }
 
   async _loadModels() {
-    const loader = new GLTFLoader(this.loadingManager ?? undefined);
-    const [packResult, rexResult] = await Promise.allSettled([
-      loader.loadAsync(PACK_URL),
-      loader.loadAsync(REX_URL)
-    ]);
+    const loader = createGltfLoader(this.loadingManager ?? undefined);
+    const [packResult, rexResult] = await spanFrame("travel-parse", () =>
+      Promise.allSettled([loader.loadAsync(PACK_URL), loader.loadAsync(REX_URL)])
+    );
 
     if (packResult.status === "fulfilled") {
       this._pendingPack = packResult.value.scene;
     } else {
+      this._modelLoadError = String(packResult.reason?.message || packResult.reason);
       console.warn("[TravelVignette] Failed to load travel pack.", packResult.reason);
     }
     if (rexResult.status === "fulfilled") {
       this._pendingRex = rexResult.value.scene;
     } else {
+      this._modelLoadError = String(rexResult.reason?.message || rexResult.reason);
       console.warn("[TravelVignette] Failed to load T-rex.", rexResult.reason);
     }
 
-    if (this.introGate?.()) {
+    if (this._pendingPack || this._pendingRex) {
       this._holdForIntro = true;
-      return;
     }
-    await this._commitModels();
+    this._modelLoadSettled = true;
   }
 
   async _commitModels({ yieldFrame = async () => {}, revealHidden = false } = {}) {
     if (this.packRoot || this.rexRoot) return;
+
+    // Keep group on the stage floor — local fits assume parent Y = 0.
+    this.group.position.y = 0;
 
     if (this._pendingRex) {
       this.rexRoot = findNamed(this._pendingRex, "rex-root") ?? this._pendingRex;
@@ -163,10 +243,11 @@ export class TravelVignette {
       this.rexRoot.name = "rex-root";
       this.rexRoot.rotation.y = REX_YAW;
       this.group.add(this.rexRoot);
+      holdRootOffCamera(this.rexRoot);
       fitHeightOnFloor(this.rexRoot, REX_HEIGHT);
       this.rexRoot.position.x += REX_SIDE;
       this.rexRoot.position.z += REX_BACK;
-      this.rexRoot.traverse(polishMesh);
+      this.rexRoot.traverse((obj) => polishMesh(obj, { receiveShadow: false }));
     }
 
     await yieldFrame();
@@ -176,21 +257,24 @@ export class TravelVignette {
       this._pendingPack = null;
       this.packRoot.name = "travel-pack-root";
       this.group.add(this.packRoot);
-      fitHeightOnFloor(this.packRoot, PACK_HEIGHT);
-      this.packRoot.position.x += PACK_SIDE;
-      this.packRoot.position.z += PACK_FORWARD;
+      holdRootOffCamera(this.packRoot);
       this.packRoot.rotation.y += PACK_YAW;
       this.packMorphs = [];
       this.packRoot.traverse((obj) => {
-        polishMesh(obj, { doubleSide: true });
+        polishMesh(obj);
         if (obj.isMesh && obj.morphTargetInfluences?.length) {
           this.packMorphs.push(obj);
         }
       });
+      // Closed morph is much shorter than the rest pose; fit after applying it.
       this._applyLid(this._openBlend.t);
+      fitMorphedHeightOnFloor(this.packRoot, PACK_HEIGHT);
+      this.packRoot.position.x += PACK_SIDE;
+      this.packRoot.position.z += PACK_FORWARD;
     }
 
-    snapGroupToFloor(this.group);
+    // Do NOT snapGroupToFloor here — rest-pose Box3 ignores lid morphs and
+    // lifts the group, leaving the already-fitted rex mid-air.
     this.group.traverse((obj) => {
       if (obj.isMesh) obj.userData.vignetteIndex = this.vignetteIndex;
     });

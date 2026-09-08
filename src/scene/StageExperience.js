@@ -25,12 +25,15 @@ import {
   LOOK,
   AMBIENT_INTENSITY,
   HEMI_INTENSITY,
+  STAGE_ENV_INTENSITY,
   SPOT_HEIGHT_M,
   SPOT_INTENSITY,
   SPOT_ANGLE,
   SPOT_PENUMBRA,
   SPOT_DISTANCE,
   SPOT_DECAY,
+  SPOT_SHADOW,
+  WORK_RENDER_SCALE,
   SCROLL_CAPTURE_BLEND_IN,
   SCROLL_CAPTURE_BLEND_OUT,
   SCROLL_CAPTURE_WHEEL_ON,
@@ -44,7 +47,6 @@ import {
   INTRO_SIDEKICK_BAKE_DELAY_MS,
   INTRO_DEFERRED_IDLE_TIMEOUT_MS,
   INTRO_SPRING_HOLD_MS,
-  INTRO_POST_LAND_FETCH_MS,
   INTRO_POST_LAND_WARM_MS,
   INTRO_POST_LAND_CURSOR_MS,
   vignetteStageDegrees,
@@ -65,7 +67,15 @@ import {
   shouldBlockScrollCaptureBlend
 } from "./stage/stageAnimationPolicy.js";
 import { INTRO_TRACK_DESCENT } from "./stage/stageCameraTrack.js";
-import { setGroupRenderOpacity } from "./stage/stageModelReveal.js";
+import {
+  GPU_HOLD_LAYER,
+  compileHeldRoot,
+  hideSceneExcept,
+  releaseRootToCamera,
+  setGroupRenderOpacity,
+  warmMeshesChunked
+} from "./stage/stageModelReveal.js";
+import { createFrameBudget, setActiveFrameBudget, spanFrame, tagFrame } from "./stage/frameBudget.js";
 import { STAGE_FLOOR_Y, measureBlockoutReferenceBounds, measureSceneBounds, snapAllGroupsToFloor, snapGroupToFloor } from "./vignettes/pcSceneBlockout.js";
 import { preloadPcTextures, setPcTextureLoadingManager } from "./vignettes/pcProductionMaterials.js";
 import { WaterCursor } from "../cursor/WaterCursor.js";
@@ -89,6 +99,24 @@ const CAMERA_ZOOM_HEIGHT = 2.15;
 
 const _SPOT_AIM_LOCAL = new THREE.Vector3();
 
+/**
+ * `?work` or `?work=1` → 60% object raster. `?quality=0.6` sets the scale.
+ * `?work=0` forces full. Screen canvases are not read from this.
+ */
+function readWorkRenderScale() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.has("quality")) {
+    const n = Number(params.get("quality"));
+    if (Number.isFinite(n) && n > 0) return Math.min(1, n);
+  }
+  if (params.has("work")) {
+    const v = params.get("work");
+    if (v === "0" || v === "false" || v === "off") return 1;
+    return WORK_RENDER_SCALE;
+  }
+  return 1;
+}
+
 export class StageExperience {
   /**
    * @param {HTMLCanvasElement} canvas
@@ -97,7 +125,9 @@ export class StageExperience {
     this.canvas = canvas;
     this.reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.isCoarse = window.matchMedia("(pointer: coarse)").matches;
-    this.pixelRatio = Math.min(window.devicePixelRatio || 1, this.isCoarse ? 1.5 : 1.75);
+    this._fullPixelRatio = Math.min(window.devicePixelRatio || 1, this.isCoarse ? 1.5 : 1.75);
+    this._renderScale = readWorkRenderScale();
+    this.pixelRatio = this._fullPixelRatio * this._renderScale;
 
     this.hud = new HUDController();
     this.loadingManager = new THREE.LoadingManager();
@@ -181,7 +211,9 @@ export class StageExperience {
     this._introAssetsWarmed = false;
     this._introSpringArmed = this.reducedMotion;
     this._introHoldStartedAt = 0;
-    this._introModelsFetchStarted = false;
+    this._deferredModelsFetchStarted = false;
+    this.frameBudget = createFrameBudget();
+    setActiveFrameBudget(this.frameBudget);
 
     this.environment = new THREE.Group();
     this.scene.add(this.environment);
@@ -194,6 +226,8 @@ export class StageExperience {
     this._buildEnvironment();
     this._buildLighting();
     this.liveEnv = new LiveStageEnvironment(this.renderer);
+    this.scene.environment = this.liveEnv.getStudioEnvironment();
+    this.scene.environmentIntensity = STAGE_ENV_INTENSITY;
     this.vignettes = this._buildVignettes();
     this._mountNeonSystem();
     this._initCameraRig();
@@ -206,7 +240,7 @@ export class StageExperience {
     this.post = new PostPass(
       this.renderer,
       this.pixelRatio,
-      this.reducedMotion ? 0.03 : 0.05,
+      0, // grain off — sensor-noise look crushed fog; bloom stays
       this.camera,
       { scene: this.scene, bloom: !this.reducedMotion }
     );
@@ -237,9 +271,6 @@ export class StageExperience {
    * scroll = theta; click = radial pull toward the active stop).
    */
   _initCameraRig() {
-    // Lock the turntable: ring travel is the camera orbiting, not the world spinning.
-    this.world.rotation.y = 0;
-
     const vignetteInputs = this.vignettes.map((vig) => {
       const p = vig.group.position;
       return {
@@ -342,9 +373,11 @@ export class StageExperience {
       SPOT_DECAY
     );
     this.spotLight.position.set(0, SPOT_HEIGHT_M, 0);
+    this.spotLight.layers.set(0);
     this.camera.add(this.spotLight);
     this.spotLight.target = this.spotTarget;
     configureSpotShadow(this.spotLight);
+    this._applyRenderScale();
   }
 
   _aimPovSpotlight() {
@@ -356,17 +389,21 @@ export class StageExperience {
   }
 
   /**
-   * Per-stop neon tube + fog card. One PointLight follows the front-most tube
-   * (camera travels; vignettes stay put).
+   * Per-stop neon tubes + one shared fog ring. Four static PointLights
+   * (layers 0+2) scale by camera proximity; haze Y-billboards sit on layer 2.
    */
   _mountNeonSystem() {
     this.fogMaterial = createFogMaterial({ reducedMotion: this.reducedMotion });
     this.neon = new NeonSystem({
       scene: this.scene,
       camera: this.camera,
-      fogMaterial: this.fogMaterial
+      fogMaterial: this.fogMaterial,
+      reducedMotion: this.reducedMotion,
+      isCoarse: this.isCoarse
     });
     this.vignettes.forEach((vig) => this.neon.attach(vig));
+    this.neon.finishMount();
+    this.neon.setStageFloor?.(this.stageFloor);
   }
 
   /** Shared LoadingManager → XP fader. Fog bake + min duration before input. */
@@ -385,7 +422,11 @@ export class StageExperience {
     });
 
     void preloadPcTextures();
-    this._startIntroModelFetches();
+    this._startGatingModelFetches();
+    // Same moment as the desktop fetch, but NOT the boot manager. Parse then
+    // overlaps the fader instead of blocking post-land frames. The gate does
+    // not wait for these.
+    this._startDeferredModelFetches();
     this.loadGate.finishSeeding();
   }
 
@@ -487,10 +528,58 @@ export class StageExperience {
 
   debugResnapAll() {
     snapAllGroupsToFloor(this.vignettes.map((vig) => vig.group));
+    this.neon?.seatTubesOnFloor?.();
     return this.debugFloorHeights();
   }
 
-  /** Dev helper — Sidekick motion state. */
+  /**
+   * DEV — draw meshes at a fraction of the DPR cap. Effects stay on.
+   * XP / MySpace / Sidekick SMS canvases stay at authored size.
+   * `1` or `false` restores full. `?work` boots at 0.6.
+   * @param {number | false} [scale]
+   */
+  setWorkQuality(scale = WORK_RENDER_SCALE) {
+    if (scale === false || scale === 1) {
+      this._renderScale = 1;
+    } else {
+      const n = Number(scale);
+      this._renderScale = Math.min(1, Math.max(0.35, Number.isFinite(n) && n > 0 ? n : WORK_RENDER_SCALE));
+    }
+    this._applyRenderScale();
+    this._onResize();
+    return this.debugWorkQuality();
+  }
+
+  debugFrameBudget() {
+    return this.frameBudget?.dump() ?? null;
+  }
+
+  debugWorkQuality() {
+    const draw = new THREE.Vector2();
+    this.renderer.getDrawingBufferSize(draw);
+    return {
+      scale: this._renderScale,
+      pixelRatio: this.pixelRatio,
+      fullPixelRatio: this._fullPixelRatio,
+      drawingBuffer: { width: draw.x, height: draw.y },
+      shadowMap: this.spotLight?.shadow?.mapSize?.x ?? null,
+      screensUnscaled: true
+    };
+  }
+
+  _applyRenderScale() {
+    this.pixelRatio = this._fullPixelRatio * this._renderScale;
+    this.renderer.setPixelRatio(this.pixelRatio);
+    if (this.post) this.post.pixelRatio = this.pixelRatio;
+    if (!this.spotLight?.shadow) return;
+    const size = Math.max(256, Math.round(SPOT_SHADOW.mapSize * this._renderScale));
+    this.spotLight.shadow.mapSize.set(size, size);
+    this.spotLight.shadow.map?.dispose();
+    this.spotLight.shadow.map = null;
+    this.renderer.shadowMap.needsUpdate = true;
+  }
+
+  /** Dev helper — Sidekick motion state + keypad/side-button mesh graph. */
   debugSidekick() {
     const sidekick = this.vignettes[2]?.instance;
     return {
@@ -505,12 +594,32 @@ export class StageExperience {
     };
   }
 
+  /** DEV — FogDepthCapture RT vs drawing buffer, live near/far, packed samples. */
+  debugFogCapture() {
+    return this.neon?.debugFogCapture?.(this.renderer, this.scene, this.camera) ?? null;
+  }
+
+  /** DEV — camera-parented depth RT + soft-term ramp. Not a second composer. */
+  debugFogVis(mode = "both") {
+    return this.neon?.debugFogVis?.(mode) ?? "off";
+  }
+
+  /**
+   * Isolate stacked fog look: floor neon stain vs radial feather.
+   * @param {{ floor?: boolean, feather?: number, fog?: boolean }} opts
+   */
+  debugFogIsolate(opts = {}) {
+    return this.neon?.debugFogIsolate?.(opts) ?? null;
+  }
+
   _snapAllVignettesToFloor(force = false) {
     if (!force && !this.introComplete) {
       this._pendingFloorSnap = true;
       return;
     }
     snapAllGroupsToFloor(this.vignettes.map((vig) => vig.group));
+    // Floor snap moves group.y — re-seat tubes so bottoms stay on Y=0.
+    this.neon?.seatTubesOnFloor?.();
     this._pendingFloorSnap = false;
   }
 
@@ -542,7 +651,6 @@ export class StageExperience {
    * Fetch → warm → cursor, each after the height spring has visually settled.
    */
   _schedulePostIntroAssetWork() {
-    window.setTimeout(() => this._startIntroModelFetches(), INTRO_POST_LAND_FETCH_MS);
     window.setTimeout(() => this._warmIntroAssetsDeferred(), INTRO_POST_LAND_WARM_MS);
     window.setTimeout(() => this._ensureWaterCursor(), INTRO_POST_LAND_CURSOR_MS);
   }
@@ -592,13 +700,59 @@ export class StageExperience {
     }
   }
 
-  /** Kick PC + Sidekick GLB downloads after the aerial hold / early drop. */
-  _startIntroModelFetches() {
-    if (this._introModelsFetchStarted) return;
-    this._introModelsFetchStarted = true;
+  /** Desktop GLB only — Sidekick / Travel must not count toward the boot gate. */
+  _startGatingModelFetches() {
     this.vignettes[1]?.instance?.startModelLoad?.();
-    this.vignettes[2]?.instance?.startModelLoad?.();
-    this.vignettes[3]?.instance?.startModelLoad?.();
+  }
+
+  /** Sidekick + Travel/T-rex bytes — with the desktop fetch, not the boot manager. */
+  _startDeferredModelFetches() {
+    if (this._deferredModelsFetchStarted) return;
+    this._deferredModelsFetchStarted = true;
+    const sidekick = this.vignettes[2]?.instance;
+    const travel = this.vignettes[3]?.instance;
+    sidekick?.startModelLoad?.();
+    // One meshopt decode at a time — parallel parse dropped both scenes.
+    void this._startTravelAfterSidekick(sidekick, travel);
+  }
+
+  async _startTravelAfterSidekick(sidekick, travel) {
+    const deadline = performance.now() + 20000;
+    while (sidekick && !sidekick._modelLoadSettled && performance.now() < deadline) {
+      await new Promise((resolve) => window.setTimeout(resolve, 50));
+    }
+    travel?.startModelLoad?.();
+  }
+
+  /**
+   * Upload maps, compile once while the root is on GPU_HOLD_LAYER, then show.
+   * Not one compile per mesh inside the live fog-depth + beauty frame.
+   */
+  async _compileThenShow(root) {
+    if (!root || !this.renderer) return;
+    let held = false;
+    root.traverse((obj) => {
+      if (obj.isMesh && obj.layers.isEnabled(GPU_HOLD_LAYER)) held = true;
+    });
+    if (!held) return;
+    await warmMeshesChunked(root, this.renderer);
+    try {
+      await spanFrame("shader-compile", async () => {
+        compileHeldRoot(this.renderer, this.scene, this.camera, root);
+      });
+      await spanFrame("fog-depth-compile", async () => {
+        const restore = hideSceneExcept(this.scene, root);
+        try {
+          this.neon?.compileHeldFogDepth?.(this.renderer, this.scene, this.camera);
+        } finally {
+          restore();
+        }
+      });
+    } catch (error) {
+      console.warn("[StageExperience] Held compile failed:", error);
+    }
+    releaseRootToCamera(root);
+    await this._yieldFrame();
   }
 
   /** Texture decode during descent — must not wait for hold flags or motion complete. */
@@ -607,7 +761,8 @@ export class StageExperience {
     this._introAssetsWarmed = true;
     const desktop = this.vignettes[1]?.instance;
     const idle = window.requestIdleCallback;
-    const warm = () => void desktop?.warmIntroAssets?.(this.renderer);
+    const warm = () =>
+      void desktop?.warmIntroAssets?.(this.renderer, () => this._yieldFrame());
     if (idle) {
       idle(warm, { timeout: INTRO_DEFERRED_IDLE_TIMEOUT_MS });
     } else {
@@ -664,29 +819,58 @@ export class StageExperience {
       await this._waitForIntegrateWindow();
       await yieldFrame(INTRO_MATERIAL_YIELD_FRAMES);
 
-      await desktop?.integrateAfterIntro?.({
-        yieldFrame,
-        revealHidden: true,
-        batchSize: INTRO_MATERIAL_BATCH_SIZE,
-        yieldFrames: INTRO_MATERIAL_YIELD_FRAMES
-      });
-      await yieldFrame(INTRO_MATERIAL_YIELD_FRAMES);
+      await spanFrame("desktop-integrate", () =>
+        desktop?.integrateAfterIntro?.({
+          yieldFrame,
+          revealHidden: true,
+          batchSize: INTRO_MATERIAL_BATCH_SIZE,
+          yieldFrames: INTRO_MATERIAL_YIELD_FRAMES
+        })
+      );
+      // CubeUV + PMREM once while the PC is still on GPU_HOLD_LAYER.
+      // The heavy-effects flush used to recapture this and hitch the first
+      // live frame (~600ms). Do not force a second capture later.
+      if (desktop?.glassMesh) {
+        await spanFrame("crt-cube", async () => {
+          try {
+            desktop.updateCrtGlassReflection?.(
+              this.liveEnv,
+              this.scene,
+              this.spotLight,
+              this.spotTarget,
+              { force: true }
+            );
+          } catch (error) {
+            console.warn("[StageExperience] CRT cube warm failed:", error);
+          }
+        });
+      }
+      await this._compileThenShow(desktop?.pcRoot);
 
-      await sidekick?.integrateAfterIntro?.({
-        yieldFrame,
-        revealHidden: true,
-        deferScreenTextureMs: INTRO_SIDEKICK_BAKE_DELAY_MS
-      });
-      await yieldFrame();
+      await spanFrame("sidekick-integrate", () =>
+        sidekick?.integrateAfterIntro?.({
+          yieldFrame,
+          revealHidden: true,
+          deferScreenTextureMs: INTRO_SIDEKICK_BAKE_DELAY_MS
+        })
+      );
+      await this._compileThenShow(sidekick?.sidekickRoot);
 
-      await travel?.integrateAfterIntro?.({
-        yieldFrame,
-        revealHidden: true
-      });
-      await yieldFrame();
+      await spanFrame("travel-integrate", () =>
+        travel?.integrateAfterIntro?.({
+          yieldFrame,
+          revealHidden: true
+        })
+      );
+      await this._compileThenShow(travel?.packRoot);
+      await this._compileThenShow(travel?.rexRoot);
 
       stillHolding = Boolean(
-        desktop?._holdForIntro || sidekick?._holdForIntro || travel?._holdForIntro
+        desktop?._holdForIntro ||
+          sidekick?._holdForIntro ||
+          travel?._holdForIntro ||
+          (sidekick?._modelLoadStarted && !sidekick?._modelLoadSettled) ||
+          (travel?._modelLoadStarted && !travel?._modelLoadSettled)
       );
 
       if (this._pendingFloorSnap) {
@@ -711,20 +895,15 @@ export class StageExperience {
   }
 
   _tickNeon(time) {
-    if (this.fogMaterial?.uniforms?.uTime) {
-      this.fogMaterial.uniforms.uTime.value = time;
-    }
     if (!this.neon || !this.cameraRig) return;
-    this.neon.update(this.cameraRig.state.theta, this.vignettes.length);
+    this.neon.update(this.cameraRig.state.theta, this.vignettes.length, time);
   }
 
   debugNeon() {
     return {
       interactionReady: this._interactionReady,
       locked: this.locked,
-      lightIntensity: this.neon?.light?.intensity ?? 0,
-      lightColor: this.neon?.light?.color?.getHexString?.() ?? null,
-      lightHeight: this.neon?.light?.position?.y ?? null,
+      ...(this.neon?.debugState?.() ?? {}),
       tubes: this.vignettes.map((vig) => ({
         name: vig.def.name,
         colors: vig.def.neonColors ?? null,
@@ -733,10 +912,37 @@ export class StageExperience {
     };
   }
 
-  /** CRT env capture — runs well after models are visible; never on the settle frame. */
+  /**
+   * TEMP — hot-tune neon PointLight height / peak intensity (no rebuild).
+   * Prefer `setNeon({ height: 1.8 })` before lowering `maxLight`.
+   * Remove after baking the chosen pair into `constants.js`.
+   * @param {{ height?: number, maxLight?: number }} opts
+   */
+  setNeon(opts = {}) {
+    if (!this.neon?.setNeon) {
+      return { ok: false, reason: "neon not mounted" };
+    }
+    const state = this.neon.setNeon(opts);
+    // Re-derive proximity intensities for the current camera pose immediately.
+    this._tickNeon(this.clock?.getElapsedTime?.() ?? 0);
+    return { ok: true, ...state };
+  }
+
+  /**
+   * Overlay a square + crosshair on the CRT canvas. Green square must read square
+   * on the bezel content quad at rest and zoomed. `window.__stage.debugCrtAlign()`.
+   */
+  debugCrtAlign(show = true) {
+    this.hud?.getMySpaceScreen?.()?.setAlignGrid(show);
+    const desktop = this.vignettes[1]?.instance;
+    return desktop?.debugCrtScreen?.() ?? null;
+  }
+
+  /** CRT env capture — skipped if the held-window warm already ran. */
   _flushIntroDeferredWork() {
     const desktop = this.vignettes[1]?.instance;
     if (!desktop?.updateCrtGlassReflection) return;
+    if (desktop._lastEnvRotY != null) return;
     desktop._pendingCrtEnvRefresh = true;
     desktop.updateCrtGlassReflection(
       this.liveEnv,
@@ -748,54 +954,38 @@ export class StageExperience {
     desktop._pendingCrtEnvRefresh = false;
   }
 
-  /** Grain ramps in after land — never mid ease-out (avoids a composite hitch on settle). */
-  _tickPostGrainStrength(dt) {
-    const cappedDt = Math.min(Math.max(dt, 0), 1 / 24);
-    let target = 0;
-    if (this._introMotionComplete) {
-      target = 1;
-    }
-    const rate = 1 / 2.4;
-    if (this._postGrainStrength < target) {
-      this._postGrainStrength = Math.min(target, this._postGrainStrength + cappedDt * rate);
-    } else if (this._postGrainStrength > target) {
-      this._postGrainStrength = Math.max(target, this._postGrainStrength - cappedDt * rate * 2);
-    }
+  /** Grain stays off (PostPass amount 0). Kept so a future re-enable can ramp again. */
+  _tickPostGrainStrength(_dt) {
+    this._postGrainStrength = 0;
   }
 
   /** Fade GLB vignettes in after post-settle integration mounts them hidden. */
   _tickModelReveal(dt) {
-    const desktopRoot = this.vignettes[1]?.instance?.pcRoot;
-    const sidekickRoot = this.vignettes[2]?.instance?.sidekickRoot;
-    const travelPack = this.vignettes[3]?.instance?.packRoot;
-    const travelRex = this.vignettes[3]?.instance?.rexRoot;
-    if (!desktopRoot && !sidekickRoot && !travelPack && !travelRex) return;
+    const roots = [
+      this.vignettes[1]?.instance?.pcRoot,
+      this.vignettes[2]?.instance?.sidekickRoot,
+      this.vignettes[3]?.instance?.packRoot,
+      this.vignettes[3]?.instance?.rexRoot
+    ].filter(Boolean);
+    if (!roots.length) return;
 
     // Only reveal once intro motion is done and at least one model is mounted.
     if (!this._introMotionComplete) return;
     // Don't start the fade while materials are still being prepared off-screen.
     if (this._introIntegrationActive && this._modelRevealOpacity <= 0) return;
 
-    const cappedDt = Math.min(Math.max(dt, 0), 1 / 24);
-    const duration = 1.35;
-    const prev = this._modelRevealOpacity;
-    this._modelRevealOpacity = Math.min(1, this._modelRevealOpacity + cappedDt / duration);
-    if (this._modelRevealOpacity === prev && prev >= 1) return;
+    if (this._modelRevealOpacity < 1) {
+      const cappedDt = Math.min(Math.max(dt, 0), 1 / 24);
+      this._modelRevealOpacity = Math.min(1, this._modelRevealOpacity + cappedDt / 1.35);
+    }
 
     const opacity = this._modelRevealOpacity;
-    if (desktopRoot) setGroupRenderOpacity(desktopRoot, opacity);
-    if (sidekickRoot) setGroupRenderOpacity(sidekickRoot, opacity);
-    if (travelPack) setGroupRenderOpacity(travelPack, opacity);
-    if (travelRex) setGroupRenderOpacity(travelRex, opacity);
-  }
-
-  _tickDesktopRestAnchor() {
-    const desktop = this.vignettes[1]?.instance;
-    if (!desktop?.pcRoot) return;
-
-    // Orbital camera: keep the PC on its ring stop. The old rest-anchor bake
-    // pushed the model toward a fixed +Z POV and flings it off-frame now.
-    desktop.applyRestAnchorBlend(0);
+    for (const root of roots) {
+      // Deferred travel GLBs can mount after the fade already hit 1; stamp them.
+      if (opacity >= 1 && root.userData._revealStamped) continue;
+      setGroupRenderOpacity(root, opacity);
+      if (opacity >= 1) root.userData._revealStamped = true;
+    }
   }
 
   _buildVignettes() {
@@ -833,8 +1023,7 @@ export class StageExperience {
           scrollCapture: this.scrollCapture,
           reducedMotion: this.reducedMotion,
           introGate: () => !this.introComplete,
-          deferModelLoad: !this.reducedMotion,
-          loadingManager: this.loadingManager,
+          deferModelLoad: true,
           onRequestClose: () => {
             if (this.cameraRig?.state?.index !== 2) return;
             if (!this.cameraRig.state.isZoomed) return;
@@ -857,8 +1046,7 @@ export class StageExperience {
           scrollCapture: this.scrollCapture,
           reducedMotion: this.reducedMotion,
           introGate: () => !this.introComplete,
-          deferModelLoad: !this.reducedMotion,
-          loadingManager: this.loadingManager,
+          deferModelLoad: true,
           onAligned: () => this._snapAllVignettesToFloor()
         });
         instances.push({ def, group, angle, stageDeg, instance: travel });
@@ -1475,6 +1663,7 @@ export class StageExperience {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
     this.post.setSize(w, h);
+    this.neon?.setSize?.(this.renderer);
     this.hud.updateMySpacePanelForVignette(this.current);
     this.waterCursor?.resize(w, h);
     if (this.cameraRig?.state?.index === 2) {
@@ -1521,6 +1710,7 @@ export class StageExperience {
   }
 
   _animate() {
+    this.frameBudget?.begin();
     const dt = this.clock.getDelta();
     const t = this.clock.elapsedTime;
 
@@ -1554,8 +1744,6 @@ export class StageExperience {
 
     this.animFns.forEach((fn) => fn(t));
 
-    // Vignettes never move — only the camera rig writes travel transforms.
-    this.world.rotation.y = 0;
     this.parallaxDampZones?.update(dt);
     this.cameraRig?.parallax?.setStrength?.(this.parallaxDampZones?.scale ?? 1);
     this.cameraRig?.update(dt);
@@ -1565,7 +1753,6 @@ export class StageExperience {
     this._aimPovSpotlight();
 
     if (this.introComplete) {
-      this._tickDesktopRestAnchor();
       this._applyVignetteMotion(t);
     }
     this._tickModelReveal(dt);
@@ -1577,10 +1764,20 @@ export class StageExperience {
       this.ui.readout.textContent = `STAGE ${deg.toFixed(1).padStart(5, "0")}°`;
     }
 
+    // Opaque depth → fog soft fade (before beauty; not a second composer).
+    const fogT = performance.now();
+    tagFrame("fog-depth");
+    this.neon?.captureFogDepth?.(this.renderer, this.scene, this.camera);
+    tagFrame(`fog-depth:${Math.round(performance.now() - fogT)}ms`);
+
+    const beautyT = performance.now();
+    tagFrame("beauty");
     this.post.render(this.scene, this.camera, t, {
       grainStrength: this._postGrainStrength
     });
+    tagFrame(`beauty:${Math.round(performance.now() - beautyT)}ms`);
     this.waterCursor?.render();
+    this.frameBudget?.end(dt);
     requestAnimationFrame(this._animate);
   }
 }

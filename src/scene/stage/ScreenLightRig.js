@@ -5,6 +5,7 @@
 // Requires three >= r150. RectAreaLight only lights MeshStandard/PhysicalMaterial.
 
 import * as THREE from "three";
+import { tagFrame } from "./frameBudget.js";
 import { RectAreaLightUniformsLib } from "three/examples/jsm/lights/RectAreaLightUniformsLib.js";
 
 let _rectAreaInit = false;
@@ -144,6 +145,7 @@ export class ScreenLightRig {
     this._blitMat.map = this.texture;
     r.setRenderTarget(this._rt);
     r.render(this._blitScene, this._blitCam);
+    tagFrame("rt-readback");
     r.readRenderTargetPixels(this._rt, 0, 0, 1, 1, this._pixel);
     r.setRenderTarget(prevRT);
 

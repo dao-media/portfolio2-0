@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import gsap from "gsap";
 import { toCanvas } from "html-to-image";
+import { tagFrame } from "../../scene/stage/frameBudget.js";
+import { releaseCaptureCanvas } from "../releaseCaptureCanvas.js";
 import { SidekickSmsForm } from "./SidekickSmsForm.js";
 import {
   SIDEKICK_FRAME_SIZE,
@@ -409,6 +411,7 @@ export class SidekickSmsScreen {
     this.form.root.style.height = `${CAPTURE_H}px`;
 
     try {
+      tagFrame("html-to-image");
       const captured = await toCanvas(lcd, {
         width: CAPTURE_W,
         height: CAPTURE_H,
@@ -418,7 +421,11 @@ export class SidekickSmsScreen {
         // Skip webfont waits — Tahoma/system stack only.
         fontEmbedCSS: ""
       });
-      if (gen !== this._captureGen) return;
+      if (gen !== this._captureGen) {
+        releaseCaptureCanvas(captured);
+        return;
+      }
+      releaseCaptureCanvas(this._formBitmap);
       this._formBitmap = captured;
       this._formReady = true;
       if (this.flipProgress > 0.01) this.paint();

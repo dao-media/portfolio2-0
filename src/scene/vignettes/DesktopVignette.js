@@ -1,11 +1,20 @@
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { createGltfLoader } from "../loaders/createGltfLoader.js";
 import {
   alignModelToBlockout,
   buildPcSceneBlockout
 } from "./pcSceneBlockout.js";
 import { createCrtScreenMaterial, setCrtScreenGlow, CRT_SCREEN_GLOW_MAX } from "./CrtScreenMaterial.js";
-import { applyScreenMapSettings, computeScreenUvBounds, deriveCrtScreenMap, SCREEN_MAP_CRT, SCREEN_MAP_PLANE } from "./screenTextureMap.js";
+import {
+  applyScreenMapSettings,
+  createCrtContentQuadFromSpec,
+  flattenCrtPhosphorToRimPlane,
+  measureCrtScreenGeometry,
+  SCREEN_MAP_CRT,
+  SCREEN_MAP_CRT_QUAD,
+  SCREEN_MAP_PLANE
+} from "./screenTextureMap.js";
+import { CRT_CONTENT_PLANE } from "./crtBezelOpening.js";
 import {
   PARALLAX_DAMP_ZONE_IDS,
   SCROLL_CAPTURE_MESH_IDS
@@ -28,19 +37,15 @@ import {
   setCrtGlassFocusScale,
   setCrtGlassSpotlight
 } from "./CrtGlassMaterial.js";
-import { hideGroupForReveal } from "../stage/stageModelReveal.js";
-import { DESKTOP_REST_ANCHOR_CAM_PUSH } from "../stage/constants.js";
-
-const _REST_ANCHOR_CAM = new THREE.Vector3();
-const _REST_ANCHOR_ROOT = new THREE.Vector3();
-const _REST_ANCHOR_TARGET = new THREE.Vector3();
+import { hideGroupForReveal, holdRootOffCamera } from "../stage/stageModelReveal.js";
+import { spanFrame } from "../stage/frameBudget.js";
 
 const MODEL_URL = "/assets/models/pc-source/pc-from-source.glb";
 
 export const desktopVignetteMeta = {
   name: "Retro Desktop",
   tint: 0x7ad0ff,
-  neonColors: ["#00e5ff", "#7cff6b"],
+  neonColors: ["#00e5ff", "#9dff1a"],
   desc: "MySpace profile on the CRT — click the monitor to zoom in and boot."
 };
 
@@ -64,6 +69,9 @@ export class DesktopVignette {
     this.reducedMotion = deps.reducedMotion ?? false;
     this._modelLoadStarted = false;
     this.interactives = [];
+    /** Flattened phosphor / glass host (`pc-Mesh_2`) — no live content. */
+    this.phosphorMesh = null;
+    /** Bezel-sized flat content quad — live CanvasTexture emissiveMap. */
     this.screenMesh = null;
     this.screenHitMesh = null;
     this.pcRoot = null;
@@ -82,12 +90,8 @@ export class DesktopVignette {
     this._screenReadyWaiters = [];
     this._introAssetsWarmed = false;
     this._pcSceneReady = false;
-    /** Pre-push model position — floor-snapped baseline. */
-    this._alignedRestPosition = null;
-    /** Baked group-local PC pose at the desktop resting stop. */
-    this._restAnchorPosition = null;
 
-    /** Invisible blockout — same footprint/height as Monolith & Orbit placeholders. */
+    /** Invisible blockout — same footprint/height as the Monolith placeholder. */
     this.blockoutRef = buildPcSceneBlockout(this.group, { hidden: true });
     if (!deps.deferModelLoad) {
       this.startModelLoad();
@@ -171,14 +175,14 @@ export class DesktopVignette {
   }
 
   /** Decode PC textures during the intro descent — keeps the settle hitch smaller. */
-  async warmIntroAssets(renderer) {
+  async warmIntroAssets(renderer, yieldFrame) {
     if (this._introAssetsWarmed) return;
     this._introAssetsWarmed = true;
-    await warmPcTexturesOnGpu(renderer);
+    await warmPcTexturesOnGpu(renderer, yieldFrame);
   }
 
   async _loadModel() {
-    const loader = new GLTFLoader(this.loadingManager ?? undefined);
+    const loader = createGltfLoader(this.loadingManager ?? undefined);
     try {
       const gltf = await loader.loadAsync(MODEL_URL);
       this._pendingScene = gltf.scene;
@@ -212,25 +216,25 @@ export class DesktopVignette {
     // GLB is still detached it uses the model itself as space and the PC lands
     // meters away from the desktop stop (invisible at the camera).
     this.group.add(this.pcRoot);
+    // Off-camera until programs are compiled — do not compile inside live frames.
+    holdRootOffCamera(this.pcRoot);
     alignModelToBlockout(this.pcRoot, this.blockoutRef);
-    await yieldFrame(yieldFrames);
 
     if (this.renderer) {
-      await preparePcModelMaterialsChunked(
-        this.pcRoot,
-        this.renderer,
-        () => yieldFrame(yieldFrames),
-        batchSize
-      );
-    }
-    await yieldFrame(yieldFrames);
-
-    const sourceMesh = this._findScreenMesh(this.pcRoot);
-    if (sourceMesh) {
-      this.screenMesh = this._mountScreenOnMesh(sourceMesh);
-      this.interactives.push(this.screenMesh);
+      // Yield while held — meshes are on GPU_HOLD_LAYER, so a present does not
+      // compile new programs. Do not drop this back to a live 1-mesh warmer.
+      await preparePcModelMaterialsChunked(this.pcRoot, this.renderer, yieldFrame, batchSize);
     }
     await yieldFrame();
+
+    await spanFrame("pc-mount", async () => {
+      const sourceMesh = this._findScreenMesh(this.pcRoot);
+      if (sourceMesh) {
+        this.screenMesh = this._mountScreenOnMesh(sourceMesh);
+        this.interactives.push(this.screenMesh);
+      }
+      holdRootOffCamera(this.pcRoot);
+    });
 
     this._ensurePowerLed();
     this._ensurePowerButton();
@@ -238,77 +242,9 @@ export class DesktopVignette {
       hideGroupForReveal(this.pcRoot);
     }
 
-    this._captureAlignedRestPosition();
     this._pcSceneReady = true;
     this._notifyScreenReady();
     this.onAligned?.();
-  }
-
-  _captureAlignedRestPosition() {
-    const root = this._getSceneRoot();
-    this._alignedRestPosition = root ? root.position.clone() : null;
-  }
-
-  /** Visible scene root — GLB model or fallback blockout. */
-  _getSceneRoot() {
-    return this.pcRoot ?? this.blockoutRef ?? null;
-  }
-
-  /**
-   * One-shot bake while the turntable faces the desktop stop — stores group-local rest pose.
-   * @param {THREE.PerspectiveCamera} camera
-   * @param {THREE.Object3D} world
-   * @param {number} anchorY
-   * @returns {boolean}
-   */
-  ensureRestAnchorBaked(camera, world, anchorY) {
-    if (this._restAnchorPosition || !camera || !world) return false;
-
-    const root = this._getSceneRoot();
-    if (!root || !this._alignedRestPosition) return false;
-
-    const savedY = world.rotation.y;
-    world.rotation.y = anchorY;
-    world.updateMatrixWorld(true);
-
-    root.position.copy(this._alignedRestPosition);
-    this.group.updateMatrixWorld(true);
-    root.getWorldPosition(_REST_ANCHOR_ROOT);
-    _REST_ANCHOR_CAM.copy(_REST_ANCHOR_ROOT).sub(camera.position);
-    _REST_ANCHOR_CAM.y = 0;
-
-    if (_REST_ANCHOR_CAM.lengthSq() <= 1e-8) {
-      this._restAnchorPosition = this._alignedRestPosition.clone();
-    } else {
-      _REST_ANCHOR_TARGET.copy(_REST_ANCHOR_ROOT).addScaledVector(
-        _REST_ANCHOR_CAM,
-        DESKTOP_REST_ANCHOR_CAM_PUSH
-      );
-      this.group.worldToLocal(_REST_ANCHOR_TARGET);
-      this._restAnchorPosition = _REST_ANCHOR_TARGET.clone();
-    }
-
-    world.rotation.y = savedY;
-    world.updateMatrixWorld(true);
-    return true;
-  }
-
-  /**
-   * Blend the PC between aligned and baked rest anchors — keep in sync with camera travel.
-   * @param {number} blend 0 = aligned, 1 = resting hero
-   */
-  applyRestAnchorBlend(blend) {
-    const root = this._getSceneRoot();
-    if (!root || !this._alignedRestPosition) return;
-
-    const t = THREE.MathUtils.clamp(blend, 0, 1);
-    if (t <= 1e-6) {
-      root.position.copy(this._alignedRestPosition);
-      return;
-    }
-    if (!this._restAnchorPosition) return;
-
-    root.position.lerpVectors(this._alignedRestPosition, this._restAnchorPosition, t);
   }
 
   _ensurePowerButton() {
@@ -366,7 +302,7 @@ export class DesktopVignette {
   }
 
   /**
-   * CRT phosphor + room spill — off while black, ramps with boot/power,
+   * CRT content quad + room spill — off while black, ramps with boot/power,
    * color always sampled from the live screen texture.
    */
   _syncScreenGlow() {
@@ -378,7 +314,6 @@ export class DesktopVignette {
     const bootProgress = THREE.MathUtils.clamp(this.mySpace.powerOnProgress ?? 0, 0, 1);
     const power = powered ? Math.max(bootProgress, this.mySpace.monitorLedOn ? 1 : 0) : 0;
 
-    // Screen face emissive — lit phosphor matching the canvas (no diffuse wash).
     const mats = this.screenMesh?.material
       ? Array.isArray(this.screenMesh.material)
         ? this.screenMesh.material
@@ -391,9 +326,92 @@ export class DesktopVignette {
     this.screenLightRig?.setPower(power);
   }
 
+  /** Dark cavity behind the content quad — no live CanvasTexture on `pc-Mesh_2`. */
+  _retirePhosphorContent(sourceMesh) {
+    const idx = this._findScreenMaterialIndex(sourceMesh);
+    if (idx === null) return;
+
+    const dark = new THREE.MeshStandardMaterial({
+      color: 0x050505,
+      emissive: 0x000000,
+      emissiveIntensity: 0,
+      roughness: 1,
+      metalness: 0,
+      envMapIntensity: 0,
+      side: THREE.FrontSide,
+      toneMapped: true
+    });
+    dark.name = SCREEN_MATERIAL_NAME;
+
+    if (Array.isArray(sourceMesh.material)) {
+      sourceMesh.material[idx] = dark;
+    } else {
+      sourceMesh.material = dark;
+    }
+  }
+
   _mountScreenOnMesh(sourceMesh) {
-    const screenMap = deriveCrtScreenMap(sourceMesh);
-    const { material: screenMat, map } = this._createScreenMaterial(screenMap);
+    sourceMesh.visible = true;
+    sourceMesh.renderOrder = 1;
+    this.phosphorMesh = sourceMesh;
+
+    // Clone curved glass BEFORE flattening — shell keeps authored bulge.
+    this._mountGlassShell(sourceMesh);
+    flattenCrtPhosphorToRimPlane(sourceMesh);
+    this._retirePhosphorContent(sourceMesh);
+
+    // Blender-authored opening: phosphor AABB + 1.5 cm pad, content inset 1 cm
+    // with slight rounded corners (`scripts/crt-bezel-blender-measure2.py`).
+    const { material: screenMat, map } = this._createScreenMaterial(SCREEN_MAP_CRT_QUAD);
+    const contentQuad = createCrtContentQuadFromSpec(sourceMesh, screenMat, CRT_CONTENT_PLANE);
+    if (!contentQuad) {
+      console.warn(
+        "[DesktopVignette] Failed to place Blender content plane — falling back to phosphor."
+      );
+      return this._mountScreenOnPhosphorFallback(sourceMesh);
+    }
+    sourceMesh.add(contentQuad);
+
+    this.screenMesh = contentQuad;
+    this.screenHitMesh = this._createScreenHitMesh(contentQuad);
+    this.mySpace.setScreenMap(map);
+    this.mySpace.setScreenUvBounds(null);
+    this.mySpace.setWarpSourceMesh(null);
+    this.mySpace.setCaptureSize(CRT_CONTENT_PLANE.canvasWidth, CRT_CONTENT_PLANE.canvasHeight);
+
+    this._crtMetrics = {
+      mode: "blender-bezel-content-quad",
+      spec: CRT_CONTENT_PLANE,
+      name: contentQuad.name,
+      aspect: CRT_CONTENT_PLANE.aspect,
+      canvasWidth: CRT_CONTENT_PLANE.canvasWidth,
+      canvasHeight: CRT_CONTENT_PLANE.canvasHeight,
+      width: CRT_CONTENT_PLANE.width,
+      height: CRT_CONTENT_PLANE.height,
+      usable: true,
+      phosphor: measureCrtScreenGeometry(sourceMesh)
+    };
+
+    if (import.meta.env.DEV) {
+      console.info("[DesktopVignette] CRT Blender content plane", {
+        content: `${CRT_CONTENT_PLANE.width.toFixed(4)}×${CRT_CONTENT_PLANE.height.toFixed(4)} m`,
+        aspect: Number(CRT_CONTENT_PLANE.aspect.toFixed(4)),
+        canvas: `${CRT_CONTENT_PLANE.canvasWidth}×${CRT_CONTENT_PLANE.canvasHeight}`,
+        cornerR: CRT_CONTENT_PLANE.cornerRadius,
+        insetM: 0.01
+      });
+    }
+
+    this._registerScrollCapture();
+    this._ensurePowerLed();
+    this._attachScreenLightRig(contentQuad);
+    this._finishScreenMount();
+    return contentQuad;
+  }
+
+  /** Legacy Path 1 — content on flattened phosphor if bezel measure fails. */
+  _mountScreenOnPhosphorFallback(sourceMesh) {
+    const { material: screenMat, map } = this._createScreenMaterial(SCREEN_MAP_CRT);
     const idx = this._findScreenMaterialIndex(sourceMesh);
     if (idx === null) return sourceMesh;
 
@@ -403,32 +421,42 @@ export class DesktopVignette {
       sourceMesh.material = screenMat;
     }
 
-    sourceMesh.visible = true;
-    sourceMesh.renderOrder = 10;
     this.screenMesh = sourceMesh;
     this.screenHitMesh = this._createScreenHitMesh(sourceMesh);
-    const bounds = computeScreenUvBounds(sourceMesh);
-    this.mySpace.setScreenMap(screenMap);
-    this.mySpace.setScreenUvBounds(bounds);
+    this.mySpace.setScreenMap(map);
+    this.mySpace.setScreenUvBounds(null);
     this.mySpace.setWarpSourceMesh(sourceMesh);
+
+    const metrics = measureCrtScreenGeometry(sourceMesh);
+    this._crtMetrics = { ...metrics, mode: "phosphor-fallback" };
+    if (metrics.usable) {
+      this.mySpace.setCaptureSize(metrics.canvasWidth, metrics.canvasHeight);
+    }
+
+    this._registerScrollCapture();
+    this._ensurePowerLed();
+    this._attachScreenLightRig(sourceMesh);
+    this._finishScreenMount();
+    return sourceMesh;
+  }
+
+  _finishScreenMount() {
     if (this.mySpace.isPoweredOn) {
       this.mySpace.draw();
     } else if (this.mySpace.isMonitorBooting || this.mySpace.monitorLedOn) {
-      // Boot in progress — keep the live CRT texture; don't reset to black.
       this.mySpace.texture.needsUpdate = true;
     } else {
       this.mySpace.drawOff();
     }
-    this._registerScrollCapture();
-    this._ensurePowerLed();
-    this._attachScreenLightRig(sourceMesh);
-    this._mountGlassShell(sourceMesh);
     this._syncScreenGlow();
     this._notifyScreenReady();
     if (this._focusBlend > 0.85 && this.mySpace.xpBoot?.canStartBoot) {
       void this.mySpace.playPowerOn();
     }
-    return sourceMesh;
+  }
+
+  debugCrtScreen() {
+    return this._crtMetrics ?? null;
   }
 
   _attachScreenLightRig(screenMesh) {
@@ -469,7 +497,8 @@ export class DesktopVignette {
    * @param {THREE.Object3D} spotTarget
    */
   updateCrtGlassReflection(liveEnv, scene, spotLight, spotTarget, { force = false } = {}) {
-    if (!this.screenMesh || !this.glassMesh?.material) return;
+    const captureMesh = this.phosphorMesh ?? this.screenMesh;
+    if (!captureMesh || !this.glassMesh?.material) return;
 
     setCrtGlassSpotlight(this.glassMesh.material, spotLight, spotTarget);
 
@@ -477,7 +506,7 @@ export class DesktopVignette {
 
     const rotY = this.pcRoot?.rotation.y ?? this.group.rotation.y;
     const capturePos = new THREE.Vector3();
-    this.screenMesh.getWorldPosition(capturePos);
+    captureMesh.getWorldPosition(capturePos);
 
     const rotDelta =
       this._lastEnvRotY === null ? Infinity : Math.abs(rotY - this._lastEnvRotY);
@@ -486,7 +515,7 @@ export class DesktopVignette {
 
     if (!force && rotDelta < 0.0003 && posDelta < 0.001) return;
 
-    liveEnv.syncMonitorReflections(this.screenMesh);
+    liveEnv.syncMonitorReflections(captureMesh);
     // CRT glass only — never write into scene.environment (that recolors the whole stage).
     const envTex =
       liveEnv.update(scene, capturePos, { applyToScene: false }) ?? liveEnv.getTexture();
@@ -558,7 +587,7 @@ export class DesktopVignette {
     });
   }
 
-  _createScreenMaterial(map = SCREEN_MAP_CRT) {
+  _createScreenMaterial(map = SCREEN_MAP_CRT_QUAD) {
     const texture = this.mySpace.getTexture();
     applyScreenMapSettings(texture, map);
 
@@ -579,7 +608,6 @@ export class DesktopVignette {
     this.mySpace.setScreenUvBounds(null);
     this.mySpace.setWarpSourceMesh(null);
     this.blockoutRef = buildPcSceneBlockout(this.group, { screenMaterial: screenMat });
-    this._captureAlignedRestPosition();
     this.onAligned?.();
     this.group.traverse((obj) => {
       if (obj.name === "blockout-screen") {

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { tagFrame } from "../stage/frameBudget.js";
 import { FOG_ATLAS, NEON_FOG } from "../stage/constants.js";
 
 const BAKE_VERTEX = /* glsl */ `
@@ -98,6 +99,7 @@ export function bakeFogAtlas(renderer) {
     bakeMaterial.uniforms.uTheta.value = (2 * Math.PI * k) / N;
     renderer.setRenderTarget(rt);
     renderer.render(quadScene, quadCam);
+    tagFrame("rt-readback");
     renderer.readRenderTargetPixels(rt, 0, 0, TILE, TILE, px);
     const cx = (k % COLS) * TILE;
     const cy = Math.floor(k / COLS) * TILE;

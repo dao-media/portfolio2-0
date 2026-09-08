@@ -1,4 +1,6 @@
 import { toCanvas } from "html-to-image";
+import { tagFrame } from "../../scene/stage/frameBudget.js";
+import { releaseCaptureCanvas } from "../releaseCaptureCanvas.js";
 import { isSiteAudioMuted, playSiteSfx } from "../../audio/siteAudio.js";
 import { playCrtPowerOnAnimation } from "../crtPowerOnCanvas.js";
 import { XP_BOOT_CONFIG, XP_BOOT_STATES } from "./config.js";
@@ -69,6 +71,15 @@ export class XpBootMonitor {
       }
     };
     window.addEventListener("siteaudiomutechange", this._onMuteChange);
+  }
+
+  resize(width, height) {
+    this.width = width;
+    this.height = height;
+    if (this.root) {
+      this.root.style.width = `${width}px`;
+      this.root.style.height = `${height}px`;
+    }
   }
 
   _bind() {
@@ -431,6 +442,7 @@ export class XpBootMonitor {
       // Clear transient hover classes so the cached bitmap stays hover-neutral.
       this._els.userTiles?.forEach((tile) => tile.classList.remove("is-hover"));
 
+      tagFrame("html-to-image");
       const captured = await toCanvas(this.root, {
         width: this.width,
         height: this.height,
@@ -440,12 +452,18 @@ export class XpBootMonitor {
       });
 
       if (this.state === XP_BOOT_STATES.LOGIN) {
+        if (this._baseLoginBitmap !== captured) {
+          releaseCaptureCanvas(this._baseLoginBitmap);
+        }
         this._baseLoginBitmap = captured;
       }
 
       const ctx = this.screen.ctx;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(captured, 0, 0, this.width, this.height);
+      if (this.state !== XP_BOOT_STATES.LOGIN) {
+        releaseCaptureCanvas(captured);
+      }
       if (this._hoveredUser && this.state === XP_BOOT_STATES.LOGIN) {
         this._paintLoginHoverOverlay();
         return;

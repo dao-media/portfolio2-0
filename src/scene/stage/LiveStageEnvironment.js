@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { tagFrame } from "./frameBudget.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { CAM_Z, STAGE_BG, STAGE_RADIUS } from "./constants.js";
 import { MonitorReflectionRig } from "./MonitorReflectionRig.js";
@@ -32,6 +33,9 @@ export class LiveStageEnvironment {
     this._pmrem.compileCubemapShader();
     /** PMREM-processed env — MeshPhysicalMaterial needs CUBE_UV, not raw cubemap faces. */
     this._pmremTarget = null;
+    /** Dedicated RoomEnvironment IBL for `scene.environment` — not the CRT cube. */
+    this._studioPmremTarget = null;
+    this._studioEnvTexture = null;
     this._buildLightformers();
     this._addDarkRoomBase();
   }
@@ -111,9 +115,24 @@ export class LiveStageEnvironment {
     );
   }
 
-  /** @returns {THREE.Texture} PMREM env map for CRT glass / scene.environment. */
+  /** @returns {THREE.Texture} PMREM CubeUV env map for CRT glass. Never the raw cubemap. */
   getTexture() {
-    return this._pmremTarget?.texture ?? this.target.texture;
+    return this._pmremTarget?.texture ?? this.getStudioEnvironment();
+  }
+
+  /**
+   * Static studio IBL for stage MeshStandard materials (travel pack, T-rex, PC chassis).
+   * Separate from the CRT cube capture so glass reflections stay monitor-local.
+   * @returns {THREE.Texture}
+   */
+  getStudioEnvironment() {
+    if (!this._studioEnvTexture) {
+      const room = new RoomEnvironment();
+      this._studioPmremTarget = this._pmrem.fromScene(room, 0.04);
+      this._studioEnvTexture = this._studioPmremTarget.texture;
+      room.dispose();
+    }
+    return this._studioEnvTexture;
   }
 
   /**
@@ -136,6 +155,7 @@ export class LiveStageEnvironment {
       this._roomSphere.position.copy(position);
     }
     this.cubeCamera.position.copy(position);
+    tagFrame("shader-compile");
     this.cubeCamera.update(this.renderer, this.virtualScene);
 
     this._pmremTarget = this._pmrem.fromCubemap(this.target.texture, this._pmremTarget);
@@ -150,6 +170,7 @@ export class LiveStageEnvironment {
   dispose() {
     this.monitorRig.dispose();
     this._pmremTarget?.dispose();
+    this._studioPmremTarget?.dispose();
     this._roomEnvTexture?.dispose?.();
     this._pmrem.dispose();
     this.target.dispose();

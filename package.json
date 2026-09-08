@@ -12,9 +12,12 @@
     "test:scroll": "node scripts/stage-scroll-stress.mjs",
     "test:parallax": "node scripts/stage-parallax-stress.mjs",
     "test:sidekick": "node scripts/sidekick-keypad-stress.mjs",
-    "test:motion": "npm run test:cursor && npm run test:scroll && npm run test:parallax && npm run test:sidekick"
+    "test:gate": "node scripts/stage-load-gate-stress.mjs",
+    "test:motion": "npm run test:cursor && npm run test:scroll && npm run test:parallax && npm run test:sidekick && npm run test:gate",
+    "test:smoke": "node scripts/stage-canvas-smoke.mjs"
   },
   "devDependencies": {
+    "playwright": "^1.54.2",
     "vite": "^6.3.5"
   },
   "dependencies": {

@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { toCanvas } from "html-to-image";
+import { tagFrame } from "../scene/stage/frameBudget.js";
+import { releaseCaptureCanvas } from "./releaseCaptureCanvas.js";
 import {
   MYSPACE_PROFILE,
   findContentById,
@@ -27,8 +29,9 @@ import { playXpLinkClick } from "../audio/siteAudio.js";
 const WIDTH = 1024;
 const HEIGHT = 768;
 /** External margin for the IE frame inside the CRT glass (not page padding). */
-const CRT_BEZEL_INSET_X_RATIO = 0.038;
-const CRT_BEZEL_INSET_Y_RATIO = 0.042;
+/** No extra canvas crop — glass UVs already define the bezel opening. */
+const CRT_BEZEL_INSET_X_RATIO = 0;
+const CRT_BEZEL_INSET_Y_RATIO = 0;
 /** Scanline + vignette strength on the canvas texture (0.6 = 40% softer overlays). */
 const CRT_OVERLAY_INTENSITY = 0.6;
 /** Classic MySpace link hover — painted on the CRT canvas, never via DOM re-capture. */
@@ -85,6 +88,7 @@ export class MySpaceScreen {
     this._baseFrameCanvas.height = HEIGHT;
     this._baseFrameCtx = this._baseFrameCanvas.getContext("2d");
     this._baseFrameValid = false;
+    this._showAlignGrid = false;
 
     this._crtHost =
       document.getElementById("myspace-crt-host") ?? this._createCrtHost();
@@ -126,8 +130,8 @@ export class MySpaceScreen {
 
   _updateScreenGeometry() {
     const crtFace = computeScreenWindowRect(
-      WIDTH,
-      HEIGHT,
+      this.canvas.width,
+      this.canvas.height,
       this.screenUvBounds,
       this.screenMap
     );
@@ -156,6 +160,46 @@ export class MySpaceScreen {
     applyScreenMapSettings(this.texture, map);
     this._updateScreenGeometry();
     if (this.powerOnProgress > 0) this.draw();
+  }
+
+  /**
+   * Size the CRT canvas to the bezel-opening aspect (content quad).
+   * Quad UVs stay 0–1 — do not window to a UV AABB.
+   * @param {number} width
+   * @param {number} height
+   */
+  setCaptureSize(width, height) {
+    const w = Math.max(16, Math.round(width));
+    const h = Math.max(16, Math.round(height));
+    if (this.canvas.width !== w || this.canvas.height !== h) {
+      this.canvas.width = w;
+      this.canvas.height = h;
+      this._baseFrameCanvas.width = w;
+      this._baseFrameCanvas.height = h;
+    }
+    this.pageHeight = h;
+    this.xpBoot?.resize?.(w, h);
+    this._syncCaptureHostSize(w, h);
+    this._updateScreenGeometry();
+    this.texture.needsUpdate = true;
+    if (this.powerOnProgress > 0) this.draw();
+  }
+
+  /** Overlay a square grid on the CRT texture to verify glass aspect. */
+  setAlignGrid(show) {
+    this._showAlignGrid = Boolean(show);
+    if (this.powerOnProgress > 0) this.draw();
+  }
+
+  _syncCaptureHostSize(w, h) {
+    const root = document.documentElement;
+    root.style.setProperty("--crt-capture-w", `${w}px`);
+    root.style.setProperty("--crt-capture-h", `${h}px`);
+    const power = document.getElementById("crt-power-on-root");
+    if (power) {
+      power.style.width = `${w}px`;
+      power.style.height = `${h}px`;
+    }
   }
 
   setContentWarp(_warp) {}
@@ -190,7 +234,7 @@ export class MySpaceScreen {
     this._baseFrameValid = false;
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.fillStyle = "#030403";
-    this.ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     this._drawScanlines();
     this.texture.needsUpdate = true;
   }
@@ -276,7 +320,13 @@ export class MySpaceScreen {
 
   hitTest(uv) {
     if (!uv) return null;
-    const { x, y } = screenUvToCanvas(uv, WIDTH, HEIGHT, this.screenUvBounds, this.screenMap);
+    const { x, y } = screenUvToCanvas(
+      uv,
+      this.canvas.width,
+      this.canvas.height,
+      this.screenUvBounds,
+      this.screenMap
+    );
 
     if (this.xpBoot?.active) {
       for (let i = this.hitRegions.length - 1; i >= 0; i -= 1) {
@@ -326,7 +376,13 @@ export class MySpaceScreen {
   handlePointer(uv) {
     if (!this.isPoweredOn) {
       if (!uv || !this.xpBoot?.active) return false;
-      const { x, y } = screenUvToCanvas(uv, WIDTH, HEIGHT, this.screenUvBounds, this.screenMap);
+      const { x, y } = screenUvToCanvas(
+      uv,
+      this.canvas.width,
+      this.canvas.height,
+      this.screenUvBounds,
+      this.screenMap
+    );
       return this.xpBoot.handlePointer(x, y);
     }
 
@@ -346,7 +402,13 @@ export class MySpaceScreen {
         this.xpBoot.clearHover();
         return;
       }
-      const { x, y } = screenUvToCanvas(uv, WIDTH, HEIGHT, this.screenUvBounds, this.screenMap);
+      const { x, y } = screenUvToCanvas(
+      uv,
+      this.canvas.width,
+      this.canvas.height,
+      this.screenUvBounds,
+      this.screenMap
+    );
       this.xpBoot.setHover(x, y);
       return;
     }
@@ -384,7 +446,7 @@ export class MySpaceScreen {
 
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.fillStyle = "#030403";
-    this.ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
     this.ctx.save();
     this.ctx.beginPath();
@@ -415,6 +477,7 @@ export class MySpaceScreen {
 
     drawIeChrome(this.ctx, this.layout, MYSPACE_PROFILE.url);
     this._drawScanlines();
+    if (this._showAlignGrid) this._paintAlignGrid();
 
     if (this.powerOnProgress < 1) {
       this._drawCrtPowerOn();
@@ -564,6 +627,7 @@ export class MySpaceScreen {
     this._rebuildHitRegions();
 
     try {
+      tagFrame("html-to-image");
       const captured = await toCanvas(captureEl, {
         width: captureW,
         height: fullH,
@@ -578,8 +642,12 @@ export class MySpaceScreen {
         }
       });
 
-      if (gen !== this._captureGen) return;
+      if (gen !== this._captureGen) {
+        releaseCaptureCanvas(captured);
+        return;
+      }
 
+      releaseCaptureCanvas(this._pageBitmap);
       this._pageBitmap = captured;
       this.pageHeight = fullH;
       this.scrollY = Math.min(this.scrollY, this.maxScroll);
@@ -613,6 +681,29 @@ export class MySpaceScreen {
     this.ctx.fillRect(trackX + 1, thumbY, trackW - 2, thumbH);
   }
 
+  _paintAlignGrid() {
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.strokeStyle = "rgba(255, 0, 180, 0.85)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, w - 2, h - 2);
+    ctx.beginPath();
+    ctx.moveTo(w / 2, 0);
+    ctx.lineTo(w / 2, h);
+    ctx.moveTo(0, h / 2);
+    ctx.lineTo(w, h / 2);
+    ctx.stroke();
+    const side = Math.round(Math.min(w, h) * 0.22);
+    const x = (w - side) / 2;
+    const y = (h - side) / 2;
+    ctx.strokeStyle = "rgba(0, 255, 120, 0.95)";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x, y, side, side);
+    ctx.restore();
+  }
+
   _drawScanlines() {
     const { window: win } = this.layout;
     const scanAlpha = 0.04 * CRT_OVERLAY_INTENSITY;
@@ -638,6 +729,6 @@ export class MySpaceScreen {
   }
 
   _drawCrtPowerOn() {
-    renderCrtPowerOnFrame(this.ctx, WIDTH, HEIGHT, this.powerOnProgress);
+    renderCrtPowerOnFrame(this.ctx, this.canvas.width, this.canvas.height, this.powerOnProgress);
   }
 }
