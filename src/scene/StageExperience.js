@@ -11,6 +11,12 @@ import { StageBootSequence } from "../ui/xpBoot/StageBootSequence.js";
 import { bakeFogAtlas } from "./neon/bakeFogAtlas.js";
 import { createFogMaterial } from "./neon/createFogMaterial.js";
 import { NeonSystem } from "./neon/NeonSystem.js";
+import { VolumetricFogPass } from "./neon/VolumetricFogPass.js";
+import {
+  FOG_DEFAULTS,
+  createFogParams,
+  FOG_HEAVY_FADE_IN_MS
+} from "../fog/fogConfig.js";
 import { configureSpotShadow } from "./stage/configureSpotShadow.js";
 import { LiveStageEnvironment } from "./stage/LiveStageEnvironment.js";
 import { buildStageStudioRoom } from "./stage/StageStudioRoom.js";
@@ -115,6 +121,17 @@ function readWorkRenderScale() {
     return WORK_RENDER_SCALE;
   }
   return 1;
+}
+
+/**
+ * Live atmosphere: volumetric by default. `?fog=haze` restores sheet+haze (paths kept).
+ * @returns {"haze" | "volumetric"}
+ */
+function readFogMode() {
+  const params = new URLSearchParams(window.location.search);
+  const v = (params.get("fog") || "").toLowerCase();
+  if (v === "haze" || v === "ring" || v === "0" || v === "off") return "haze";
+  return "volumetric";
 }
 
 export class StageExperience {
@@ -237,12 +254,30 @@ export class StageExperience {
       window.__stage = this;
     }
 
+    // Shared Tier-B pass + fogConfig. In composer always (gate warm compiles it).
+    // Default atmosphere: volumetric on; haze + ring hidden (paths kept for ?fog=haze).
+    this._fogMode = readFogMode();
+    this._volFogFade = 0;
+    this.volumetricFog = new VolumetricFogPass(this.camera, {
+      useComposerDepth: false,
+      depthPacked: true,
+      halfRes: FOG_DEFAULTS.halfRes,
+      params: createFogParams()
+    });
+    this.volumetricFog.setEnabled(false);
+    this.volumetricFog.setDensityScale(0);
+    this.volumetricFog.setNoiseFrozen(this.reducedMotion);
+
     this.post = new PostPass(
       this.renderer,
       this.pixelRatio,
       0, // grain off — sensor-noise look crushed fog; bloom stays
       this.camera,
-      { scene: this.scene, bloom: !this.reducedMotion }
+      {
+        scene: this.scene,
+        bloom: !this.reducedMotion,
+        volumetricPass: this.volumetricFog
+      }
     );
 
     this._initLoadGate();
@@ -255,6 +290,8 @@ export class StageExperience {
     this._mountPovSpotlight();
     this._setActiveVignette(0);
     this._runIntro();
+    // Apply after neon exists (mounted above) — sticky haze isolate for volumetric preview.
+    this._applyFogMode(this._fogMode, { resetFade: true });
 
     window.addEventListener("resize", this._onResize);
     this._onResize();
@@ -597,6 +634,114 @@ export class StageExperience {
   /** DEV — FogDepthCapture RT vs drawing buffer, live near/far, packed samples. */
   debugFogCapture() {
     return this.neon?.debugFogCapture?.(this.renderer, this.scene, this.camera) ?? null;
+  }
+
+  /**
+   * DEV — enable/disable volumetric fog pass (composer skips when off).
+   * Prefer `debugFog('volumetric'|'haze')` for the paired haze toggle.
+   * @param {boolean} on
+   */
+  setVolumetricEnabled(on) {
+    if (on) return this.debugFog("volumetric");
+    return this.debugFog("haze");
+  }
+
+  /**
+   * Live fog atmosphere.
+   * `volumetric` (default): raymarch on, haze + ring off.
+   * `haze`: raymarch off, haze + ring on (legacy compare / `?fog=haze`).
+   * @param {"haze" | "volumetric"} [mode]
+   */
+  debugFog(mode = "volumetric") {
+    const next = mode === "haze" || mode === "ring" ? "haze" : "volumetric";
+    this._applyFogMode(next, { resetFade: true });
+    return this.debugVolumetricFog();
+  }
+
+  /**
+   * @param {"haze" | "volumetric"} mode
+   * @param {{ resetFade?: boolean }} [opts]
+   */
+  _applyFogMode(mode, opts = {}) {
+    this._fogMode = mode === "haze" ? "haze" : "volumetric";
+    if (opts.resetFade) this._volFogFade = 0;
+
+    if (this._fogMode === "volumetric") {
+      // Sticky haze off; hide ring (do not delete paths).
+      this.neon?.debugFogIsolate?.({ haze: false, fog: false });
+      this.volumetricFog?.setDensityScale(0);
+      this.volumetricFog?.setEnabled(false);
+    } else {
+      this.neon?.debugFogIsolate?.({ haze: true, fog: true });
+      if (this.neon) this.neon._hazeIsolateOff = false;
+      this.volumetricFog?.setEnabled(false);
+      this.volumetricFog?.setDensityScale(0);
+      this._volFogFade = 0;
+    }
+  }
+
+  /**
+   * Gate volumetric march behind heavy-effects; fade density ~FOG_HEAVY_FADE_IN_MS.
+   * @param {number} dt
+   */
+  _tickVolumetricFog(dt) {
+    const pass = this.volumetricFog;
+    if (!pass) return;
+
+    const wantVol = this._fogMode === "volumetric";
+    const heavy = this._shouldRunIntroHeavyEffects();
+
+    if (!wantVol || !heavy) {
+      pass.setEnabled(false);
+      pass.setDensityScale(0);
+      if (!wantVol) this._volFogFade = 0;
+      return;
+    }
+
+    pass.setEnabled(true);
+    const fadeSec = FOG_HEAVY_FADE_IN_MS / 1000;
+    const step = fadeSec > 0 ? Math.min(Math.max(dt, 0), 1 / 20) / fadeSec : 1;
+    this._volFogFade = Math.min(1, this._volFogFade + step);
+    pass.setDensityScale(this._volFogFade);
+  }
+
+  /**
+   * DEV — hot-update fogConfig params on the live pass.
+   * @param {Record<string, number|boolean>} [partial]
+   */
+  setVolumetricParams(partial = {}) {
+    if (!this.volumetricFog) return null;
+    const next = { ...createFogParams(), ...partial };
+    this.volumetricFog.setParams(next);
+    if (this.reducedMotion) this.volumetricFog.setNoiseFrozen(true);
+    return this.debugVolumetricFog();
+  }
+
+  /** DEV — volumetric pass state for cost / soft-contact / toggle gates. */
+  debugVolumetricFog() {
+    const pass = this.volumetricFog;
+    if (!pass) return null;
+    const u = pass.marchMaterial?.uniforms;
+    return {
+      mode: this._fogMode ?? "volumetric",
+      enabled: Boolean(pass.enabled),
+      densityScale: u?.uDensityScale?.value ?? null,
+      fade: this._volFogFade ?? 0,
+      depthPacked: Boolean(pass.depthPacked),
+      halfRes: Boolean(pass.halfRes),
+      hasDepth: Boolean(pass._depthTexture),
+      hasValidSize: Boolean(pass._hasValidSize),
+      fogTarget: pass.fogTarget
+        ? { w: pass.fogTarget.width, h: pass.fogTarget.height }
+        : null,
+      near: u?.uCameraNear?.value ?? null,
+      far: u?.uCameraFar?.value ?? null,
+      steps: u?.uBaseRaymarchStepCount?.value ?? null,
+      density: u?.uFogDensityMultiplier?.value ?? null,
+      fillCap: u?.uInScatterFillCap?.value ?? null,
+      lightIntensities: u?.uLightIntensity?.value?.slice?.() ?? null,
+      noiseFrozen: Boolean(pass._noiseFrozen)
+    };
   }
 
   /** DEV — camera-parented depth RT + soft-term ramp. Not a second composer. */
@@ -1758,16 +1903,27 @@ export class StageExperience {
     this._tickModelReveal(dt);
     this._tickPostGrainStrength(dt);
     this._tickNeon(t);
+    this._tickVolumetricFog(dt);
 
     if (this.ui.readout) {
       const deg = this._getDisplayStageDegrees();
       this.ui.readout.textContent = `STAGE ${deg.toFixed(1).padStart(5, "0")}°`;
     }
 
-    // Opaque depth → fog soft fade (before beauty; not a second composer).
+    // Opaque depth → volumetric (FogDepthCapture) + legacy soft-fade sheet.
     const fogT = performance.now();
     tagFrame("fog-depth");
     this.neon?.captureFogDepth?.(this.renderer, this.scene, this.camera);
+    if (this.volumetricFog && this.neon?.depthCapture?.depthTexture) {
+      this.volumetricFog.setSceneDepth(this.neon.depthCapture.depthTexture, {
+        packed: true
+      });
+      // Four live neon PointLights — intensity already tracks neonProximity in NeonSystem.update.
+      if (this.volumetricFog.enabled) {
+        const lights = this.neon.stopLights?.map((s) => s.light) ?? [];
+        this.volumetricFog.setLights(lights);
+      }
+    }
     tagFrame(`fog-depth:${Math.round(performance.now() - fogT)}ms`);
 
     const beautyT = performance.now();

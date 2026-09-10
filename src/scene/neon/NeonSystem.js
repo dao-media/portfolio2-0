@@ -102,6 +102,8 @@ export class NeonSystem {
     this.entries = [];
     this.stopLights = [];
     this.hazeCards = [];
+    /** When true, `_updateHaze` keeps cards hidden (debugFogIsolate sticky). */
+    this._hazeIsolateOff = false;
 
     /** Live tune — defaults from constants; `__stage.setNeon` mutates these. */
     this._lightHeight = NEON_LIGHT_HEIGHT;
@@ -241,6 +243,9 @@ export class NeonSystem {
       const amp = this.reducedMotion ? 0 : NEON_FOG.driftAmp;
       drift.value.set(Math.sin(t * 0.15) * amp, Math.cos(t * 0.11) * amp);
     }
+    if (uniforms?.uCameraXZ?.value) {
+      uniforms.uCameraXZ.value.set(this.camera.position.x, this.camera.position.z);
+    }
 
     for (let i = 0; i < n; i += 1) {
       const prox = neonProximity(theta, this.entries[i].theta);
@@ -285,21 +290,33 @@ export class NeonSystem {
    * pass) — hiding it removes neon-stained floor. Feather is the radial band.
    * @param {{ floor?: boolean, feather?: number, fog?: boolean }} opts
    */
-  debugFogIsolate({ floor, feather, fog } = {}) {
+  debugFogIsolate({ floor, feather, fog, haze } = {}) {
     if (typeof floor === "boolean" && this._stageFloor) {
       this._stageFloor.visible = floor;
     }
     const u = this.fogMaterial?.uniforms;
-    if (typeof feather === "number" && u?.uFeather) {
-      u.uFeather.value = Math.max(0, feather);
+    if (typeof feather === "number") {
+      const f = Math.max(0, feather);
+      if (u?.uFeather) u.uFeather.value = f;
+      if (u?.uFeatherInner) u.uFeatherInner.value = f;
     }
     if (typeof fog === "boolean" && this.fogRing) {
       this.fogRing.visible = fog;
     }
+    if (typeof haze === "boolean") {
+      this._hazeIsolateOff = !haze;
+      for (const card of this.hazeCards) {
+        if (card?.mesh) card.mesh.visible = haze;
+      }
+    }
     return {
       floorVisible: this._stageFloor?.visible ?? null,
       feather: u?.uFeather?.value ?? null,
-      fogVisible: this.fogRing?.visible ?? null
+      featherInner: u?.uFeatherInner?.value ?? null,
+      fogVisible: this.fogRing?.visible ?? null,
+      hazeVisible: this.hazeCards.filter((c) => c.mesh.visible).length,
+      hazeTotal: this.hazeCards.length,
+      hazeIsolateOff: Boolean(this._hazeIsolateOff)
     };
   }
 
@@ -411,6 +428,11 @@ export class NeonSystem {
         rOuter: NEON_FOG.rOuter,
         layer: NEON_FOG_LAYER,
         softFade: NEON_FOG.softFade,
+        opacity: NEON_FOG.opacity,
+        feather: NEON_FOG.feather,
+        featherInner: NEON_FOG.featherInner,
+        distFadeStart: NEON_FOG.distFadeStart,
+        distFadeEnd: NEON_FOG.distFadeEnd,
         depthCapture: Boolean(this.depthCapture?.depthTexture)
       },
       hazeVisible: this.hazeCards.filter((c) => c.mesh.visible).length,
@@ -462,6 +484,12 @@ export class NeonSystem {
 
   _updateHaze(camTheta, time, atlas) {
     if (!this.hazeCards.length) return;
+    if (this._hazeIsolateOff) {
+      for (const card of this.hazeCards) {
+        card.mesh.visible = false;
+      }
+      return;
+    }
     for (const card of this.hazeCards) {
       const prox = neonProximity(camTheta, card.theta);
       if (prox < NEON_FOG.hazeCull) {
