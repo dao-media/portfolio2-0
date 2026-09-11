@@ -19,6 +19,9 @@ export const CAM_Y = 2.85;
 /** Close / focused POV on +Z (before resting pullback is applied). */
 export const CAM_Z = STAGE_RADIUS + CAM_BACKOFF;
 export const CAM_FOV = 42;
+/** Near/far — far must clear the studio shell walls (~180 m from rest cam). */
+export const CAM_NEAR = 0.1;
+export const CAM_FAR = 220;
 export const LOOK = new THREE.Vector3(0, 2.35, STAGE_RADIUS);
 
 /** Disabled — vignette moves no longer dolly in/out; use click-to-focus instead. */
@@ -121,13 +124,20 @@ export const NEON_FOG = {
   rOuter: 22,
   y: 0.05,
   albedo: 0.75,
-  opacity: 0.85,
+  /** Ground-glow only — haze carries atmosphere. Was 0.85 when the ring was judged alone. */
+  opacity: 0.32,
   speed: 1.0,
   /** Spatial scale of the FBM bake over the ~44 m footprint (old 3.0 × 10/44). */
   uScale: 0.7,
   uLoopRadius: 1.5,
   footprint: 44,
+  /** Outer radial feather (m). */
   feather: 2.5,
+  /**
+   * Inner radial feather (m). Wider than outer so the hole edge is a gradient,
+   * not a hard strip — do not lower rInner / fill the disc.
+   */
+  featherInner: 6.0,
   driftAmp: 4.0,
   /**
    * Soft-particle fade distance (m) vs opaque scene depth.
@@ -135,12 +145,17 @@ export const NEON_FOG = {
    */
   softFade: 2.0,
   /**
-   * Haze off (0) while judging the fog ring. The 5×6 m additive cards were
-   * misread as lit studio walls — the room is MeshBasic and never took neon.
-   * Restore **20** / **12** coarse + hazeOpacity **0.2** after the taste pass.
+   * World-XZ distance fade vs camera (m). Near arc at rest is ~6–14 m; far arc
+   * ~42–50 m. Fade **20 → 36** sits in the dead gap — far/horizon band dies,
+   * near pool stays full.
    */
-  hazeCount: 0,
-  hazeCountCoarse: 0,
+  distFadeStart: 20,
+  distFadeEnd: 36,
+  /**
+   * Y-billboard haze cards — atmosphere. Ring is ground-glow only.
+   */
+  hazeCount: 20,
+  hazeCountCoarse: 12,
   hazeHeight: 6,
   hazeWidth: 5,
   hazeRadius: 18,

@@ -1,0 +1,32 @@
+{
+  "label": "Manual 1",
+  "params": {
+    "halfRes": true,
+    "fogMinY": -0.1,
+    "fogFloorFadeRangeY": 2.05,
+    "fogMaxY": 12.8,
+    "fogFadeOutRangeY": 1.2,
+    "fogFadeOutPow": 1.8,
+    "heightFogFactor": 0.54,
+    "heightFogStartY": -1,
+    "heightFogEndY": 0,
+    "heightFogExpK": 0.37,
+    "heightFogHazeStartY": 0.5,
+    "heightFogHazeRangeY": 1.8,
+    "heightFogHazeFloor": 0.25,
+    "fogDensityMultiplier": 0.35,
+    "baseRaymarchStepCount": 64,
+    "baseMaxRayLength": 32,
+    "noiseBias": 0.4,
+    "noisePow": 3,
+    "globalScale": 3.25,
+    "noiseMovementX": 0.06,
+    "noiseMovementY": 0.06,
+    "noiseSpeed": 7.95,
+    "outputDither": 0.02,
+    "falloffNoiseWarp": 0,
+    "falloffCeilingJitter": 1.2,
+    "noiseYSlice": 0,
+    "noiseYScroll": -0.019
+  }
+}

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>Fog Lab — Portfolio 2.0</title>
+    <link rel="stylesheet" href="/src/fog-lab/fog-lab.css" />
+  </head>
+  <body class="fog-lab">
+    <canvas id="fog-lab-canvas"></canvas>
+
+    <aside class="fog-lab__hud" aria-label="Fog lab controls">
+      <header class="fog-lab__header">
+        <h1>Fog lab</h1>
+        <p class="fog-lab__status" id="fog-lab-status">
+          GATE 1 shell — volumetric pending peer check
+        </p>
+      </header>
+
+      <div class="fog-lab__stats" id="fog-lab-stats" aria-live="polite">
+        <span><em>FPS</em> <strong id="stat-fps">—</strong></span>
+        <span><em>frame</em> <strong id="stat-ms">—</strong> ms</span>
+        <span><em>halfRes</em> <strong id="stat-half">—</strong></span>
+      </div>
+
+      <div class="fog-lab__presets">
+        <button type="button" data-preset="grazing">Grazing rest POV</button>
+        <button type="button" data-preset="overhead">Overhead</button>
+        <button type="button" data-preset="ring">Ring eye-level</button>
+      </div>
+
+      <form class="fog-lab__sliders" id="fog-lab-sliders"></form>
+
+      <p class="fog-lab__note">
+        Isolated from the live stage. Tune here until GATE 3+ is approved.
+        Orbit: drag · zoom: scroll.
+      </p>
+    </aside>
+
+    <script type="module" src="/src/fog-lab/main.js"></script>
+  </body>
+</html>

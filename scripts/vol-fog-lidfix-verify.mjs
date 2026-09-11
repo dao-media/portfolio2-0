@@ -7,10 +7,13 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { chromium } from "playwright";
 import { createServer } from "vite";
+import { FOG_DEFAULTS } from "../src/fog/fogConfig.js";
 
 const PORT = 5214;
 const OUT = "public/debug";
 const BOOT_MS = 120_000;
+const FULL_D = FOG_DEFAULTS.fogDensityMultiplier;
+const QUARTER_D = FULL_D * 0.25;
 mkdirSync(OUT, { recursive: true });
 
 const server = await createServer({
@@ -174,8 +177,8 @@ const poses = [
 ];
 
 for (const dens of [
-  { tag: "full", d: 0.16 },
-  { tag: "quarter", d: 0.04 }
+  { tag: "full", d: FULL_D },
+  { tag: "quarter", d: QUARTER_D }
 ]) {
   const uniforms = await applyDensity(dens.d);
   for (const pose of poses) {
@@ -195,7 +198,7 @@ for (const dens of [
 }
 
 await setPose({ heightDelta: 0, lookAtYDelta: 0 });
-await applyDensity(0.16);
+await applyDensity(FULL_D);
 await page.evaluate(() => {
   window.__stage.cameraRig.state.isZoomed = false;
   window.__stage.volumetricFog?.setNoiseFrozen?.(false);

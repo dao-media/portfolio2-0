@@ -27,6 +27,8 @@ import {
   CAM_Y,
   CAM_Z,
   CAM_FOV,
+  CAM_NEAR,
+  CAM_FAR,
   CAM_REST_BACK,
   LOOK,
   AMBIENT_INTENSITY,
@@ -200,8 +202,8 @@ export class StageExperience {
     this.camera = new THREE.PerspectiveCamera(
       CAM_FOV,
       window.innerWidth / window.innerHeight,
-      0.1,
-      120
+      CAM_NEAR,
+      CAM_FAR
     );
     this.scene.add(this.camera);
 

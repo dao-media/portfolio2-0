@@ -1,0 +1,131 @@
+.fog-lab {
+  margin: 0;
+  min-height: 100%;
+  background: #141414;
+  color: #e8e8e8;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.fog-lab #fog-lab-canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  touch-action: none;
+}
+
+.fog-lab__hud {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  width: min(320px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  padding: 12px 14px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 10, 10, 0.88);
+  backdrop-filter: blur(8px);
+  box-sizing: border-box;
+  z-index: 2;
+}
+
+.fog-lab__header h1 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fog-lab__status {
+  margin: 0 0 10px;
+  color: #9ad4ff;
+  line-height: 1.35;
+}
+
+.fog-lab__stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.fog-lab__stats em {
+  font-style: normal;
+  color: #888;
+  margin-right: 4px;
+}
+
+.fog-lab__stats strong {
+  font-weight: 600;
+  color: #fff;
+}
+
+.fog-lab__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.fog-lab__presets button {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font: inherit;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.fog-lab__presets button:hover,
+.fog-lab__presets button:focus-visible {
+  border-color: #9ad4ff;
+  outline: none;
+}
+
+.fog-lab__sliders {
+  display: grid;
+  gap: 8px;
+}
+
+.fog-lab__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  align-items: center;
+}
+
+.fog-lab__row label {
+  grid-column: 1 / -1;
+  color: #aaa;
+}
+
+.fog-lab__row input[type="range"] {
+  width: 100%;
+  accent-color: #9ad4ff;
+}
+
+.fog-lab__row output {
+  min-width: 3.5ch;
+  text-align: right;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.fog-lab__row--check {
+  grid-template-columns: auto 1fr;
+}
+
+.fog-lab__row--check label {
+  grid-column: auto;
+}
+
+.fog-lab__note {
+  margin: 12px 0 0;
+  color: #777;
+  line-height: 1.4;
+}

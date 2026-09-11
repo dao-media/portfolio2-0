@@ -47,6 +47,9 @@ uniform float uHeightFogFactor;
 uniform float uHeightFogStartY;
 uniform float uHeightFogEndY;
 uniform float uHeightFogExpK;
+uniform float uHeightFogHazeStartY;
+uniform float uHeightFogHazeRangeY;
+uniform float uHeightFogHazeFloor;
 uniform float uFogDensityMultiplier;
 uniform float uDensityScale;
 uniform float uFalloffNoiseWarp;
@@ -158,12 +161,17 @@ float heightFalloff(float y, float startYOffset) {
 
   // Live path: exponential — asymptotes, no hard top edge (probe-1 confirmed lid).
   // k ≤ 0 keeps the legacy smoothstep lid (A/B / rollback only).
-  // Default k ~0.18: steep k (≥~0.5) saturates at grazing into a soft sheet that
-  // scores like the old binary lid on the row-315 instrument.
   if (uHeightFogExpK > 1e-5) {
     float h = max(y - startY, 0.0);
     float amp = 0.35 + uHeightFogFactor;
-    return amp * exp(-h * uHeightFogExpK);
+    float dens = amp * exp(-h * uHeightFogExpK);
+    // Soft mid-PC ceiling → haze above (smoothstep + residual floor; not a hard lid).
+    if (uHeightFogHazeRangeY > 1e-5) {
+      float hazeStart = uHeightFogHazeStartY + startYOffset;
+      float gate = 1.0 - smoothstep(hazeStart, hazeStart + uHeightFogHazeRangeY, y);
+      dens *= mix(max(uHeightFogHazeFloor, 0.0), 1.0, gate);
+    }
+    return dens;
   }
   float fadeTop = 1.0 - pow(
     smoothstep(uFogMaxY - uFogFadeOutRangeY, uFogMaxY, y),
@@ -497,6 +505,9 @@ export class VolumetricFogPass extends Pass {
       uHeightFogStartY: { value: d.heightFogStartY },
       uHeightFogEndY: { value: d.heightFogEndY },
       uHeightFogExpK: { value: d.heightFogExpK },
+      uHeightFogHazeStartY: { value: d.heightFogHazeStartY },
+      uHeightFogHazeRangeY: { value: d.heightFogHazeRangeY },
+      uHeightFogHazeFloor: { value: d.heightFogHazeFloor },
       uFogDensityMultiplier: { value: d.fogDensityMultiplier },
       uDensityScale: { value: 1 },
       uFalloffNoiseWarp: { value: d.falloffNoiseWarp },
@@ -581,6 +592,9 @@ export class VolumetricFogPass extends Pass {
     u.uHeightFogStartY.value = p.heightFogStartY;
     u.uHeightFogEndY.value = p.heightFogEndY;
     u.uHeightFogExpK.value = p.heightFogExpK;
+    u.uHeightFogHazeStartY.value = p.heightFogHazeStartY;
+    u.uHeightFogHazeRangeY.value = p.heightFogHazeRangeY;
+    u.uHeightFogHazeFloor.value = p.heightFogHazeFloor;
     u.uFogDensityMultiplier.value = p.fogDensityMultiplier;
     u.uFalloffNoiseWarp.value = p.falloffNoiseWarp;
     u.uFalloffCeilingJitter.value = p.falloffCeilingJitter;
