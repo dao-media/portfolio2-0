@@ -23,3 +23,4 @@ Rules:
 - Prefer numbers copied from `src/scene/stage/constants.js` and the owning module — do not invent tunables.
 - If you rename a file or constant, grep README and fix every mention.
 - Bump the **Last verified** date at the top of README when you edit it.
+- **Prepend** a short row to the **Latest changes** table near the top (newest first) whenever the stage or README facts change.

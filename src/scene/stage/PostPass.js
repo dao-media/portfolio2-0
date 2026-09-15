@@ -10,9 +10,9 @@ import { NEON_BLOOM } from "./constants.js";
 import { FilmGrainEffect } from "./FilmGrainEffect.js";
 
 /**
- * One live composer: RenderPass → volumetric fog → bloom → (optional) film grain.
- * Grain defaults to **0**. Grain stays last so it is not bloomed.
- * Do not add a second composer.
+ * One live composer: RenderPass → volumetric fog → (optional) EdgeGlitchPass →
+ * bloom → (optional) film grain. Grain defaults to **0**. Grain stays last so
+ * it is not bloomed. Do not add a second composer.
  */
 export class PostPass {
   /**
@@ -20,7 +20,13 @@ export class PostPass {
    * @param {number} pixelRatio
    * @param {number} grain
    * @param {THREE.Camera} camera
-   * @param {{ bloom?: boolean, scene?: THREE.Scene, volumetricPass?: import("../neon/VolumetricFogPass.js").VolumetricFogPass | null }} [options]
+   * @param {{
+   *   bloom?: boolean,
+   *   scene?: THREE.Scene,
+   *   volumetricPass?: import("../neon/VolumetricFogPass.js").VolumetricFogPass | null,
+   *   edgeGlitchPass?: import("../edgeGlitch/EdgeGlitchPass.js").EdgeGlitchPass | null,
+   *   edgeTubeGlitchPass?: import("../edgeGlitch/EdgeGlitchPass.js").EdgeGlitchPass | null
+   * }} [options]
    */
   constructor(renderer, pixelRatio, grain = 0, camera, options = {}) {
     this.renderer = renderer;
@@ -33,6 +39,9 @@ export class PostPass {
     this._drawH = 0;
     this._scene = options.scene ?? null;
     this.volumetricPass = options.volumetricPass ?? null;
+    this.edgeGlitchPass =
+      options.edgeGlitchPass ?? options.edgeTubeGlitchPass ?? null;
+    this.edgeTubeGlitchPass = this.edgeGlitchPass;
 
     this.composer = new EffectComposer(renderer, {
       frameBufferType: THREE.HalfFloatType,
@@ -41,8 +50,12 @@ export class PostPass {
 
     this.renderPass = new RenderPass(this._scene ?? new THREE.Scene(), camera);
     const bloomScale = NEON_BLOOM.resolutionScale ?? 0.5;
+    // mipmapBlur: false — Kawase/mipmap path intermittently outputs a full-black
+    // frame when the camera translates every frame (stop-0 parallax). Kernel
+    // blur stays stable under the same motion. Do not re-enable without a
+    // move-cursor zero-frame probe at stop 0.
     this.bloomEffect = new BloomEffect({
-      mipmapBlur: true,
+      mipmapBlur: false,
       luminanceThreshold: NEON_BLOOM.luminanceThreshold,
       luminanceSmoothing: NEON_BLOOM.luminanceSmoothing,
       intensity: options.bloom === false ? 0 : NEON_BLOOM.intensity,
@@ -50,16 +63,6 @@ export class PostPass {
       resolutionScale: bloomScale,
       kernelSize: KernelSize.LARGE
     });
-    // mipmapBlurPass.setSize ignores resolutionScale (full-res mips). Scale it
-    // to match so half-res bloom is actually half-res. Never allow 0×0.
-    const bloomSetSize = this.bloomEffect.setSize.bind(this.bloomEffect);
-    this.bloomEffect.setSize = (width, height) => {
-      bloomSetSize(width, height);
-      this.bloomEffect.mipmapBlurPass.setSize(
-        Math.max(1, Math.round(Math.max(0, width) * bloomScale)),
-        Math.max(1, Math.round(Math.max(0, height) * bloomScale))
-      );
-    };
     this.bloomPass = new EffectPass(camera, this.bloomEffect);
     this.grainEffect = new FilmGrainEffect({ grain });
     this.grainPass = new EffectPass(camera, this.grainEffect);
@@ -67,6 +70,10 @@ export class PostPass {
     this.composer.addPass(this.renderPass);
     if (this.volumetricPass) {
       this.composer.addPass(this.volumetricPass);
+    }
+    // fog → EdgeGlitch → bloom → grain (silhouette tears before bloom)
+    if (this.edgeGlitchPass) {
+      this.composer.addPass(this.edgeGlitchPass);
     }
     this.composer.addPass(this.bloomPass);
     this.composer.addPass(this.grainPass);
@@ -114,6 +121,20 @@ export class PostPass {
     }
 
     this.volumetricPass?.setSize?.(dw, dh);
+  }
+
+  /**
+   * Authored bloom intensity (restored after fog opacity land fade).
+   * @param {number} intensity
+   */
+  setBloomIntensity(intensity) {
+    if (!this.bloomEffect) return;
+    this.bloomEffect.intensity = Math.max(0, intensity);
+  }
+
+  /** @returns {number} */
+  getBloomIntensity() {
+    return this.bloomEffect?.intensity ?? 0;
   }
 
   /**
@@ -165,6 +186,7 @@ export class PostPass {
   dispose() {
     this.composer.dispose();
     this.bloomEffect.dispose();
+    // edgeTubeGlitchEffect is owned by EdgeGlitchSystem
     this.grainEffect.dispose();
     this.volumetricPass?.dispose?.();
   }

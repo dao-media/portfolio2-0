@@ -21,7 +21,10 @@ import { FOG_PARAM_SCHEMA, FOG_DEFAULTS, createFogParams } from "../fog/fogConfi
 const PRIORITY = [
   "fogDensityMultiplier",
   "noisePow",
+  "falloffNoiseWarp",
   "noiseSpeed",
+  "fogDistFadeStart",
+  "fogDistFadeEnd",
   "heightFogExpK",
   "heightFogHazeStartY",
   "heightFogHazeFloor",
@@ -43,6 +46,10 @@ const LABELS = {
   outputDither:           "output dither",
   falloffCeilingJitter:   "ceiling jitter",
   falloffNoiseWarp:       "noise warp",
+  fogDistFadeStart:       "dist fade start",
+  fogDistFadeEnd:         "dist fade end",
+  fogNearFadeStart:       "near fade start",
+  fogNearFadeEnd:         "near fade end",
   noiseMovementX:         "wind X",
   noiseMovementY:         "wind Z",
   noiseYScroll:           "Y scroll",
@@ -470,7 +477,7 @@ const FOG_TUNER_CSS = `
 /* ── Toggle button ───────────────────────────────────────── */
 #fog-tuner-toggle {
   position: fixed;
-  bottom: 60px;
+  bottom: 72px;
   right: 16px;
   z-index: 9000;
   width: 34px;

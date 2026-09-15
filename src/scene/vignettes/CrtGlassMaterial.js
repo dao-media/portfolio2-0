@@ -1,17 +1,38 @@
 import * as THREE from "three";
 import { SPOT_ANGLE, SPOT_DISTANCE, SPOT_PENUMBRA } from "../stage/constants.js";
 
-/** Spotlight-gated Fresnel glass — softbox env streak only inside the POV pool. */
+/** Spotlight-gated Fresnel glass + neon PointLight specular (single-source). */
 export const CRT_GLASS = {
-  roughness: 0.1,
-  envMapIntensity: 2.65,
-  directGlare: 0.22,
+  roughness: 0.42,
+  /**
+   * Dark stage IBL through CubeUV reads as a gray radial disc when this is ~2+.
+   * Keep low; glare is mostly the flat gradient (see fragment), not env.
+   */
+  envMapIntensity: 0.22,
+  directGlare: 0.06,
+  /**
+   * Neon PointLight specular on glass — pin glint only (not a broad disc).
+   * Must stay under bloom threshold ~1 or half-res bloom softens it back into a disc.
+   * Do not raise neonGlare; do not reintroduce N·L fill.
+   */
+  neonGlare: 0.28,
+  neonSpecPower: 180,
+  neonDistance: 5.5,
   shellOffset: 0.006,
-  shellScale: 1.014,
+  /** Keep 1 — scaling the shell from the mesh origin shears it off the bezel. */
+  shellScale: 1,
   renderOrder: 12,
-  fresnelPower: 2.35,
-  baseGlare: 0.15,
-  fresnelGlare: 3.4
+  fresnelPower: 2.4,
+  baseGlare: 0.035,
+  fresnelGlare: 0.45,
+  /** Spot-pool edge — lower sharpness / wider edge = no hard circle on the CRT. */
+  spotSharpness: 1.0,
+  spotEdgeWidth: 0.12,
+  spotPenumbraScale: 1.0,
+  /** Direct lamp+spec exponents (lower = softer hotspot). */
+  lampPower: 1.6,
+  specPowerMin: 2.5,
+  specPowerMax: 5.0
 };
 
 const CRT_GLASS_VERT = /* glsl */ `
@@ -45,7 +66,16 @@ const CRT_GLASS_FRAG = /* glsl */ `
   uniform float uFresnelGlare;
   uniform float uRoughness;
   uniform float uDirectGlare;
+  uniform float uLampPower;
+  uniform float uSpecPowerMin;
+  uniform float uSpecPowerMax;
   uniform vec3 uSpotColor;
+  uniform vec3 uNeonOrigin;
+  uniform vec3 uNeonColor;
+  uniform float uNeonIntensity;
+  uniform float uNeonGlare;
+  uniform float uNeonSpecPower;
+  uniform float uNeonDistance;
 
   varying vec3 vWorldPosition;
   varying vec3 vWorldNormal;
@@ -60,14 +90,15 @@ const CRT_GLASS_FRAG = /* glsl */ `
 
     vec3 L = toPoint / max(dist, 1e-5);
     float cosAngle = dot(L, uSpotDirection);
-    if (cosAngle <= cos(uSpotAngle)) return 0.0;
-
     float cosOuter = cos(uSpotAngle);
-    float cosInner = cos(uSpotAngle * (1.0 - uSpotPenumbra * uSpotPenumbraScale));
-    float spot = smoothstep(cosOuter - uSpotEdgeWidth, cosInner, cosAngle);
-    spot = pow(clamp(spot, 0.0, 1.0), uSpotSharpness);
+    if (cosAngle <= cosOuter) return 0.0;
 
-    float distFade = 1.0 - smoothstep(uSpotDistance * 0.82, uSpotDistance, dist);
+    float cosInner = cos(uSpotAngle * (1.0 - uSpotPenumbra * uSpotPenumbraScale));
+    // Wide smoothstep — feather the pool so the CRT does not read a hard disk edge.
+    float spot = smoothstep(cosOuter - uSpotEdgeWidth, cosInner, cosAngle);
+    spot = pow(clamp(spot, 0.0, 1.0), max(uSpotSharpness, 1.0));
+
+    float distFade = 1.0 - smoothstep(uSpotDistance * 0.72, uSpotDistance, dist);
     return spot * distFade;
   }
 
@@ -87,21 +118,52 @@ const CRT_GLASS_FRAG = /* glsl */ `
       viewMatrix
     );
 
+    // Flat fresnel wash only at the rim — center CubeUV+spot used to read as a gray disc.
+    vec3 flatWash = vec3(0.62, 0.70, 0.82) * (uBaseGlare + fresnel * uFresnelGlare);
     vec4 envSample = textureCubeUV(envMap, envMapRotation * reflectVec, uRoughness);
-    vec4 streakSample = textureCubeUV(envMap, envMapRotation * streakVec, uRoughness + 0.05);
+    vec4 streakSample = textureCubeUV(envMap, envMapRotation * streakVec, uRoughness + 0.12);
     float reflectMix = uBaseGlare + fresnel * uFresnelGlare;
-    vec3 envGlare =
-      (envSample.rgb * reflectMix + streakSample.rgb * (uBaseGlare * 1.25 + fresnel * 0.75)) *
-      envMapIntensity;
+    vec3 envHint =
+      (envSample.rgb * reflectMix + streakSample.rgb * (uBaseGlare + fresnel * 0.45)) *
+      envMapIntensity *
+      0.18;
+    vec3 envGlare = flatWash + envHint;
 
-    // Broad POV-spot streak — keeps glare visible when env samples are dark.
+    // Soft POV-spot wash — keep glare readable without a hard specular disk.
     vec3 lightDir = normalize(uSpotOrigin - vWorldPosition);
     vec3 halfVec = normalize(lightDir + viewDir);
-    float lamp = pow(max(dot(normal, lightDir), 0.0), 2.2);
-    float spec = pow(max(dot(normal, halfVec), 0.0), mix(4.0, 14.0, uRoughness));
-    vec3 directGlare = uSpotColor * uDirectGlare * (lamp * 0.55 + spec * 0.45);
+    float lamp = pow(max(dot(normal, lightDir), 0.0), uLampPower);
+    float specPow = mix(uSpecPowerMin, uSpecPowerMax, uRoughness);
+    float spec = pow(max(dot(normal, halfVec), 0.0), specPow);
+    vec3 directGlare = uSpotColor * uDirectGlare * (lamp * 0.4 + spec * 0.15);
 
-    vec3 glare = (envGlare + directGlare) * spotMask;
+    // Neon PointLight specular — pin Blinn tip only (single-source, spot may be 0).
+    // No N·L fill. Hard NH gate + clamp keep bloom from re-softening into a disc.
+    vec3 neonGlare = vec3(0.0);
+    if (uNeonIntensity > 1e-4) {
+      vec3 toNeon = uNeonOrigin - vWorldPosition;
+      float neonDist = length(toNeon);
+      float neonAtt = 1.0 - smoothstep(uNeonDistance * 0.28, uNeonDistance, neonDist);
+      vec3 neonDir = toNeon / max(neonDist, 1e-5);
+      vec3 neonHalf = normalize(neonDir + viewDir);
+      float nh = max(dot(normal, neonHalf), 0.0);
+      float neonSpec = pow(nh, uNeonSpecPower);
+      neonSpec *= smoothstep(0.92, 0.995, nh);
+      float neonLevel = clamp(uNeonIntensity / 28.0, 0.0, 1.5);
+      neonGlare =
+        uNeonColor *
+        uNeonGlare *
+        neonLevel *
+        neonAtt *
+        neonSpec *
+        fresnel *
+        fresnel;
+      // Cap so half-res bloom cannot re-inflate a round wash (§20.20 recurrence).
+      neonGlare = min(neonGlare, vec3(0.28));
+    }
+
+    // Rim env/spot under spot pool; neon glint is independent (spot may be 0).
+    vec3 glare = (envGlare + directGlare) * (spotMask * fresnel) + neonGlare;
 
     gl_FragColor = vec4(glare, 1.0);
   }
@@ -126,15 +188,24 @@ export function createCrtGlassMaterial(envMap = null) {
       uSpotAngle: { value: SPOT_ANGLE },
       uSpotPenumbra: { value: SPOT_PENUMBRA },
       uSpotDistance: { value: SPOT_DISTANCE },
-      uSpotSharpness: { value: 1.6 },
-      uSpotEdgeWidth: { value: 0.012 },
-      uSpotPenumbraScale: { value: 0.45 },
+      uSpotSharpness: { value: CRT_GLASS.spotSharpness },
+      uSpotEdgeWidth: { value: CRT_GLASS.spotEdgeWidth },
+      uSpotPenumbraScale: { value: CRT_GLASS.spotPenumbraScale },
       uFresnelPower: { value: CRT_GLASS.fresnelPower },
       uBaseGlare: { value: CRT_GLASS.baseGlare },
       uFresnelGlare: { value: CRT_GLASS.fresnelGlare },
       uRoughness: { value: CRT_GLASS.roughness },
       uDirectGlare: { value: CRT_GLASS.directGlare },
-      uSpotColor: { value: new THREE.Color(0xfff2e0) }
+      uLampPower: { value: CRT_GLASS.lampPower },
+      uSpecPowerMin: { value: CRT_GLASS.specPowerMin },
+      uSpecPowerMax: { value: CRT_GLASS.specPowerMax },
+      uSpotColor: { value: new THREE.Color(0xfff2e0) },
+      uNeonOrigin: { value: new THREE.Vector3() },
+      uNeonColor: { value: new THREE.Color(0x00e5ff) },
+      uNeonIntensity: { value: 0 },
+      uNeonGlare: { value: CRT_GLASS.neonGlare },
+      uNeonSpecPower: { value: CRT_GLASS.neonSpecPower },
+      uNeonDistance: { value: CRT_GLASS.neonDistance }
     },
     vertexShader: CRT_GLASS_VERT,
     fragmentShader: CRT_GLASS_FRAG,
@@ -146,11 +217,25 @@ export function createCrtGlassMaterial(envMap = null) {
     toneMapped: false
   });
 
-  if (envMap) {
-    material.envMap = envMap;
-  }
-
+  applyCrtGlassEnvMap(material, envMap);
   return material;
+}
+
+/**
+ * ShaderMaterial does not get CubeUV size defines the way MeshStandardMaterial does.
+ * Without them, `#include <cube_uv_reflection_fragment>` fails to compile.
+ * @param {THREE.ShaderMaterial} material
+ * @param {THREE.Texture | null | undefined} envMap
+ */
+function applyCrtGlassEnvMap(material, envMap) {
+  if (!material || !envMap) return;
+  if (envMap.mapping !== THREE.CubeUVReflectionMapping) return;
+
+  // Bind as material.envMap so WebGLProgram injects CUBEUV_* once.
+  // Do not also stamp those defines — redefinition fails the fragment compile.
+  material.envMap = envMap;
+  if (material.uniforms?.envMap) material.uniforms.envMap.value = envMap;
+  material.needsUpdate = true;
 }
 
 const _spotOrigin = new THREE.Vector3();
@@ -180,11 +265,9 @@ export function setCrtGlassSpotlight(material, spotLight, spotTarget) {
 /** @param {THREE.ShaderMaterial} material @param {THREE.Texture} envMap */
 export function setCrtGlassEnvMap(material, envMap) {
   if (!material?.uniforms?.envMap || !envMap) return;
-  material.envMap = envMap;
-  material.uniforms.envMap.value = envMap;
+  applyCrtGlassEnvMap(material, envMap);
   material.uniforms.envMapIntensity.value =
     CRT_GLASS.envMapIntensity * (material.userData._focusGlareScale ?? 1);
-  material.needsUpdate = true;
 }
 
 /**
@@ -205,6 +288,32 @@ export function setCrtGlassFocusScale(material, focusBlend) {
   material.uniforms.uDirectGlare.value = CRT_GLASS.directGlare * scale;
   material.uniforms.uFresnelGlare.value = CRT_GLASS.fresnelGlare * scale;
   material.uniforms.uBaseGlare.value = CRT_GLASS.baseGlare * scale;
+  if (material.uniforms.uNeonGlare) {
+    // Keep neon glints readable when dollied in — do not crush as hard as env wash.
+    material.uniforms.uNeonGlare.value = CRT_GLASS.neonGlare * Math.max(0.55, scale);
+  }
+}
+
+const _neonOrigin = new THREE.Vector3();
+
+/**
+ * Drive glass specular from the stop neon PointLight (works with POV spot off).
+ * @param {THREE.ShaderMaterial} material
+ * @param {THREE.PointLight | null | undefined} neonLight
+ */
+export function setCrtGlassNeonLight(material, neonLight) {
+  if (!material?.uniforms?.uNeonOrigin) return;
+  if (!neonLight || neonLight.intensity < 1e-4) {
+    material.uniforms.uNeonIntensity.value = 0;
+    return;
+  }
+  neonLight.getWorldPosition(_neonOrigin);
+  material.uniforms.uNeonOrigin.value.copy(_neonOrigin);
+  material.uniforms.uNeonColor.value.copy(neonLight.color);
+  material.uniforms.uNeonIntensity.value = neonLight.intensity;
+  if (neonLight.distance > 1e-3) {
+    material.uniforms.uNeonDistance.value = neonLight.distance * 1.35;
+  }
 }
 
 /**

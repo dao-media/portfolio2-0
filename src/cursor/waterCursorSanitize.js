@@ -55,6 +55,19 @@ export function sanitizeWaterCursorConfig(overrides = {}) {
   cfg.omegaMax = clamp(finite(cfg.omegaMax, 6), 0.5, 24);
   cfg.waveTravel = clamp(finite(cfg.waveTravel, 1.5), 0, 6);
 
+  cfg.rimPushPx = clamp(finite(cfg.rimPushPx, 22), 0, 64);
+  cfg.rimFollowDamp = clamp(finite(cfg.rimFollowDamp, 0.42), 0.15, 1);
+  cfg.rimBlowStretch = clamp(finite(cfg.rimBlowStretch, 0.18), 0, 0.6);
+  cfg.rimSlurp = clamp(finite(cfg.rimSlurp, 0.62), 0, 1.2);
+  cfg.rimSlurpBand = clamp(finite(cfg.rimSlurpBand, 0.032), 0.005, 0.12);
+  cfg.rimInsideFree = clamp(finite(cfg.rimInsideFree, 0.022), 0.005, 0.1);
+  cfg.rimSlurpAngleBlend = clamp(finite(cfg.rimSlurpAngleBlend, 0.72), 0, 1);
+  cfg.rimFieldSmooth = clamp(finite(cfg.rimFieldSmooth, 16), 1, 40);
+  cfg.blowExponent = clamp(finite(cfg.blowExponent, 2.8), 1, 6);
+  cfg.neckPinch = clamp(finite(cfg.neckPinch, 0.72), 0, 1);
+  cfg.recoilPushPx = clamp(finite(cfg.recoilPushPx, 10), 0, 48);
+  cfg.snapThreshold = clamp(finite(cfg.snapThreshold, 0.01), 0.002, 0.05);
+
   cfg.pressScale = clamp(finite(cfg.pressScale, 0.92), 0.5, 1);
   cfg.pressDuration = clamp(finite(cfg.pressDuration, 0.12), 0.01, 1);
   cfg.presenceHideDuration = clamp(finite(cfg.presenceHideDuration, 0.22), 0.05, 1);

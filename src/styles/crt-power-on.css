@@ -7,8 +7,8 @@
   position: fixed;
   left: -10000px;
   top: 0;
-  width: 1024px;
-  height: 768px;
+  width: var(--crt-capture-w, 1024px);
+  height: var(--crt-capture-h, 768px);
   margin: 0;
   padding: 0;
   overflow: hidden;

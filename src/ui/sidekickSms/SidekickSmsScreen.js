@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import gsap from "gsap";
 import { toCanvas } from "html-to-image";
+import { beginDomCapturePad, DOM_CAPTURE_EDGE_PAD_PX } from "../domCapturePad.js";
 import { tagFrame } from "../../scene/stage/frameBudget.js";
 import { releaseCaptureCanvas } from "../releaseCaptureCanvas.js";
 import { SidekickSmsForm } from "./SidekickSmsForm.js";
@@ -412,15 +413,24 @@ export class SidekickSmsScreen {
 
     try {
       tagFrame("html-to-image");
-      const captured = await toCanvas(lcd, {
-        width: CAPTURE_W,
-        height: CAPTURE_H,
-        pixelRatio: 1,
-        cacheBust: false,
-        backgroundColor: SIDEKICK_SPLASH_BG,
-        // Skip webfont waits — Tahoma/system stack only.
-        fontEmbedCSS: ""
-      });
+      const endPad = beginDomCapturePad(lcd, { background: SIDEKICK_SPLASH_BG });
+      let captured;
+      try {
+        captured = await toCanvas(lcd, {
+          width: CAPTURE_W,
+          height: CAPTURE_H,
+          pixelRatio: 1,
+          cacheBust: false,
+          backgroundColor: SIDEKICK_SPLASH_BG,
+          fontEmbedCSS: "",
+          style: {
+            boxSizing: "border-box",
+            padding: `${DOM_CAPTURE_EDGE_PAD_PX}px`
+          }
+        });
+      } finally {
+        endPad();
+      }
       if (gen !== this._captureGen) {
         releaseCaptureCanvas(captured);
         return;

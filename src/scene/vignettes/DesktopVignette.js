@@ -4,7 +4,7 @@ import {
   alignModelToBlockout,
   buildPcSceneBlockout
 } from "./pcSceneBlockout.js";
-import { createCrtScreenMaterial, setCrtScreenGlow, CRT_SCREEN_GLOW_MAX } from "./CrtScreenMaterial.js";
+import { createCrtScreenMaterial, setCrtScreenGlow, CRT_SCREEN_GLOW_MAX, crtPowerOnGlowIntensity } from "./CrtScreenMaterial.js";
 import {
   applyScreenMapSettings,
   createCrtContentQuadFromSpec,
@@ -35,7 +35,8 @@ import {
   attachCrtGlassShell,
   setCrtGlassEnvMap,
   setCrtGlassFocusScale,
-  setCrtGlassSpotlight
+  setCrtGlassSpotlight,
+  setCrtGlassNeonLight
 } from "./CrtGlassMaterial.js";
 import { hideGroupForReveal, holdRootOffCamera } from "../stage/stageModelReveal.js";
 import { spanFrame } from "../stage/frameBudget.js";
@@ -46,6 +47,8 @@ export const desktopVignetteMeta = {
   name: "Retro Desktop",
   tint: 0x7ad0ff,
   neonColors: ["#00e5ff", "#9dff1a"],
+  /** Clear of the tower (blockout X ~1.1–3.2) — default `(2.2, 0.85)` sat inside the case. */
+  neonTubeXZ: /** @type {[number, number]} */ ([3.65, 1.15]),
   desc: "MySpace profile on the CRT — click the monitor to zoom in and boot."
 };
 
@@ -91,7 +94,7 @@ export class DesktopVignette {
     this._introAssetsWarmed = false;
     this._pcSceneReady = false;
 
-    /** Invisible blockout — same footprint/height as the Monolith placeholder. */
+    /** Invisible blockout — same footprint/height as the Bust placeholder. */
     this.blockoutRef = buildPcSceneBlockout(this.group, { hidden: true });
     if (!deps.deferModelLoad) {
       this.startModelLoad();
@@ -312,7 +315,13 @@ export class DesktopVignette {
       this.mySpace.isMonitorBooting;
 
     const bootProgress = THREE.MathUtils.clamp(this.mySpace.powerOnProgress ?? 0, 0, 1);
-    const power = powered ? Math.max(bootProgress, this.mySpace.monitorLedOn ? 1 : 0) : 0;
+    const booting = Boolean(this.mySpace.isMonitorBooting) && bootProgress > 0 && bootProgress < 1;
+    // Warm-up: emissive briefly clears bloom threshold, then settles ≤ 0.72.
+    const glow = !powered
+      ? 0
+      : booting
+        ? crtPowerOnGlowIntensity(bootProgress)
+        : CRT_SCREEN_GLOW_MAX * Math.max(bootProgress, this.mySpace.monitorLedOn ? 1 : 0);
 
     const mats = this.screenMesh?.material
       ? Array.isArray(this.screenMesh.material)
@@ -320,9 +329,10 @@ export class DesktopVignette {
         : [this.screenMesh.material]
       : [];
     for (const mat of mats) {
-      setCrtScreenGlow(mat, power * CRT_SCREEN_GLOW_MAX);
+      setCrtScreenGlow(mat, glow, { allowBloomPeak: booting });
     }
 
+    const power = powered ? Math.max(bootProgress, this.mySpace.monitorLedOn ? 1 : 0) : 0;
     this.screenLightRig?.setPower(power);
   }
 
@@ -490,17 +500,19 @@ export class DesktopVignette {
   }
 
   /**
-   * Capture monitor softbox env and gate glare with the POV spotlight cone.
+   * Capture monitor softbox env; gate POV-spot wash; neon PointLight specular on glass.
    * @param {import("../stage/LiveStageEnvironment.js").LiveStageEnvironment} liveEnv
    * @param {THREE.Scene} scene
    * @param {THREE.SpotLight} spotLight
    * @param {THREE.Object3D} spotTarget
+   * @param {{ force?: boolean, neonLight?: THREE.PointLight | null }} [opts]
    */
-  updateCrtGlassReflection(liveEnv, scene, spotLight, spotTarget, { force = false } = {}) {
+  updateCrtGlassReflection(liveEnv, scene, spotLight, spotTarget, { force = false, neonLight = null } = {}) {
     const captureMesh = this.phosphorMesh ?? this.screenMesh;
     if (!captureMesh || !this.glassMesh?.material) return;
 
     setCrtGlassSpotlight(this.glassMesh.material, spotLight, spotTarget);
+    this.syncGlassNeon(neonLight);
 
     if (!liveEnv || !scene) return;
 
@@ -513,7 +525,10 @@ export class DesktopVignette {
     const posDelta =
       this._lastEnvPos === null ? Infinity : capturePos.distanceTo(this._lastEnvPos);
 
-    if (!force && rotDelta < 0.0003 && posDelta < 0.001) return;
+    if (!force && rotDelta < 0.0003 && posDelta < 0.001) {
+      // Still refresh neon every call — light color/intensity drift without camera move.
+      return;
+    }
 
     liveEnv.syncMonitorReflections(captureMesh);
     // CRT glass only — never write into scene.environment (that recolors the whole stage).
@@ -524,6 +539,14 @@ export class DesktopVignette {
     this._lastEnvRotY = rotY;
     if (!this._lastEnvPos) this._lastEnvPos = new THREE.Vector3();
     this._lastEnvPos.copy(capturePos);
+  }
+
+  /**
+   * Neon PointLight specular on the glass shell (spot may be off).
+   * @param {THREE.PointLight | null | undefined} neonLight
+   */
+  syncGlassNeon(neonLight) {
+    setCrtGlassNeonLight(this.glassMesh?.material, neonLight);
   }
 
   _createScreenHitMesh(screenMesh) {

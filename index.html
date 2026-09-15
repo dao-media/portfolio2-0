@@ -18,17 +18,24 @@
     <canvas id="scene-canvas" aria-label="Cinematic 3D portfolio stage"></canvas>
 
     <div class="ui">
-      <div class="wordmark"><b>Portfolio 2.0</b>&nbsp;&nbsp;Camera Choreography Prototype</div>
-      <div class="readout mono" id="readout">STAGE 000.0°</div>
-      <div class="caption" id="caption">
-        <span class="index mono" id="capIndex">01 / 03</span>
-        <span>
-          <span class="name" id="capName">Monolith</span>
-          <span class="desc" id="capDesc"></span>
-        </span>
+      <div class="top-bar">
+        <div class="wordmark"><b>Portfolio 2.0</b>&nbsp;&nbsp;Camera Choreography Prototype</div>
+        <div class="fps mono" id="fps" aria-live="polite">— FPS</div>
+        <div class="readout mono" id="readout">STAGE 000.0°</div>
       </div>
-      <div class="dots" id="dots" role="tablist" aria-label="Vignettes"></div>
-      <div class="hint">Scroll · Swipe · Arrow keys</div>
+      <div class="bottom-bar">
+        <div class="caption" id="caption">
+          <span class="index mono" id="capIndex">01 / 03</span>
+          <span class="caption__copy">
+            <span class="name" id="capName">Bust</span>
+            <span class="desc" id="capDesc"></span>
+          </span>
+        </div>
+        <div class="dots" id="dots" role="tablist" aria-label="Vignettes"></div>
+        <div class="bottom-bar__end">
+          <div class="hint">Scroll · Swipe · Arrow keys</div>
+        </div>
+      </div>
     </div>
 
     <div class="myspace-panel scroll-capture" id="myspace-panel" data-scroll-capture hidden>

@@ -8,7 +8,7 @@ const _clearColor = new THREE.Color();
  * EffectComposer's depth texture is only blitted *after* RenderPass (for post
  * effects). Fog draws *during* RenderPass, so it cannot sample that buffer
  * without a framebuffer feedback loop. This pre-pass is one depth-only
- * traversal of layer-0 geometry (fog/haze stay on layer 2 and are skipped).
+ * traversal of layer-0 geometry (no atmosphere meshes on layer 2 anymore).
  *
  * Depth is written with MeshDepthMaterial into a **color** target (Three's
  * BasicDepthPacking stores `1.0 - windowZ` in `.r` — the fog shader undoes that).
@@ -96,7 +96,7 @@ export class FogDepthCapture {
       this._hidden.push(obj);
     }
 
-    // Layer 0 only — fog ring + haze are NEON_FOG_LAYER (2).
+    // Layer 0 only — atmosphere is post-process volumetric (no layer-2 fog meshes).
     // Held roots sit on holdLayer until compile; include them only for the
     // pre-show depth warm so the first live fog frame does not compile.
     camera.layers.set(0);

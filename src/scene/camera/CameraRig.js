@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { springTo, springVec3To } from "./spring.js";
 import { TWO_PI, mod, pointOnRing, shortestAngleDelta } from "./ringLayout.js";
-import { createScrollAdvance } from "./scrollAdvance.js";
+import { createScrollAdvance, isSettleRisingEdge } from "./scrollAdvance.js";
 import { createParallax } from "./parallax.js";
 
 const SETTLE_VALUE_EPS = 1.5e-3;
@@ -16,7 +16,7 @@ const _lookScratch = new THREE.Vector3();
  * Camera orbits outside the vignette ring. During travel, look-at is pinned to
  * the vignette ring at the *current* theta so the first lap (and every lap)
  * stays circular — destination look-at springs cut a chord through center and
- * make the first Monolith→Desktop hop feel broken.
+ * make the first Bust→Desktop hop feel broken.
  */
 export class CameraRig {
   constructor(
@@ -326,7 +326,7 @@ export class CameraRig {
     this.parallax.getOffset(this.camera, _parallaxOffset);
     this.camera.position.add(_parallaxOffset);
 
-    if (s.isSettled && !wasSettled) {
+    if (isSettleRisingEdge(wasSettled, s.isSettled)) {
       this.scrollAdvance?.notifySettled?.();
     }
   }

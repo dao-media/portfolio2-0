@@ -1,6 +1,10 @@
 /**
- * Shared LoadingManager + fog bake + min boot duration.
- * Interaction stays locked until all three clear.
+ * Shared LoadingManager + min boot duration.
+ * Interaction stays locked until the *gating* set (PC maps + Desktop GLB)
+ * plus min boot clear. Deferred GLBs (Sidekick, Travel/T-rex) must not
+ * share this manager — a late onLoad would otherwise re-enter finalize.
+ *
+ * Fog atlas bake removed — volumetric fog needs no ring/haze atlas.
  */
 export function createStageLoadGate({
   manager,
@@ -9,20 +13,20 @@ export function createStageLoadGate({
   scene,
   camera,
   post,
-  fogMaterial,
-  bakeFogAtlas,
   bootMinMs = 2600,
   onReady
 }) {
   let assetsReady = false;
   let ready = false;
   let seeding = true;
+  /** Set the moment finalize starts so a second onLoad cannot unlock twice. */
+  let committed = false;
   const bootStart = performance.now();
 
   const finalize = () => {
-    if (!assetsReady || ready) return;
+    if (!assetsReady || ready || committed) return;
+    committed = true;
 
-    fogMaterial.uniforms.uFogAtlas.value = bakeFogAtlas(renderer);
     renderer.compile(scene, camera);
     post?.warm?.();
     if (!post?._scene) {
@@ -42,7 +46,7 @@ export function createStageLoadGate({
   };
 
   manager.onLoad = () => {
-    if (seeding) return;
+    if (seeding || committed) return;
     assetsReady = true;
     finalize();
   };

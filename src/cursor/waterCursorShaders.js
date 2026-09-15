@@ -13,6 +13,11 @@ export const waterCursorFragmentShader = /* glsl */ `
   uniform float uAngle;
   uniform float uTailBias;
   uniform float uPressScale;
+  uniform float uRimPress;
+  uniform float uBlow;
+  uniform float uSlurp;
+  uniform float uNeck;
+  uniform float uSlurpAngle;
   uniform float uPresence;
   uniform float uRadius;
   uniform float uIdleRadiusWobble;
@@ -25,32 +30,48 @@ export const waterCursorFragmentShader = /* glsl */ `
   varying vec2 vUv;
 
   void main() {
+    // Basic squeeze / elongation along the rim axis (into fill = against glitch push).
+    vec2 tipDir = vec2(cos(uSlurpAngle), sin(uSlurpAngle));
+    vec2 sideDir = vec2(-tipDir.y, tipDir.x);
     vec2 p = vUv - 0.5;
-    float theta = atan(p.y, p.x);
-    float rel = theta - uAngle;
 
-    float baseR = uRadius * uPressScale * uPresence;
+    float tear = uBlow * (1.0 - uSlurp * 0.75);
+    float couple = max(tear, uSlurp);
+
+    // Elongate along tip; squeeze sideways (uNeck strengthens the squeeze)
+    float along = 1.0 + tear * 0.4 + uSlurp * 0.18;
+    float across = 1.0 - tear * 0.18 - uSlurp * 0.12 * mix(0.5, 1.0, uNeck);
+    across = max(across, 0.72);
+
+    float gx = dot(p, tipDir) / along;
+    float gy = dot(p, sideDir) / across;
+
+    float baseR = uRadius * uPressScale * uRimPress * uPresence;
     float r = baseR;
 
     if (uDeformEnabled > 0.5) {
-      // mode 2: symmetric elongation along the motion axis
-      r += baseR * uStretch * 0.35 * cos(2.0 * rel);
+      float theta = atan(gy, gx);
+      float rel = theta - uAngle;
+      float tipRel = theta - uSlurpAngle;
 
-      // mode 1: nose/tail asymmetry — teardrop without piecewise seams
-      r -= baseR * uStretch * uTailBias * cos(rel);
+      float motionAmt = uStretch * (1.0 - couple * 0.85);
+      r += baseR * motionAmt * 0.35 * cos(2.0 * rel);
+      r -= baseR * motionAmt * uTailBias * cos(rel);
 
-      // mode 3: traveling settle wave
+      // Mild tip/tail bias — keep subtle, single mass
+      float tip = cos(tipRel);
+      r += baseR * tear * 0.22 * (-tip);
+      r += baseR * uSlurp * 0.12 * tip;
+
       r += uWaveAmp * cos(3.0 * theta - uWavePhase);
-
       if (uIdleRadiusWobble > 0.0) {
         r += uIdleRadiusWobble * sin(theta * 3.0 + uTime * 0.8);
       }
 
-      // harmonic overdriven → corners return; keep deviation under ~40%
-      r = clamp(r, baseR * 0.6, baseR * 1.4);
+      r = clamp(r, baseR * 0.7, baseR * 1.35);
     }
 
-    float d = length(p) - r;
+    float d = length(vec2(gx, gy)) - r;
     float alpha = 1.0 - smoothstep(-fwidth(d), fwidth(d), d);
     alpha *= uOpacity * clamp(uPresence, 0.0, 1.0);
 

@@ -76,6 +76,20 @@ export class WaterCursor {
     this._presenceUseSpring = false;
     this._wavePhase = 0;
 
+    /** Smoothed edge-glitch rim field. */
+    this._rimBlow = 0;
+    this._rimSlurp = 0;
+    this._rimNeck = 0;
+    this._rimPushX = 0;
+    this._rimPushY = 0;
+    this._rimTipAngle = 0;
+    this._rimTargetBlow = 0;
+    this._rimTargetSlurp = 0;
+    this._rimTargetNeck = 0;
+    this._rimTargetPushX = 0;
+    this._rimTargetPushY = 0;
+    this._rimTargetTipAngle = 0;
+
     this._quadPx = this.cfg.baseDiameter * this.cfg.quadScale;
     this._baseRadiusUv = 0.5 / this.cfg.quadScale;
 
@@ -91,6 +105,11 @@ export class WaterCursor {
       uAngle: { value: 0 },
       uTailBias: { value: this.cfg.tailBias },
       uPressScale: { value: 1 },
+      uRimPress: { value: 1 },
+      uBlow: { value: 0 },
+      uSlurp: { value: 0 },
+      uNeck: { value: 0 },
+      uSlurpAngle: { value: 0 },
       uPresence: { value: 1 },
       uRadius: { value: this._baseRadiusUv },
       uIdleRadiusWobble: {
@@ -183,6 +202,81 @@ export class WaterCursor {
       ease: this.cfg.pressEase,
       overwrite: true
     });
+  }
+
+  /**
+   * Edge-glitch rim — surface tension: blow / neck / positional recoil.
+   * @param {{
+   *   blow?: number,
+   *   slurp?: number,
+   *   neck?: number,
+   *   pushX?: number,
+   *   pushY?: number,
+   *   tipAngle?: number
+   * }} [field]
+   */
+  setRimField(field = {}) {
+    if (!this._initialized || this._disposed) return;
+    this._rimTargetBlow = Math.min(1, Math.max(0, Number.isFinite(field.blow) ? field.blow : 0));
+    this._rimTargetSlurp = Math.min(
+      1,
+      Math.max(0, Number.isFinite(field.slurp) ? field.slurp : 0)
+    );
+    this._rimTargetNeck = Math.min(
+      1,
+      Math.max(0, Number.isFinite(field.neck) ? field.neck : 0)
+    );
+    this._rimTargetPushX = Number.isFinite(field.pushX) ? field.pushX : 0;
+    this._rimTargetPushY = Number.isFinite(field.pushY) ? field.pushY : 0;
+    if (Number.isFinite(field.tipAngle)) {
+      // Gate axis continuity — reject ~180° flips that make the mass "swap sides"
+      const next = field.tipAngle;
+      let diff = next - this._rimTargetTipAngle;
+      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+      if (Math.abs(diff) <= Math.PI * 0.55) {
+        this._rimTargetTipAngle = next;
+      }
+      // else hold prior axis — noisy SDF normals must not invert the gate
+    }
+  }
+
+  /**
+   * Live rim RESPONSE knobs (WaterCursorRimTuner) — glitch params untouched.
+   * @param {Partial<{
+   *   blowExponent: number,
+   *   neckPinch: number,
+   *   recoilPushPx: number,
+   *   slurpBand: number,
+   *   snapThreshold: number
+   * }>} partial
+   */
+  setRimParams(partial = {}) {
+    if (!this._initialized || this._disposed) return null;
+    const next = sanitizeWaterCursorConfig({
+      ...this.cfg,
+      blowExponent: partial.blowExponent ?? this.cfg.blowExponent,
+      neckPinch: partial.neckPinch ?? this.cfg.neckPinch,
+      recoilPushPx: partial.recoilPushPx ?? this.cfg.recoilPushPx,
+      rimSlurpBand: partial.slurpBand ?? this.cfg.rimSlurpBand,
+      snapThreshold: partial.snapThreshold ?? this.cfg.snapThreshold
+    });
+    this.cfg.blowExponent = next.blowExponent;
+    this.cfg.neckPinch = next.neckPinch;
+    this.cfg.recoilPushPx = next.recoilPushPx;
+    this.cfg.rimSlurpBand = next.rimSlurpBand;
+    this.cfg.snapThreshold = next.snapThreshold;
+    return this.getRimParams();
+  }
+
+  /** @returns {Record<string, number>} */
+  getRimParams() {
+    return {
+      blowExponent: this.cfg.blowExponent,
+      neckPinch: this.cfg.neckPinch,
+      recoilPushPx: this.cfg.recoilPushPx,
+      slurpBand: this.cfg.rimSlurpBand,
+      snapThreshold: this.cfg.snapThreshold
+    };
   }
 
   /** @param {number} width @param {number} height — CSS pixels. */
@@ -392,10 +486,30 @@ export class WaterCursor {
     const dt = clampDeltaSeconds(deltaTimeMs);
     this.uniforms.uTime.value = performance.now() * 0.001;
 
+    const rimSmooth = this.cfg.rimFieldSmooth;
+    this._rimBlow = damp(this._rimBlow, this._rimTargetBlow, rimSmooth, dt);
+    this._rimSlurp = damp(this._rimSlurp, this._rimTargetSlurp, rimSmooth, dt);
+    this._rimNeck = damp(this._rimNeck, this._rimTargetNeck, rimSmooth, dt);
+    this._rimPushX = damp(this._rimPushX, this._rimTargetPushX, rimSmooth, dt);
+    this._rimPushY = damp(this._rimPushY, this._rimTargetPushY, rimSmooth, dt);
+    {
+      let diff = this._rimTargetTipAngle - this._rimTipAngle;
+      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+      this._rimTipAngle = wrapAngle(this._rimTipAngle + diff * (1 - Math.exp(-rimSmooth * dt)));
+    }
+
+    const blow = this.deformEnabled ? this._rimBlow : 0;
+    const slurp = this.deformEnabled ? this._rimSlurp : 0;
+    const neck = this.deformEnabled ? this._rimNeck : 0;
+    // Positional recoil along -gradient (away from glitch); released on cross
+    const recoilMul = this.deformEnabled ? blow * (1 - slurp * 0.85) : 0;
+    const followMul = THREE.MathUtils.lerp(1, this.cfg.rimFollowDamp, blow * 0.55);
+    const followRate = this.cfg.followRate * followMul;
+
     const prevX = this._pos.x;
     const prevY = this._pos.y;
-    this._pos.x = damp(this._pos.x, this._pointer.x, this.cfg.followRate, dt);
-    this._pos.y = damp(this._pos.y, this._pointer.y, this.cfg.followRate, dt);
+    this._pos.x = damp(this._pos.x, this._pointer.x, followRate, dt);
+    this._pos.y = damp(this._pos.y, this._pointer.y, followRate, dt);
 
     const vx = (this._pos.x - prevX) / dt;
     const vy = (this._pos.y - prevY) / dt;
@@ -404,9 +518,16 @@ export class WaterCursor {
 
     this._updateDirection(dt);
 
+    // Rim couple orients the teardrop via uSlurpAngle alone — do NOT yank motion
+    // heading toward the SDF normal (that spun the blob instead of flowing through).
     if (this.deformEnabled) {
+      const rimAmt = Math.max(blow, slurp, neck);
+      if (rimAmt > 1e-3) {
+        this._omega *= Math.exp(-14 * rimAmt * dt);
+      }
+
       const turn = Math.min(Math.abs(this._omega) / this.cfg.omegaMax, 1);
-      this._waveSpring.target = this.cfg.waveAmp * turn;
+      this._waveSpring.target = this.cfg.waveAmp * turn * (1 - Math.max(blow, slurp) * 0.55);
       const waveAmp = Math.min(Math.max(this._waveSpring.update(dt), 0), MAX_WAVE_AMP);
       this._wavePhase = wrapAngle(this._wavePhase + this._omega * this.cfg.waveTravel * dt);
 
@@ -417,7 +538,8 @@ export class WaterCursor {
       const speed = Math.min(speedPx / this.cfg.maxSpeed, 1);
       const shapedSpeed = Math.pow(Math.max(speed, 0), this.cfg.speedResponseExponent);
 
-      this._stretchSpring.target = this.cfg.maxStretch * shapedSpeed;
+      // Mild motion stretch only — blow shape is shader teardrop, not spring stretch
+      this._stretchSpring.target = this.cfg.maxStretch * shapedSpeed * (1 - blow * 0.75);
       this._stretchSpring.update(dt);
       this._stretch = THREE.MathUtils.clamp(
         this._stretchSpring.value,
@@ -439,14 +561,33 @@ export class WaterCursor {
 
     this.uniforms.uStretch.value = this._stretch;
     this.uniforms.uAngle.value = this._angle;
-    this.mesh.position.set(this._pos.x, this._pos.y, 0);
+    this.uniforms.uRimPress.value = 1;
+    this.uniforms.uBlow.value = blow;
+    this.uniforms.uSlurp.value = slurp * this.cfg.rimSlurp;
+    this.uniforms.uNeck.value = neck;
+    this.uniforms.uSlurpAngle.value = this._rimTipAngle;
+    this.mesh.position.set(
+      this._pos.x + this._rimPushX * recoilMul,
+      this._pos.y + this._rimPushY * recoilMul,
+      0
+    );
   }
 
   /**
    * Heading tracks velocity while moving; coasts on angular momentum when stopped.
    * Radial deformations spring; rotation has inertia — no return force.
+   * During rim couple, freeze heading so edge flow doesn't spin the blob.
    */
   _updateDirection(dt) {
+    const rimAmt = this.deformEnabled
+      ? Math.max(this._rimBlow, this._rimSlurp, this._rimNeck)
+      : 0;
+    if (rimAmt > 0.2) {
+      this._omega *= Math.exp(-18 * rimAmt * dt);
+      this._angle = wrapAngle(this._angle);
+      return;
+    }
+
     const speedPx = this._velocity.length();
 
     if (speedPx > this.cfg.directionSpeedThreshold) {

@@ -4,8 +4,10 @@ import { fileURLToPath } from "node:url";
 import * as THREE from "three";
 import {
   SIDEKICK_KEYPAD_MATERIAL_NAME,
+  applySidekickFusedButtonAtlas,
   debugSidekickKeypad,
   ensureSidekickKeypadMaterials,
+  isInvisibleCoverMaterial,
   isSidekickKeypadMeshHealthy,
   repairSidekickKeypadMaterials
 } from "./gltfMaterialOwnership.js";
@@ -36,7 +38,29 @@ function makeSharedPhong3() {
   });
 }
 
-function makePhoneRoot() {
+function makeLabelMap() {
+  const data = new Uint8Array([255, 255, 255, 255]);
+  const tex = new THREE.DataTexture(data, 1, 1);
+  tex.needsUpdate = true;
+  tex.name = "test-label-atlas";
+  return tex;
+}
+
+function makeLabelMaterial(name) {
+  const mat = new THREE.MeshBasicMaterial({
+    name,
+    map: makeLabelMap(),
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    alphaTest: 0.08,
+    side: THREE.DoubleSide
+  });
+  mat.userData.sidekickLabelProtected = true;
+  return mat;
+}
+
+function makePhoneRoot({ withLabels = false } = {}) {
   const root = new THREE.Group();
   root.name = "TMobleSideKick3";
 
@@ -52,7 +76,43 @@ function makePhoneRoot() {
   face.name = "buttonsFace";
 
   root.add(buttons, cover, face);
-  return { root, buttons, cover, shared, face };
+
+  let keyboard = null;
+  let sideButtons = null;
+  if (withLabels) {
+    keyboard = new THREE.Mesh(new THREE.BoxGeometry(1, 0.01, 1), makeLabelMaterial("lambert3"));
+    keyboard.name = "KeyboardText";
+    keyboard.userData.sidekickLabelProtected = true;
+    sideButtons = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.02), makeLabelMaterial("phong4"));
+    sideButtons.name = "sideButtons";
+    sideButtons.userData.sidekickLabelProtected = true;
+    root.add(keyboard, sideButtons);
+  }
+
+  return { root, buttons, cover, shared, face, keyboard, sideButtons };
+}
+
+function assertFusedBodyOpaque(mesh, label) {
+  assert(mesh?.isMesh, `${label} missing`);
+  const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+  assert(mat, `${label} has no material`);
+  assert(mat.name !== SIDEKICK_KEYPAD_MATERIAL_NAME, `${label} paved with keypad plastic`);
+  assert(!mat.userData?.sidekickKeypadProtected, `${label} marked keypad-protected`);
+  assert(Boolean(mat.map), `${label} lost atlas map`);
+  assert(mat.userData?.sidekickFusedButtonProtected, `${label} lost fused pin`);
+  assert(mat.transparent === false, `${label} transparent`);
+  assert(mat.alphaTest === 0, `${label} alphaTest=${mat.alphaTest}`);
+  assert(mat.opacity === 1, `${label} opacity=${mat.opacity}`);
+}
+
+function assertLabelIntact(mesh, label) {
+  assert(mesh?.isMesh, `${label} missing`);
+  const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+  assert(mat, `${label} has no material`);
+  assert(mat.name !== SIDEKICK_KEYPAD_MATERIAL_NAME, `${label} paved with keypad plastic`);
+  assert(!mat.userData?.sidekickKeypadProtected, `${label} marked keypad-protected`);
+  assert(Boolean(mat.map), `${label} lost atlas map`);
+  assert(mat.alphaTest > 0, `${label} alphaTest cleared`);
 }
 
 export function runSidekickKeypadStressTest() {
@@ -128,6 +188,101 @@ export function runSidekickKeypadStressTest() {
     assert(buttons.material.transparent === false, "fade restored transparent");
     assert(buttons.material.alphaTest === 0, `restored alphaTest=${buttons.material.alphaTest}`);
     assert(isSidekickKeypadMeshHealthy(buttons), "unhealthy after fade restore");
+  });
+
+  run("cover heuristic is identity-only — not opacity+alphaTest", () => {
+    const cutout = new THREE.MeshBasicMaterial({
+      name: "lambert3",
+      opacity: 0,
+      alphaTest: 0.08,
+      transparent: true
+    });
+    assert(
+      isInvisibleCoverMaterial(cutout) === false,
+      "label cutout at opacity 0 must not classify as cover"
+    );
+    const phong3 = makeSharedPhong3();
+    assert(isInvisibleCoverMaterial(phong3) === true, "phong3 must still classify as cover");
+  });
+
+  run("label atlases survive setGroupRenderOpacity 0→1 + ensure", () => {
+    const { root, buttons, keyboard, sideButtons } = makePhoneRoot({ withLabels: true });
+    applySidekickFusedButtonAtlas(sideButtons);
+    repairSidekickKeypadMaterials(root);
+    assertLabelIntact(keyboard, "KeyboardText");
+    assertFusedBodyOpaque(sideButtons, "sideButtons");
+
+    // Mount-order bug: hide (opacity 0) then ensure — must not pave labels or bodies.
+    setGroupRenderOpacity(root, 0);
+    ensureSidekickKeypadMaterials(root);
+    assertLabelIntact(keyboard, "KeyboardText after hide+ensure");
+    assert(sideButtons.material.map, "sideButtons lost atlas mid-hide");
+    assert(
+      sideButtons.material.name !== SIDEKICK_KEYPAD_MATERIAL_NAME,
+      "sideButtons paved mid-hide"
+    );
+    assert(isSidekickKeypadMeshHealthy(buttons), "Buttons unhealthy mid-reveal");
+
+    setGroupRenderOpacity(root, 1);
+    ensureSidekickKeypadMaterials(root);
+    assertLabelIntact(keyboard, "KeyboardText after reveal restore");
+    assertFusedBodyOpaque(sideButtons, "sideButtons after reveal restore");
+    assert(buttons.material.name === SIDEKICK_KEYPAD_MATERIAL_NAME, "Buttons left phong3");
+    assert(isSidekickKeypadMeshHealthy(buttons), "Buttons unhealthy after reveal");
+  });
+
+  run("CALL/END/D-pad fused atlas stays opaque after opacity 0→1 + ensure", () => {
+    const { root, sideButtons } = makePhoneRoot({ withLabels: true });
+    const atlas = sideButtons.material.map;
+    const prior = new THREE.MeshPhysicalMaterial({
+      name: "phong4",
+      map: atlas,
+      metalness: 0,
+      roughness: 0.17,
+      transparent: true,
+      alphaTest: 0.08
+    });
+    sideButtons.material = prior;
+    sideButtons.userData.sidekickLabelProtected = false;
+
+    const body = applySidekickFusedButtonAtlas(sideButtons);
+    assert(body, "fused atlas apply returned null");
+    assert(body.map, "CALL/END body lost TmobileButtons");
+    assert(body.name !== SIDEKICK_KEYPAD_MATERIAL_NAME, "body paved with keypad plastic");
+    assert(body.transparent === false, "body left transparent");
+    assert(body.alphaTest === 0, `body alphaTest=${body.alphaTest}`);
+    assert(body.opacity === 1, `body opacity=${body.opacity}`);
+    assert(body.side === THREE.DoubleSide, "body must be DoubleSide");
+
+    repairSidekickKeypadMaterials(root);
+    setGroupRenderOpacity(root, 0);
+    ensureSidekickKeypadMaterials(root);
+    setGroupRenderOpacity(root, 1);
+    ensureSidekickKeypadMaterials(root);
+
+    const mat = sideButtons.material;
+    assert(mat.map, "body lost atlas after opacity cycle");
+    assert(mat.name !== SIDEKICK_KEYPAD_MATERIAL_NAME, "body paved after opacity cycle");
+    assert(!mat.userData?.sidekickKeypadProtected, "body marked keypad-protected");
+    assert(mat.userData?.sidekickFusedButtonProtected, "body lost fused pin");
+    assert(mat.transparent === false, "body transparent after restore");
+    assert(mat.alphaTest === 0, `body alphaTest after restore=${mat.alphaTest}`);
+    assert(mat.opacity === 1, `body opacity after restore=${mat.opacity}`);
+    assert(mat.side === THREE.DoubleSide, "body side changed");
+  });
+
+  run("labels keep maps after ensure cycles (open/close proxy)", () => {
+    const { root, buttons, keyboard, sideButtons } = makePhoneRoot({ withLabels: true });
+    applySidekickFusedButtonAtlas(sideButtons);
+    repairSidekickKeypadMaterials(root);
+
+    // Proxy for _applyDisplayState open→close: ensure every frame while labels stay cutouts.
+    for (let i = 0; i < 8; i += 1) {
+      ensureSidekickKeypadMaterials(root);
+    }
+    assertLabelIntact(keyboard, "KeyboardText after ensure loop");
+    assertFusedBodyOpaque(sideButtons, "sideButtons after ensure loop");
+    assert(isSidekickKeypadMeshHealthy(buttons), "Buttons unhealthy after ensure loop");
   });
 
   const passed = results.filter((r) => r.ok).length;

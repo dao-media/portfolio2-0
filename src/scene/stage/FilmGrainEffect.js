@@ -9,7 +9,7 @@ export class FilmGrainEffect extends Effect {
   /**
    * @param {{ grain?: number }} [options]
    */
-  constructor({ grain = 0.05 } = {}) {
+  constructor({ grain = 0 } = {}) {
     super(
       "FilmGrainEffect",
       `

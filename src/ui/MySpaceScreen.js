@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { toCanvas } from "html-to-image";
+import { beginDomCapturePad, DOM_CAPTURE_EDGE_PAD_PX } from "./domCapturePad.js";
 import { tagFrame } from "../scene/stage/frameBudget.js";
 import { releaseCaptureCanvas } from "./releaseCaptureCanvas.js";
 import {
@@ -628,19 +629,26 @@ export class MySpaceScreen {
 
     try {
       tagFrame("html-to-image");
-      const captured = await toCanvas(captureEl, {
-        width: captureW,
-        height: fullH,
-        pixelRatio: 1,
-        backgroundColor: LINK_PAGE_BG,
-        cacheBust: false,
-        useCORS: true,
-        style: {
-          overflow: "visible",
-          width: `${captureW}px`,
-          boxSizing: "border-box"
-        }
-      });
+      const endPad = beginDomCapturePad(captureEl, { background: LINK_PAGE_BG });
+      let captured;
+      try {
+        captured = await toCanvas(captureEl, {
+          width: captureW,
+          height: fullH,
+          pixelRatio: 1,
+          backgroundColor: LINK_PAGE_BG,
+          cacheBust: false,
+          useCORS: true,
+          style: {
+            overflow: "visible",
+            width: `${captureW}px`,
+            boxSizing: "border-box",
+            padding: `${DOM_CAPTURE_EDGE_PAD_PX}px`
+          }
+        });
+      } finally {
+        endPad();
+      }
 
       if (gen !== this._captureGen) {
         releaseCaptureCanvas(captured);

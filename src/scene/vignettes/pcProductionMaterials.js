@@ -42,21 +42,49 @@ const MATERIAL_TINT = {
 };
 
 const MATERIAL_PBR = {
-  pc_1: { roughness: 0.52, metalness: 0.02 },
-  pc_2: { roughness: 0.46, metalness: 0.03 },
-  cable_black: { roughness: 0.4, metalness: 0.06 }
+  pc_1: { roughness: 0.58, metalness: 0.02 },
+  pc_2: { roughness: 0.52, metalness: 0.03 },
+  cable_black: { roughness: 0.45, metalness: 0.06 }
+};
+
+/** Full-strength 4K normals shimmer under POV spot (no MSAA on HalfFloat composer). */
+const MATERIAL_NORMAL_SCALE = {
+  pc_1: 0.28,
+  pc_2: 0.45,
+  cable_black: 0.65
+};
+
+/** Raise mapped roughness so grille/speaker microfacets stop crawling. */
+const MATERIAL_ROUGHNESS_FLOOR = {
+  pc_1: 0.42,
+  pc_2: 0.32,
+  cable_black: 0.38
+};
+
+/** Extra normal-map LOD bias (speaker grille / desk weave). Higher = softer, less crawl. */
+const MATERIAL_NORMAL_MIP_BIAS = {
+  pc_1: 1.25,
+  pc_2: 0.75,
+  cable_black: 0.5
+};
+
+/** Soften high-frequency albedo weave (grille holes) — same crawl class as normals. */
+const MATERIAL_MAP_MIP_BIAS = {
+  pc_1: 0.85,
+  pc_2: 0.35,
+  cable_black: 0.25
 };
 
 const MATERIAL_ENV_INTENSITY = {
-  pc_1: 0.58,
-  pc_2: 0.52,
+  pc_1: 0.38,
+  pc_2: 0.4,
   cable_black: 0.12
 };
 
 const MATERIAL_CLEARCOAT = {
-  pc_1: { clearcoat: 0.11, clearcoatRoughness: 0.42 },
-  pc_2: { clearcoat: 0.11, clearcoatRoughness: 0.42 },
-  cable_black: { clearcoat: 0.04, clearcoatRoughness: 0.48 }
+  pc_1: { clearcoat: 0, clearcoatRoughness: 1 },
+  pc_2: { clearcoat: 0.02, clearcoatRoughness: 0.82 },
+  cable_black: { clearcoat: 0.02, clearcoatRoughness: 0.85 }
 };
 
 const MATERIAL_RENDER = {
@@ -155,6 +183,38 @@ export async function warmPcTexturesOnGpu(renderer, yieldFrame) {
   }
 }
 
+function getMaterialNormalScale(matName) {
+  return MATERIAL_NORMAL_SCALE[resolveMaterialName(matName)] ?? 0.5;
+}
+
+function getMaterialRoughnessFloor(matName) {
+  return MATERIAL_ROUGHNESS_FLOOR[resolveMaterialName(matName)] ?? 0.28;
+}
+
+function getMaterialNormalMipBias(matName) {
+  return MATERIAL_NORMAL_MIP_BIAS[resolveMaterialName(matName)] ?? 0;
+}
+
+function getMaterialMapMipBias(matName) {
+  return MATERIAL_MAP_MIP_BIAS[resolveMaterialName(matName)] ?? 0;
+}
+
+function configurePcTexture(tex, slot, maxAniso) {
+  if (!tex) return;
+  tex.anisotropy = maxAniso;
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  if (slot === "map") {
+    tex.colorSpace = THREE.SRGBColorSpace;
+  } else {
+    tex.colorSpace = THREE.NoColorSpace;
+  }
+  tex.needsUpdate = true;
+}
+
 function buildPbrMaterial(params, matName) {
   const cc = getMaterialClearcoat(matName);
   params.envMapIntensity = getMaterialEnvIntensity(matName);
@@ -163,7 +223,9 @@ function buildPbrMaterial(params, matName) {
 
   const mat = new THREE.MeshPhysicalMaterial(params);
   mat.name = matName;
-  if (mat.normalMap) mat.normalScale.set(1, 1);
+  const n = getMaterialNormalScale(matName);
+  if (mat.normalMap) mat.normalScale.set(n, n);
+  applyPcMaterialShaders(mat, matName);
   return mat;
 }
 
@@ -209,13 +271,8 @@ function createTexturedMaterial(matName, renderer) {
     entries.forEach(({ slot, tex }) => {
       if (!tex) return;
       params[slot] = tex;
-      tex.anisotropy = maxAniso;
-      if (slot === "map") {
-        tex.colorSpace = THREE.SRGBColorSpace;
-        hasColor = true;
-      } else {
-        tex.colorSpace = THREE.NoColorSpace;
-      }
+      configurePcTexture(tex, slot, maxAniso);
+      if (slot === "map") hasColor = true;
     });
 
     params.roughness = params.roughnessMap ? 1 : pbr.roughness;
@@ -233,24 +290,59 @@ function createTexturedMaterial(matName, renderer) {
   return promise;
 }
 
-function applyMaterialRenderSettings(mat, matName) {
-  const cfg = MATERIAL_RENDER[resolveMaterialName(matName)] ?? { renderOrder: 0 };
+function applyPcMaterialShaders(mat, matName) {
+  if (!mat || mat.name === SCREEN_MATERIAL_NAME) return;
+  const resolved = resolveMaterialName(matName ?? mat.name);
+  const floor = getMaterialRoughnessFloor(resolved);
+  const nBias = getMaterialNormalMipBias(resolved);
+  const mapBias = getMaterialMapMipBias(resolved);
 
-  mat.side = THREE.FrontSide;
-  mat.depthWrite = true;
-  mat.depthTest = true;
-  mat.polygonOffset = Boolean(cfg.polygonOffset);
+  const injectRoughnessFloor = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <roughnessmap_fragment>",
+      `#include <roughnessmap_fragment>
+roughnessFactor = max(roughnessFactor, ${floor.toFixed(3)});`
+    );
+  };
 
-  if (cfg.polygonOffset) {
-    mat.polygonOffsetFactor = cfg.polygonOffsetFactor;
-    mat.polygonOffsetUnits = cfg.polygonOffsetUnits;
+  const injectMipBiases = (shader) => {
+    if (nBias > 0 && mat.normalMap) {
+      const biased = `texture2D( normalMap, vNormalMapUv, ${nBias.toFixed(2)} )`;
+      shader.fragmentShader = shader.fragmentShader
+        .replaceAll("texture2D( normalMap, vNormalMapUv )", biased)
+        .replaceAll("texture2D( normalMap, vNormalMapUv)", biased);
+    }
+    if (mapBias > 0 && mat.map) {
+      const biased = `texture2D( map, vMapUv, ${mapBias.toFixed(2)} )`;
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "texture2D( map, vMapUv )",
+        biased
+      );
+    }
+    if (mapBias > 0 && mat.roughnessMap) {
+      const biased = `texture2D( roughnessMap, vRoughnessMapUv, ${mapBias.toFixed(2)} )`;
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "texture2D( roughnessMap, vRoughnessMapUv )",
+        biased
+      );
+    }
+  };
+
+  if (resolved === "cable_black") {
+    mat.onBeforeCompile = (shader) => {
+      injectRoughnessFloor(shader);
+      injectMipBiases(shader);
+    };
+    mat.customProgramCacheKey = () =>
+      `pc-spec-aa-v3-${resolved}-${floor}-${nBias}-${mapBias}`;
+    return;
   }
-}
 
-function applyPlasticColorGrade(mat) {
-  if (!mat.map || mat.name === SCREEN_MATERIAL_NAME || resolveMaterialName(mat.name) === "cable_black") return;
+  if (!mat.map) return;
 
   mat.onBeforeCompile = (shader) => {
+    injectRoughnessFloor(shader);
+    injectMipBiases(shader);
     shader.fragmentShader = shader.fragmentShader.replace(
       "#include <color_fragment>",
       [
@@ -265,8 +357,22 @@ function applyPlasticColorGrade(mat) {
       ].join("\n")
     );
   };
+  mat.customProgramCacheKey = () =>
+    `pc-plastic-spec-aa-v3-${resolved}-${floor}-${nBias}-${mapBias}`;
+}
 
-  mat.customProgramCacheKey = () => "plastic-color-grade-v2";
+function applyMaterialRenderSettings(mat, matName) {
+  const cfg = MATERIAL_RENDER[resolveMaterialName(matName)] ?? { renderOrder: 0 };
+
+  mat.side = THREE.FrontSide;
+  mat.depthWrite = true;
+  mat.depthTest = true;
+  mat.polygonOffset = Boolean(cfg.polygonOffset);
+
+  if (cfg.polygonOffset) {
+    mat.polygonOffsetFactor = cfg.polygonOffsetFactor;
+    mat.polygonOffsetUnits = cfg.polygonOffsetUnits;
+  }
 }
 
 function polishLoadedMaterial(mat) {
@@ -282,14 +388,15 @@ function polishLoadedMaterial(mat) {
   mat.color.setHex(tint);
   mat.roughness = mat.roughnessMap ? 1 : pbr.roughness;
   mat.metalness = mat.metalnessMap ? 1 : pbr.metalness;
-  if (mat.normalMap) mat.normalScale.set(1, 1);
+  const n = getMaterialNormalScale(matName);
+  if (mat.normalMap) mat.normalScale.set(n, n);
   mat.envMapIntensity = getMaterialEnvIntensity(matName);
 
   const cc = getMaterialClearcoat(matName);
   mat.clearcoat = cc.clearcoat;
   mat.clearcoatRoughness = cc.clearcoatRoughness;
 
-  applyPlasticColorGrade(mat);
+  applyPcMaterialShaders(mat, matName);
 
   if (mat.transparent || mat.alphaMap || mat.alphaTest > 0) {
     mat.transparent = false;

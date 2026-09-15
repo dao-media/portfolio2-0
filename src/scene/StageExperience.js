@@ -2,22 +2,25 @@ import * as THREE from "three";
 import gsap from "gsap";
 import { HUDController } from "../ui/HUDController.js";
 import { DesktopVignette, desktopVignetteMeta } from "./vignettes/DesktopVignette.js";
-import { monolithVignette, addDegreeLabels } from "./stage/placeholderVignettes.js";
+import { BustVignette, bustVignetteMeta } from "./vignettes/BustVignette.js";
+import { addDegreeLabels } from "./stage/placeholderVignettes.js";
 import { SidekickVignette, sidekickVignetteMeta } from "./vignettes/SidekickVignette.js";
 import { TravelVignette, travelVignetteMeta } from "./vignettes/TravelVignette.js";
 import { PostPass } from "./stage/PostPass.js";
 import { createStageLoadGate } from "./stage/StageLoadGate.js";
 import { StageBootSequence } from "../ui/xpBoot/StageBootSequence.js";
-import { bakeFogAtlas } from "./neon/bakeFogAtlas.js";
-import { createFogMaterial } from "./neon/createFogMaterial.js";
 import { NeonSystem } from "./neon/NeonSystem.js";
 import { VolumetricFogPass } from "./neon/VolumetricFogPass.js";
+import { EdgeGlitchSystem } from "./edgeGlitch/EdgeGlitchSystem.js";
+import { EdgeGlitchPass } from "./edgeGlitch/EdgeGlitchPass.js";
+import { EDGE_GLITCH_STAGE } from "./edgeGlitch/constants.js";
 import {
   FOG_DEFAULTS,
   createFogParams,
   FOG_HEAVY_FADE_IN_MS
 } from "../fog/fogConfig.js";
 import { configureSpotShadow } from "./stage/configureSpotShadow.js";
+import { VignetteContactShadows } from "./stage/VignetteContactShadows.js";
 import { LiveStageEnvironment } from "./stage/LiveStageEnvironment.js";
 import { buildStageStudioRoom } from "./stage/StageStudioRoom.js";
 import { buildStageFloor } from "./stage/StageFloor.js";
@@ -62,7 +65,8 @@ import {
   STAGE_RADIUS,
   STAGE_BG,
   EXPOSURE,
-  BOOT_MIN_MS
+  BOOT_MIN_MS,
+  NEON_BLOOM
 } from "./stage/constants.js";
 import {
   normalizeWheelDelta,
@@ -87,6 +91,7 @@ import { createFrameBudget, setActiveFrameBudget, spanFrame, tagFrame } from "./
 import { STAGE_FLOOR_Y, measureBlockoutReferenceBounds, measureSceneBounds, snapAllGroupsToFloor, snapGroupToFloor } from "./vignettes/pcSceneBlockout.js";
 import { preloadPcTextures, setPcTextureLoadingManager } from "./vignettes/pcProductionMaterials.js";
 import { WaterCursor } from "../cursor/WaterCursor.js";
+import { rimBlowFromProximity } from "../cursor/waterCursorRimConfig.js";
 import { CameraRig } from "./camera/CameraRig.js";
 import { buildVignetteRing } from "./camera/ringLayout.js";
 import { createScrollAdvance } from "./camera/scrollAdvance.js";
@@ -123,17 +128,6 @@ function readWorkRenderScale() {
     return WORK_RENDER_SCALE;
   }
   return 1;
-}
-
-/**
- * Live atmosphere: volumetric by default. `?fog=haze` restores sheet+haze (paths kept).
- * @returns {"haze" | "volumetric"}
- */
-function readFogMode() {
-  const params = new URLSearchParams(window.location.search);
-  const v = (params.get("fog") || "").toLowerCase();
-  if (v === "haze" || v === "ring" || v === "0" || v === "off") return "haze";
-  return "volumetric";
 }
 
 export class StageExperience {
@@ -176,6 +170,8 @@ export class StageExperience {
     this._projScreenMatrix = new THREE.Matrix4();
     this._screenHover = false;
     this._pcScreenHovered = false;
+    this._fpsEma = 60;
+    this._fpsDomT = 0;
 
     this.scrollCapture = new StageScrollCapture();
     /** Soften cursor parallax over registered meshes (e.g. PC monitor → 20%). */
@@ -198,6 +194,7 @@ export class StageExperience {
     this.renderer.toneMappingExposure = EXPOSURE;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.setClearColor(STAGE_BG, 1);
 
     this.camera = new THREE.PerspectiveCamera(
       CAM_FOV,
@@ -248,7 +245,15 @@ export class StageExperience {
     this.scene.environment = this.liveEnv.getStudioEnvironment();
     this.scene.environmentIntensity = STAGE_ENV_INTENSITY;
     this.vignettes = this._buildVignettes();
+    // Glitch pass must exist before _mountNeonSystem → EdgeGlitchSystem (same
+    // instance is later added to PostPass). Creating it after neon left an orphan.
+    this._edgeGlitchPass =
+      !this.reducedMotion && EDGE_GLITCH_STAGE >= 3
+        ? new EdgeGlitchPass()
+        : null;
+    this._edgeTubeGlitchPass = this._edgeGlitchPass;
     this._mountNeonSystem();
+    this._mountContactShadows();
     this._initCameraRig();
     this._updatePlaceholderVisibility(0);
 
@@ -256,10 +261,13 @@ export class StageExperience {
       window.__stage = this;
     }
 
-    // Shared Tier-B pass + fogConfig. In composer always (gate warm compiles it).
-    // Default atmosphere: volumetric on; haze + ring hidden (paths kept for ?fog=haze).
-    this._fogMode = readFogMode();
+    // Shared Tier-B volumetric pass + fogConfig. In composer always (gate warm
+    // compiles it). Volumetric is the only live atmosphere — no haze/ring path.
     this._volFogFade = 0;
+    /** performance.now() when intro lands — fog opacity fade arms here (not heavy-effects). */
+    this._introLandAt = 0;
+    this._fogFadeDoneAt = 0;
+    this._bloomReturnT = 1;
     this.volumetricFog = new VolumetricFogPass(this.camera, {
       useComposerDepth: false,
       depthPacked: true,
@@ -268,6 +276,7 @@ export class StageExperience {
     });
     this.volumetricFog.setEnabled(false);
     this.volumetricFog.setDensityScale(0);
+    this.volumetricFog.setCompositeOpacity?.(0);
     this.volumetricFog.setNoiseFrozen(this.reducedMotion);
 
     this.post = new PostPass(
@@ -278,7 +287,8 @@ export class StageExperience {
       {
         scene: this.scene,
         bloom: !this.reducedMotion,
-        volumetricPass: this.volumetricFog
+        volumetricPass: this.volumetricFog,
+        edgeGlitchPass: this._edgeGlitchPass
       }
     );
 
@@ -292,8 +302,6 @@ export class StageExperience {
     this._mountPovSpotlight();
     this._setActiveVignette(0);
     this._runIntro();
-    // Apply after neon exists (mounted above) — sticky haze isolate for volumetric preview.
-    this._applyFogMode(this._fogMode, { resetFade: true });
 
     window.addEventListener("resize", this._onResize);
     this._onResize();
@@ -415,7 +423,11 @@ export class StageExperience {
     this.spotLight.layers.set(0);
     this.camera.add(this.spotLight);
     this.spotLight.target = this.spotTarget;
-    configureSpotShadow(this.spotLight);
+    if (SPOT_INTENSITY > 0) {
+      configureSpotShadow(this.spotLight);
+    } else {
+      this.spotLight.castShadow = false;
+    }
     this._applyRenderScale();
   }
 
@@ -428,24 +440,53 @@ export class StageExperience {
   }
 
   /**
-   * Per-stop neon tubes + one shared fog ring. Four static PointLights
-   * (layers 0+2) scale by camera proximity; haze Y-billboards sit on layer 2.
+   * Per-stop neon tubes + PointLights. Atmosphere is VolumetricFogPass only.
    */
   _mountNeonSystem() {
-    this.fogMaterial = createFogMaterial({ reducedMotion: this.reducedMotion });
     this.neon = new NeonSystem({
       scene: this.scene,
       camera: this.camera,
-      fogMaterial: this.fogMaterial,
       reducedMotion: this.reducedMotion,
       isCoarse: this.isCoarse
     });
     this.vignettes.forEach((vig) => this.neon.attach(vig));
     this.neon.finishMount();
     this.neon.setStageFloor?.(this.stageFloor);
+    this.edgeGlitch = new EdgeGlitchSystem({
+      renderer: this.renderer,
+      scene: this.scene,
+      camera: this.camera,
+      reducedMotion: this.reducedMotion,
+      glitchPass: this._edgeGlitchPass
+    });
   }
 
-  /** Shared LoadingManager → XP fader. Fog bake + min duration before input. */
+  /** Soft contact pads under each stop (POV spot + neon) — MeshBasic floor cannot receive maps. */
+  _mountContactShadows() {
+    this.contactShadows = this.vignettes.map((vig) => new VignetteContactShadows(vig.group));
+  }
+
+  _refreshContactShadows() {
+    this.contactShadows?.forEach((rig) => rig.refreshBounds());
+  }
+
+  _tickContactShadows() {
+    if (!this.contactShadows?.length || !this.camera) return;
+    const maxLight = this.neon?._maxLight || 1;
+    for (let i = 0; i < this.contactShadows.length; i += 1) {
+      const light = this.neon?.stopLights?.[i]?.light;
+      const entry = this.neon?.entries?.[i];
+      const level = light ? light.intensity / maxLight : 0;
+      this.contactShadows[i].update({
+        camera: this.camera,
+        neonWorld: light?.position ?? null,
+        neonColor: entry?.dominant ?? null,
+        neonLevel: level
+      });
+    }
+  }
+
+  /** Shared LoadingManager → XP fader. Min duration before input. */
   _initLoadGate() {
     this.loadGate = createStageLoadGate({
       manager: this.loadingManager,
@@ -454,8 +495,6 @@ export class StageExperience {
       scene: this.scene,
       camera: this.camera,
       post: this.post,
-      fogMaterial: this.fogMaterial,
-      bakeFogAtlas,
       bootMinMs: this.reducedMotion ? 400 : BOOT_MIN_MS,
       onReady: () => this._enableInteraction()
     });
@@ -568,6 +607,7 @@ export class StageExperience {
   debugResnapAll() {
     snapAllGroupsToFloor(this.vignettes.map((vig) => vig.group));
     this.neon?.seatTubesOnFloor?.();
+    this._refreshContactShadows();
     return this.debugFloorHeights();
   }
 
@@ -586,7 +626,44 @@ export class StageExperience {
     }
     this._applyRenderScale();
     this._onResize();
+    this.edgeGlitch?.setWorkQuality?.(this._renderScale);
     return this.debugWorkQuality();
+  }
+
+  _attachEdgeGlitchBust() {
+    const bust = this.vignettes?.[0]?.instance?.bustRoot;
+    if (bust) this.edgeGlitch?.attachBust?.(bust);
+  }
+
+  /** DEV — Stage-1 edge-glitch SDF / outside-band debug. */
+  debugEdgeGlitch() {
+    return this.edgeGlitch?.debugState?.() ?? null;
+  }
+
+  /**
+   * DEV — hot-update edge-glitch knobs on the live pass (EdgeGlitchTuner).
+   * @param {Record<string, number>} [partial]
+   */
+  setEdgeGlitchParams(partial = {}) {
+    return this.edgeGlitch?.setParams?.(partial) ?? null;
+  }
+
+  /** DEV — current live edge-glitch knobs. */
+  getEdgeGlitchParams() {
+    return this.edgeGlitch?.getParams?.() ?? null;
+  }
+
+  /**
+   * DEV — water-cursor rim RESPONSE curves (WaterCursorRimTuner). Glitch untouched.
+   * @param {Record<string, number>} [partial]
+   */
+  setWaterCursorRimParams(partial = {}) {
+    return this.waterCursor?.setRimParams?.(partial) ?? null;
+  }
+
+  /** DEV — current water-cursor rim response knobs. */
+  getWaterCursorRimParams() {
+    return this.waterCursor?.getRimParams?.() ?? null;
   }
 
   debugFrameBudget() {
@@ -640,71 +717,87 @@ export class StageExperience {
 
   /**
    * DEV — enable/disable volumetric fog pass (composer skips when off).
-   * Prefer `debugFog('volumetric'|'haze')` for the paired haze toggle.
    * @param {boolean} on
    */
   setVolumetricEnabled(on) {
-    if (on) return this.debugFog("volumetric");
-    return this.debugFog("haze");
-  }
-
-  /**
-   * Live fog atmosphere.
-   * `volumetric` (default): raymarch on, haze + ring off.
-   * `haze`: raymarch off, haze + ring on (legacy compare / `?fog=haze`).
-   * @param {"haze" | "volumetric"} [mode]
-   */
-  debugFog(mode = "volumetric") {
-    const next = mode === "haze" || mode === "ring" ? "haze" : "volumetric";
-    this._applyFogMode(next, { resetFade: true });
+    if (!this.volumetricFog) return null;
+    if (on) {
+      this.volumetricFog.setEnabled(true);
+      this._volFogFade = 1;
+      this.volumetricFog.setDensityScale(1);
+      this.volumetricFog.setCompositeOpacity?.(1);
+    } else {
+      this.volumetricFog.setEnabled(false);
+      this.volumetricFog.setDensityScale(0);
+      this.volumetricFog.setCompositeOpacity?.(0);
+      this._volFogFade = 0;
+    }
     return this.debugVolumetricFog();
   }
 
   /**
-   * @param {"haze" | "volumetric"} mode
-   * @param {{ resetFade?: boolean }} [opts]
+   * DEV — volumetric on/off (legacy haze/ring compare path removed).
+   * @param {"volumetric" | "off" | boolean} [mode]
    */
-  _applyFogMode(mode, opts = {}) {
-    this._fogMode = mode === "haze" ? "haze" : "volumetric";
-    if (opts.resetFade) this._volFogFade = 0;
-
-    if (this._fogMode === "volumetric") {
-      // Sticky haze off; hide ring (do not delete paths).
-      this.neon?.debugFogIsolate?.({ haze: false, fog: false });
-      this.volumetricFog?.setDensityScale(0);
-      this.volumetricFog?.setEnabled(false);
-    } else {
-      this.neon?.debugFogIsolate?.({ haze: true, fog: true });
-      if (this.neon) this.neon._hazeIsolateOff = false;
-      this.volumetricFog?.setEnabled(false);
-      this.volumetricFog?.setDensityScale(0);
-      this._volFogFade = 0;
-    }
+  debugFog(mode = "volumetric") {
+    const on = mode === true || mode === "volumetric" || mode === "on";
+    return this.setVolumetricEnabled(on);
   }
 
   /**
-   * Gate volumetric march behind heavy-effects; fade density ~FOG_HEAVY_FADE_IN_MS.
+   * Land fog with density FULL; cross-fade composite opacity (not density/in-scatter).
+   * Hold bloom intensity at 0 across the opacity ramp so half-res extract does not
+   * vignette-flash screen edges (C05 — one stage downstream of the density fix).
+   * Bloom only ever sees fog at opacity 0 or 1, never the mid-ramp.
    * @param {number} dt
    */
   _tickVolumetricFog(dt) {
     const pass = this.volumetricFog;
     if (!pass) return;
 
-    const wantVol = this._fogMode === "volumetric";
-    const heavy = this._shouldRunIntroHeavyEffects();
-
-    if (!wantVol || !heavy) {
+    if (!this.introComplete) {
       pass.setEnabled(false);
       pass.setDensityScale(0);
-      if (!wantVol) this._volFogFade = 0;
+      pass.setCompositeOpacity?.(0);
+      this._volFogFade = 0;
       return;
     }
 
     pass.setEnabled(true);
+    // Density + in-scatter at authored strength — never ramp through bloom crossing.
+    pass.setDensityScale(1);
     const fadeSec = FOG_HEAVY_FADE_IN_MS / 1000;
     const step = fadeSec > 0 ? Math.min(Math.max(dt, 0), 1 / 20) / fadeSec : 1;
+    const wasComplete = this._volFogFade >= 1;
     this._volFogFade = Math.min(1, this._volFogFade + step);
-    pass.setDensityScale(this._volFogFade);
+    pass.setCompositeOpacity?.(this._volFogFade);
+    if (!wasComplete && this._volFogFade >= 1 && this._introLandAt) {
+      this._fogFadeDoneAt = performance.now();
+      this._bloomReturnT = 0;
+    }
+    // Bloom off while opacity ramps (never extracts mid-fade). Soft-return after
+    // full so restoring intensity does not itself edge-flash.
+    if (this._volFogFade < 1) {
+      this._syncBloomForFogFade(false);
+    } else if (!this.reducedMotion) {
+      const retSec = 0.18;
+      this._bloomReturnT = Math.min(
+        1,
+        (this._bloomReturnT ?? 1) + (retSec > 0 ? Math.min(Math.max(dt, 0), 1 / 20) / retSec : 1)
+      );
+      this.post?.setBloomIntensity?.(NEON_BLOOM.intensity * this._bloomReturnT);
+    }
+  }
+
+  /**
+   * Gate bloom around the land opacity fade. Does not touch reduced-motion (already 0).
+   * @param {boolean} allowBloom
+   */
+  _syncBloomForFogFade(allowBloom) {
+    if (!this.post || this.reducedMotion) return;
+    const target = allowBloom ? NEON_BLOOM.intensity : 0;
+    if (this.post.getBloomIntensity?.() === target) return;
+    this.post.setBloomIntensity?.(target);
   }
 
   /**
@@ -725,7 +818,7 @@ export class StageExperience {
     if (!pass) return null;
     const u = pass.marchMaterial?.uniforms;
     return {
-      mode: this._fogMode ?? "volumetric",
+      mode: "volumetric",
       enabled: Boolean(pass.enabled),
       densityScale: u?.uDensityScale?.value ?? null,
       fade: this._volFogFade ?? 0,
@@ -767,6 +860,7 @@ export class StageExperience {
     snapAllGroupsToFloor(this.vignettes.map((vig) => vig.group));
     // Floor snap moves group.y — re-seat tubes so bottoms stay on Y=0.
     this.neon?.seatTubesOnFloor?.();
+    this._refreshContactShadows();
     this._pendingFloorSnap = false;
   }
 
@@ -780,12 +874,19 @@ export class StageExperience {
     this._introTrackT = 1;
     this._introMotionComplete = true;
     this.introComplete = true;
+    this._introLandAt = performance.now();
+    this._bloomReturnT = 0;
+    this.post?.setBloomIntensity?.(0);
     this.introRig.descent = 0;
     this._introSettleUntil = performance.now() + INTRO_SETTLE_GRACE_MS;
     this._introHandoffUntil = performance.now() + INTRO_HANDOFF_MS;
     // Lean settle frame — no WaterCursor / GLB parse / texture upload here.
     // Those used to hitch exactly as the height spring ease-out kissed rest.
     this.cameraRig?.scrollAdvance?.notifySettled?.();
+    // Stop 0 never travels into its arrive fade — latch arrive so neon/content
+    // resolve to one stable lit state on the intro→first-settle handoff (C01).
+    this.neon?.armArriveForActiveStop?.(this.cameraRig?.state?.index ?? 0);
+    this._tickNeon(this.clock?.getElapsedTime?.() ?? 0, 1 / 60);
     this._schedulePostIntroAssetWork();
     if (!this._introIntegrateScheduled) {
       this._introIntegrateScheduled = true;
@@ -811,6 +912,67 @@ export class StageExperience {
     if (this.waterCursor) {
       this.waterCursor.resize(window.innerWidth, window.innerHeight);
     }
+  }
+
+  /**
+   * Couple liquid cursor to bust edge SDF — surface-tension blow / neck / recoil.
+   * Response curves only; glitch pass untouched.
+   */
+  _tickWaterCursorRim() {
+    const cursor = this.waterCursor;
+    if (!cursor?.setRimField) return;
+
+    const clear = () =>
+      cursor.setRimField({ blow: 0, slurp: 0, neck: 0, pushX: 0, pushY: 0 });
+    const eg = this.edgeGlitch;
+    const idx = this.cameraRig?.state?.index ?? this.current ?? 0;
+    if (!eg?.sampleRimField || idx !== 0 || !Number.isFinite(this._lastPointer?.x)) {
+      clear();
+      return;
+    }
+
+    const u = this.pointer.x * 0.5 + 0.5;
+    const v = this.pointer.y * 0.5 + 0.5;
+    const field = eg.sampleRimField(u, v, {
+      insideFree: cursor.cfg?.rimInsideFree,
+      slurpBand: cursor.cfg?.rimSlurpBand
+    });
+    if (!field?.active) {
+      clear();
+      return;
+    }
+
+    const exp = cursor.cfg?.blowExponent ?? 2.8;
+    const neckPinch = cursor.cfg?.neckPinch ?? 0.72;
+    const snap = cursor.cfg?.snapThreshold ?? 0.01;
+    const pushPx = cursor.cfg?.recoilPushPx ?? cursor.cfg?.rimPushPx ?? 16;
+
+    // Back-loaded surface tension — resist then give way (not linear proximity)
+    let blow = field.d > 0 ? rimBlowFromProximity(field.proximity, exp) : 0;
+    // Snap through: past inside threshold, release blow + recoil
+    const snapped = field.d < -snap;
+    if (snapped) blow = 0;
+
+    const neck = field.slurp * neckPinch;
+    // Glitch push comes OFF the silhouette (outward). CSS: (gx, -gy).
+    const pushX = snapped ? 0 : field.gx * pushPx;
+    const pushY = snapped ? 0 : -field.gy * pushPx;
+
+    /** @type {{ blow: number, slurp: number, neck: number, pushX: number, pushY: number, tipAngle?: number }} */
+    const rim = {
+      blow,
+      slurp: field.slurp,
+      neck,
+      pushX,
+      pushY
+    };
+    // Tip = against the glitch push (into fill). Only update when gradient is solid.
+    const gLen = Math.hypot(field.gx, field.gy);
+    if (gLen > 0.15) {
+      rim.tipAngle = Math.atan2(field.gy, -field.gx);
+    }
+
+    cursor.setRimField(rim);
   }
 
   /** Mark intro done once the spring pageload descent settles. */
@@ -847,8 +1009,9 @@ export class StageExperience {
     }
   }
 
-  /** Desktop GLB only — Sidekick / Travel must not count toward the boot gate. */
+  /** Desktop + Bust GLBs — Sidekick / Travel must not count toward the boot gate. */
   _startGatingModelFetches() {
+    this.vignettes[0]?.instance?.startModelLoad?.();
     this.vignettes[1]?.instance?.startModelLoad?.();
   }
 
@@ -985,7 +1148,10 @@ export class StageExperience {
               this.scene,
               this.spotLight,
               this.spotTarget,
-              { force: true }
+              {
+                force: true,
+                neonLight: this.neon?.stopLights?.[1]?.light ?? null
+              }
             );
           } catch (error) {
             console.warn("[StageExperience] CRT cube warm failed:", error);
@@ -1041,9 +1207,20 @@ export class StageExperience {
     }, INTRO_HEAVY_EFFECTS_DELAY_MS);
   }
 
-  _tickNeon(time) {
+  _tickNeon(time, dt = 1 / 60) {
     if (!this.neon || !this.cameraRig) return;
-    this.neon.update(this.cameraRig.state.theta, this.vignettes.length, time);
+    const s = this.cameraRig.state;
+    // C01: do NOT OR with isSettled — aerial hold is also "settled" at pageload
+    // height, which flashed stop 0 on → off (drop) → on (land). Neon/content
+    // arm only after intro completes (land handoff).
+    const allowNeon = Boolean(this.introComplete);
+    this.neon.update(s.theta, this.vignettes.length, time, {
+      activeIndex: s.index,
+      settled: Boolean(s.isSettled),
+      dt,
+      allowNeon
+    });
+    this._tickContactShadows();
   }
 
   debugNeon() {
@@ -1096,7 +1273,10 @@ export class StageExperience {
       this.scene,
       this.spotLight,
       this.spotTarget,
-      { force: true }
+      {
+        force: true,
+        neonLight: this.neon?.stopLights?.[1]?.light ?? null
+      }
     );
     desktop._pendingCrtEnvRefresh = false;
   }
@@ -1136,7 +1316,7 @@ export class StageExperience {
   }
 
   _buildVignettes() {
-    const defs = [monolithVignette, desktopVignetteMeta, sidekickVignetteMeta, travelVignetteMeta];
+    const defs = [bustVignetteMeta, desktopVignetteMeta, sidekickVignetteMeta, travelVignetteMeta];
     const instances = [];
 
     defs.forEach((def, index) => {
@@ -1145,7 +1325,21 @@ export class StageExperience {
       const angle = placeOnStage(group, index, total);
       const stageDeg = vignetteStageDegrees(index, total);
 
-      if (index === 1) {
+      if (index === 0) {
+        const bust = new BustVignette(group, {
+          vignetteIndex: index,
+          loadingManager: this.loadingManager,
+          renderer: this.renderer,
+          reducedMotion: this.reducedMotion,
+          // Gate with Desktop — arrival stop must be ready when the fader lifts.
+          deferModelLoad: true,
+          onAligned: () => {
+            this._snapAllVignettesToFloor();
+            this._attachEdgeGlitchBust();
+          }
+        });
+        instances.push({ def, group, angle, stageDeg, instance: bust });
+      } else if (index === 1) {
         // Pull the PC stop 5% toward arena center (keep angle, shorten radius).
         group.position.x *= 0.95;
         group.position.z *= 0.95;
@@ -1197,10 +1391,6 @@ export class StageExperience {
           onAligned: () => this._snapAllVignettesToFloor()
         });
         instances.push({ def, group, angle, stageDeg, instance: travel });
-      } else {
-        def.build(group, this.animFns);
-        snapGroupToFloor(group);
-        instances.push({ def, group, angle, stageDeg, instance: null });
       }
 
       group.traverse((obj) => {
@@ -1218,7 +1408,7 @@ export class StageExperience {
     return instances;
   }
 
-  /** Placeholder blockouts on Monolith are only visible on the active vignette. */
+  /** Placeholder blockouts on Bust are only visible on the active vignette. */
   _updatePlaceholderVisibility(activeIndex = this.current) {
     this.vignettes.forEach((vig, index) => {
       const show = index === activeIndex;
@@ -1233,6 +1423,7 @@ export class StageExperience {
   _bindUi() {
     this.ui = {
       readout: document.getElementById("readout"),
+      fps: document.getElementById("fps"),
       capIndex: document.getElementById("capIndex"),
       capName: document.getElementById("capName"),
       capDesc: document.getElementById("capDesc"),
@@ -1811,6 +2002,9 @@ export class StageExperience {
     this.renderer.setSize(w, h);
     this.post.setSize(w, h);
     this.neon?.setSize?.(this.renderer);
+    const draw = new THREE.Vector2();
+    this.renderer.getDrawingBufferSize(draw);
+    this.edgeGlitch?.setSize?.(draw.x, draw.y);
     this.hud.updateMySpacePanelForVignette(this.current);
     this.waterCursor?.resize(w, h);
     if (this.cameraRig?.state?.index === 2) {
@@ -1882,11 +2076,21 @@ export class StageExperience {
         this.scene,
         this.spotLight,
         this.spotTarget,
-        { force: Boolean(desktop?._pendingCrtEnvRefresh) }
+        {
+          force: Boolean(desktop?._pendingCrtEnvRefresh),
+          neonLight: this.neon?.stopLights?.[1]?.light ?? null
+        }
       );
       if (desktop?._pendingCrtEnvRefresh) {
         desktop._pendingCrtEnvRefresh = false;
       }
+    } else if (this.introComplete && desktop?.glassMesh) {
+      // Neon glass glint every frame — not gated on heavy-effects / env recapture.
+      desktop.syncGlassNeon?.(
+        this.cameraRig?.state?.index === 1
+          ? this.neon?.stopLights?.[1]?.light ?? null
+          : null
+      );
     }
 
     this.animFns.forEach((fn) => fn(t));
@@ -1904,12 +2108,22 @@ export class StageExperience {
     }
     this._tickModelReveal(dt);
     this._tickPostGrainStrength(dt);
-    this._tickNeon(t);
+    this._tickNeon(t, dt);
     this._tickVolumetricFog(dt);
 
     if (this.ui.readout) {
       const deg = this._getDisplayStageDegrees();
       this.ui.readout.textContent = `STAGE ${deg.toFixed(1).padStart(5, "0")}°`;
+    }
+
+    if (dt > 0 && dt < 1) {
+      const instant = 1 / dt;
+      this._fpsEma += (instant - this._fpsEma) * Math.min(1, dt * 3);
+    }
+    this._fpsDomT += dt;
+    if (this.ui.fps && this._fpsDomT >= 0.25) {
+      this._fpsDomT = 0;
+      this.ui.fps.textContent = `${Math.round(this._fpsEma)} FPS`;
     }
 
     // Opaque depth → volumetric (FogDepthCapture) + legacy soft-fade sheet.
@@ -1920,13 +2134,31 @@ export class StageExperience {
       this.volumetricFog.setSceneDepth(this.neon.depthCapture.depthTexture, {
         packed: true
       });
-      // Four live neon PointLights — intensity already tracks neonProximity in NeonSystem.update.
+      // Focus-only neon PointLights — intensity from NeonSystem.update (arrive + flicker).
       if (this.volumetricFog.enabled) {
         const lights = this.neon.stopLights?.map((s) => s.light) ?? [];
         this.volumetricFog.setLights(lights);
       }
     }
+    this.edgeGlitch?.setSceneDepth?.(this.neon?.depthCapture?.depthTexture ?? null);
     tagFrame(`fog-depth:${Math.round(performance.now() - fogT)}ms`);
+
+    // Edge SDF + glitch uniforms — before beauty so the pass sees this frame's mask.
+    if (this.edgeGlitch) {
+      const bustRoot = this.vignettes?.[0]?.instance?.bustRoot;
+      if (bustRoot && !this.edgeGlitch._applied) {
+        this.edgeGlitch.attachBust(bustRoot);
+      }
+      this.edgeGlitch.setPointerNdc(this.pointer, {
+        live: Number.isFinite(this._lastPointer?.x)
+      });
+      this.edgeGlitch.update({
+        activeIndex: this.cameraRig?.state?.index ?? this.current ?? 0,
+        bustReady: Boolean(bustRoot),
+        time: t
+      });
+    }
+    this._tickWaterCursorRim();
 
     const beautyT = performance.now();
     tagFrame("beauty");

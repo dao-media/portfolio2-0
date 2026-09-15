@@ -14,6 +14,7 @@ import {
   WHEEL_MIN_DELTA,
   SCROLL_CAPTURE_WHEEL_OFF
 } from "./constants.js";
+import { createScrollAdvance, isSettleRisingEdge } from "../camera/scrollAdvance.js";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -109,6 +110,39 @@ export function runStageScrollStressTest() {
       const idx = resolveInterruptedVignetteIndex(progress, pending, from);
       assert(idx >= 0 && idx <= 2 && Number.isFinite(idx), "bad index");
     }
+  });
+
+  run("isSettleRisingEdge is false→true only", () => {
+    assert(isSettleRisingEdge(false, true) === true, "rising edge");
+    assert(isSettleRisingEdge(true, true) === false, "stays settled");
+    assert(isSettleRisingEdge(false, false) === false, "stays traveling");
+    assert(isSettleRisingEdge(true, false) === false, "falling edge");
+  });
+
+  run("notifySettled does not auto-fire hops; mid-travel wheel does not queue", () => {
+    let hops = 0;
+    let settled = true;
+    const adv = createScrollAdvance({
+      onAdvance: () => {
+        hops += 1;
+        settled = false;
+      },
+      isSettled: () => settled,
+      threshold: 10,
+      quietMs: 50
+    });
+    const wheel = (dy) =>
+      adv.handleWheel({ preventDefault() {}, deltaY: dy, deltaMode: 0 });
+
+    wheel(40);
+    assert(hops === 1, `expected first hop, got ${hops}`);
+
+    wheel(40);
+    assert(hops === 1, "mid-travel wheel must not auto-fire");
+
+    settled = true;
+    for (let i = 0; i < 24; i += 1) adv.notifySettled();
+    assert(hops === 1, "notifySettled must not itself advance");
   });
 
   const parallaxStress = runStageParallaxHandoffStressTest();

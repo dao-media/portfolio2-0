@@ -18,6 +18,11 @@ function normalizeDeltaY(event) {
   return deltaY;
 }
 
+/** True only on the false → true settle edge. */
+export function isSettleRisingEdge(wasSettled, isSettled) {
+  return Boolean(isSettled) && !wasSettled;
+}
+
 export function createScrollAdvance({
   onAdvance,
   isSettled = () => true,

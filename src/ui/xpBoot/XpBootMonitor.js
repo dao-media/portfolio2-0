@@ -443,6 +443,7 @@ export class XpBootMonitor {
       this._els.userTiles?.forEach((tile) => tile.classList.remove("is-hover"));
 
       tagFrame("html-to-image");
+      /* Inset is permanent on `.xp-crt__page` — do not also pad `.xp-crt` here. */
       const captured = await toCanvas(this.root, {
         width: this.width,
         height: this.height,

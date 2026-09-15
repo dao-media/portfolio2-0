@@ -21,15 +21,18 @@
   overflow: hidden;
 }
 
-/* CRT capture — page fills IE content pane edge-to-edge; no viewport padding. */
+/* CRT MySpace — viewport is the page parent + capture target.
+   Permanent inset (DOM_CAPTURE_EDGE_PAD_PX) keeps chrome inside the CRT. */
 .ms-root--crt {
   overflow: visible;
   max-width: 100%;
   margin: 0;
   padding: 0;
+  box-sizing: border-box;
 }
 
-.ms-root--crt .ms-viewport {
+.ms-root--crt .ms-viewport,
+.ms-root--crt .ms-viewport.is-dom-capturing {
   height: var(--ms-capture-h, auto);
   max-height: none;
   width: 100%;
@@ -39,8 +42,8 @@
   scrollbar-width: none;
   -ms-overflow-style: none;
   margin: 0;
-  padding: 0;
   box-sizing: border-box;
+  padding: 40px;
 }
 
 .ms-root--crt .ms-viewport::-webkit-scrollbar {

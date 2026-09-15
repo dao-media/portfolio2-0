@@ -4,12 +4,13 @@ Export derived travel-pack + T-rex GLBs for the stage.
 Reads source OBJs/PNGs and writes only to public/assets/models/**/runtime/.
 Never overwrites masters.
 
-After this script, compress textures (do not run gltf-transform `optimize`):
+After this script, compress textures then meshopt (do not run gltf-transform `optimize`):
 
   npx @gltf-transform/cli resize runtime.glb resized.glb --width 1024 --height 1024
   npx @gltf-transform/cli webp resized.glb runtime.glb --quality 86
+  npx @gltf-transform/cli meshopt runtime.glb runtime.glb
 
-Skip Draco until the stage ships a DRACOLoader + decoder.
+Never `optimize` — it `simplify`s meshes away. meshopt needs MeshoptDecoder on the runtime GLTFLoader (see createGltfLoader.js).
 """
 from __future__ import annotations
 

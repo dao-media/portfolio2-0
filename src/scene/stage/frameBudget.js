@@ -85,6 +85,14 @@ export function createFrameBudget() {
         spans: spans.slice(-24),
         byTag
       };
+    },
+
+    /** Clear slow/span history between cost-matrix cases. */
+    reset() {
+      slow.length = 0;
+      spans.length = 0;
+      tags = [];
+      stack.length = 0;
     }
   };
 }

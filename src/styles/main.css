@@ -8,7 +8,7 @@ html,
 body {
   height: 100%;
   overflow: hidden;
-  background: #141414;
+  background: #070709;
 }
 
 #scene-canvas {
@@ -32,14 +32,25 @@ body {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
 
-.wordmark {
+.top-bar {
   position: absolute;
-  top: 22px;
-  left: 24px;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: start;
+  gap: 12px 20px;
+  padding: 18px 22px 0;
+}
+
+.wordmark {
+  position: static;
   font-size: 10px;
   letter-spacing: 0.32em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.4);
+  min-width: 0;
 }
 
 .wordmark b {
@@ -47,23 +58,47 @@ body {
   font-weight: 600;
 }
 
+.fps {
+  justify-self: center;
+  margin-top: 1px;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: rgba(255, 255, 255, 0.45);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .readout {
-  position: absolute;
-  top: 22px;
-  right: 24px;
+  position: static;
+  justify-self: end;
   font-size: 11px;
   letter-spacing: 0.18em;
   color: rgba(255, 255, 255, 0.5);
   font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.bottom-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
+  gap: 12px 20px;
+  padding: 0 20px 16px;
 }
 
 .caption {
-  position: absolute;
-  left: 24px;
-  bottom: 26px;
+  position: static;
   display: flex;
-  align-items: baseline;
-  gap: 14px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  max-width: min(360px, 100%);
   transition: opacity 0.35s ease;
 }
 
@@ -71,6 +106,13 @@ body {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.35);
   letter-spacing: 0.15em;
+}
+
+.caption__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
 .caption .name {
@@ -83,23 +125,23 @@ body {
 
 .caption .desc {
   display: block;
-  margin-top: 6px;
+  margin-top: 0;
   font-size: 11px;
   letter-spacing: 0.06em;
   color: rgba(255, 255, 255, 0.38);
-  max-width: 320px;
+  max-width: 100%;
   line-height: 1.5;
   text-transform: none;
 }
 
 .dots {
-  position: absolute;
-  bottom: 30px;
-  left: 50%;
-  transform: translateX(-50%);
+  position: static;
+  transform: none;
   display: flex;
   gap: 14px;
   pointer-events: auto;
+  justify-self: center;
+  padding-bottom: 6px;
 }
 
 .dot {
@@ -136,21 +178,33 @@ body {
   border-radius: 50%;
 }
 
+.bottom-bar__end {
+  justify-self: end;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  /* Clear the mute FAB (44px) + edge padding. */
+  padding-right: 56px;
+  padding-bottom: 10px;
+  min-width: 0;
+}
+
 .hint {
-  position: absolute;
-  right: 24px;
-  bottom: 30px;
+  position: static;
   font-size: 10px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.28);
   text-align: right;
+  line-height: 1.35;
+  white-space: nowrap;
 }
 
 .audio-fab-root {
   position: fixed;
-  right: 20px;
-  bottom: 20px;
+  right: 16px;
+  bottom: 14px;
   z-index: 6;
   pointer-events: none;
 }
@@ -277,7 +331,7 @@ body {
 .fader {
   position: fixed;
   inset: 0;
-  background: #141414;
+  background: #070709;
   pointer-events: none;
   transition: opacity 2.4s cubic-bezier(0.22, 1, 0.36, 1);
   opacity: 1;
@@ -368,7 +422,86 @@ body {
 }
 
 @media (max-width: 900px) {
-  .caption .desc {
-    max-width: 240px;
+  .top-bar {
+    padding: 14px 14px 0;
+    gap: 8px 12px;
+  }
+
+  .wordmark {
+    font-size: 9px;
+    letter-spacing: 0.22em;
+  }
+
+  .bottom-bar {
+    padding: 0 14px 12px;
+    gap: 8px 12px;
+  }
+
+  .caption {
+    max-width: min(280px, 100%);
+  }
+
+  .hint {
+    letter-spacing: 0.16em;
+  }
+
+  .bottom-bar__end {
+    padding-right: 52px;
+  }
+}
+
+@media (max-width: 560px) {
+  .top-bar {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "wordmark readout"
+      "fps fps";
+  }
+
+  .wordmark {
+    grid-area: wordmark;
+  }
+
+  .fps {
+    grid-area: fps;
+    justify-self: start;
+    margin-top: 2px;
+  }
+
+  .readout {
+    grid-area: readout;
+  }
+
+  .bottom-bar {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "caption"
+      "dots"
+      "end";
+    justify-items: stretch;
+  }
+
+  .caption {
+    grid-area: caption;
+    max-width: calc(100% - 56px);
+  }
+
+  .dots {
+    grid-area: dots;
+    justify-self: center;
+    padding-bottom: 2px;
+  }
+
+  .bottom-bar__end {
+    grid-area: end;
+    justify-self: stretch;
+    align-items: flex-start;
+    padding-right: 56px;
+    padding-bottom: 0;
+  }
+
+  .hint {
+    text-align: left;
+    white-space: normal;
   }
 }

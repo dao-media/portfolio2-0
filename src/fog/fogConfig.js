@@ -56,13 +56,17 @@ export const FOG_PARAM_SCHEMA = [
   /** Residual density above the haze fade — keep low so it does not read as a tall veil. */
   { key: "heightFogHazeFloor", type: "number", default: 0.25, min: 0, max: 1, step: 0.01 },
   { key: "fogDensityMultiplier", type: "number", default: 0.35, min: 0, max: 0.4, step: 0.001 },
-  // Keep step spacing ≤~0.7 m: baseMaxRayLength / baseRaymarchStepCount.
-  // 32 / 64 = 0.50 m — Manual 1 (tighter than prior 32/46).
+  // Cap on march samples. Live spacing = baseMaxRayLength / this (~0.5 m).
+  // VolumetricFogPass: fixed world spacing + step count QUANTIZED to buckets of 8
+  // from rayLen (not raw per-frame ceil) — near stays cheap, count is temporally
+  // stable (raw ceil pulsed fog under camera micro-jitter).
   { key: "baseRaymarchStepCount", type: "number", default: 64, min: 8, max: 128, step: 1 },
   /**
    * Max march length (m). NEVER raise without raising baseRaymarchStepCount —
    * 32/16 undersampled falloffCeilingJitter + globalScale into vertical columns.
-   * Lab-clean spacing target ≤~0.7 m/step (32/64 = 0.50).
+   * Lab-clean spacing target ≤~0.7 m/step (32/64 = 0.50). Step count is quantized
+   * from rayLen (buckets of 8) with fixed world spacing — do not restore raw
+   * per-pixel ceil(rayLen/spacing) (temporal fog flash).
    */
   { key: "baseMaxRayLength", type: "number", default: 32, min: 10, max: 120, step: 1 },
   { key: "noiseBias", type: "number", default: 0.4, min: 0, max: 1, step: 0.01 },
@@ -80,20 +84,37 @@ export const FOG_PARAM_SCHEMA = [
   { key: "noiseSpeed", type: "number", default: 7.95, min: 0, max: 12, step: 0.05 },
   /**
    * Screen-space output dither (Mach banding on fog alpha/RGB). Amp is linear
-   * color (±0.5*amp). Textbook 8-bit 1 LSB = ~0.004; 0.02 ≈ 5 LSB — visible
-   * smearing of the fog gradient without making the Bayer 4×4 grid flash.
-   * MAX SAFE ≈ 0.05 (±12/255, barely invisible). 0.4 = ±100/255 = full flicker.
+   * color (±0.5*amp). Textbook 8-bit 1 LSB = ~0.004; 0.02 ≈ 5 LSB.
+   * Bayer 4×4 is intentionally STATIC (gl_FragCoord only) — animating with
+   * uTime caused the edge/vignette strobe. Do not reintroduce a time offset.
+   * MAX SAFE ≈ 0.05 (±12/255). 0 = Mach banding returns. 0.4 = ±100/255 flicker.
    */
   { key: "outputDither", type: "number", default: 0.02, min: 0, max: 0.1, step: 0.002 },
   /**
-   * Warp heightFalloff Y by density noise — modest so it does not lift the lid.
+   * Domain-warp heightFalloff Y by density noise so blobs churn instead of
+   * sitting still while texture scrolls across them. 0 = static slabs;
+   * 1.5 = natural movement (pre-lid-fix default restored).
    */
-  { key: "falloffNoiseWarp", type: "number", default: 0, min: 0, max: 1.5, step: 0.05 },
+  { key: "falloffNoiseWarp", type: "number", default: 1.5, min: 0, max: 2, step: 0.05 },
   /**
    * Per-pixel XZ jitter of the falloff origin (meters). Keep low — 6 m of
    * wobble read as a tall ceiling even with a low haze start.
    */
   { key: "falloffCeilingJitter", type: "number", default: 1.2, min: 0, max: 6, step: 0.05 },
+  /**
+   * Camera-distance density fade (m). Fog soft-outs before baseMaxRayLength so
+   * the far arc does not show a hard accumulation cutoff (~32 m). Same idea as
+   * the old ring distFade 20→36; volumetric uses a tighter window at the ray end.
+   */
+  { key: "fogDistFadeStart", type: "number", default: 24, min: 4, max: 80, step: 0.5 },
+  { key: "fogDistFadeEnd", type: "number", default: 32, min: 8, max: 120, step: 0.5 },
+  /**
+   * Near-camera density soft-in (m). Thins fog within this range of the camera
+   * so near screen-filling subjects (stop-0 bust / maple) are not crushed
+   * opaque. Distant look unchanged past fogNearFadeEnd. 0 end = disabled.
+   */
+  { key: "fogNearFadeStart", type: "number", default: 0.5, min: 0, max: 8, step: 0.1 },
+  { key: "fogNearFadeEnd", type: "number", default: 6, min: 0, max: 16, step: 0.25 },
   /**
    * Fill-side Y-slice offset — kept at 0.
    */
@@ -109,12 +130,14 @@ export const FOG_DEFAULTS = Object.freeze(
 
 /**
  * Soft luminance cap for in-scatter fill (bloom threshold is 1.0).
- * Fill stays under; near-tube cores keep a fraction of excess so they can still bloom.
+ * Fill is hard-clamped to this value — never re-add coreKeep excess above the
+ * cap (that strobed bloom as densityScale ramped 0→1 on intro land).
+ * `FOG_IN_SCATTER_CORE_KEEP` kept for FogTuner / __stage API compatibility only.
  */
 export const FOG_IN_SCATTER_FILL_CAP = 0.88;
 export const FOG_IN_SCATTER_CORE_KEEP = 0.22;
 
-/** Density fade-in after heavy-effects arm (ms). */
+/** Density full on land; composite opacity fades over this many ms (no in-scatter ramp). */
 export const FOG_HEAVY_FADE_IN_MS = 400;
 
 /** @returns {Record<string, boolean|number>} mutable copy of committed defaults */

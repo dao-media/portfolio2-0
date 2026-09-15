@@ -9,12 +9,20 @@ import * as THREE from "three";
  * is meant to be invisible, so the keypad vanishes unless we split them and
  * give the keys their own opaque chassis plastic.
  *
+ * Label cutouts (`KeyboardText`, `sideButtons`) use alphaTest and go to opacity 0
+ * during intro reveal — never treat that as the cover. Identity (phong3 / cover
+ * mesh / shared cover instance) only; never opacity + alphaTest.
+ *
  * Rule: before any write to a loaded material/texture, own a private copy.
  * Never dispose the abandoned shared resource — other meshes may still use it.
  */
 
 export const SIDEKICK_KEYPAD_MESH_NAMES = ["Buttons"];
 export const SIDEKICK_COVER_MESH_NAMES = ["transparentCover"];
+/** Decal / glyph meshes — never keypad-repair targets. */
+export const SIDEKICK_LABEL_MESH_NAMES = ["KeyboardText", "sideButtons"];
+/** CALL/END/D-pad: one atlas mesh (body + print), not a decal over a separate body. */
+export const SIDEKICK_FUSED_BUTTON_MESH_NAMES = ["sideButtons"];
 export const SIDEKICK_KEYPAD_DONOR_NAMES = [
   "buttonsFace",
   "bottonsSide",
@@ -62,14 +70,69 @@ export function ownTexture(texture) {
   return clone;
 }
 
-/** @param {THREE.Material | null | undefined} mat */
+/** @param {string | null | undefined} name */
+export function isSidekickLabelMeshName(name) {
+  return Boolean(name && SIDEKICK_LABEL_MESH_NAMES.includes(name));
+}
+
+/**
+ * CALL/END/D-pad live on `sideButtons` as one atlas (phong4 + TmobileButtons).
+ * A luminance cutout deletes the dark plastic and leaves only the glyphs.
+ * Force that atlas opaque — do not swap in untextured keypad plastic.
+ * @param {THREE.Mesh} mesh
+ */
+export function applySidekickFusedButtonAtlas(mesh) {
+  const prior = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+  if (!prior?.map) return null;
+
+  if (
+    prior.userData?.sidekickFusedButtonProtected &&
+    prior.map &&
+    prior.transparent === false &&
+    prior.alphaTest === 0 &&
+    mesh.userData.sidekickFusedButtonProtected
+  ) {
+    return prior;
+  }
+
+  const map = ownTexture(prior.map);
+  const mat = cloneMaterialSafe(prior);
+  mat.map = map;
+  mat.name = prior.name || mesh.name;
+  mat.transparent = false;
+  mat.opacity = 1;
+  mat.alphaTest = 0;
+  mat.alphaMap = null;
+  mat.depthWrite = true;
+  mat.depthTest = true;
+  mat.side = THREE.DoubleSide;
+  mat.metalness = 0;
+  if (typeof mat.roughness !== "number") mat.roughness = 0.45;
+  mat.userData.sidekickFusedButtonProtected = true;
+  mat.userData.sidekickLabelProtected = true;
+  mat.needsUpdate = true;
+
+  mesh.material = mat;
+  mesh.userData.sidekickLabelProtected = true;
+  mesh.userData.sidekickFusedButtonProtected = true;
+  mesh.userData.sidekickFusedButtonMaterial = mat;
+  mesh.visible = true;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mat;
+}
+
+/**
+ * True only for the authored invisible cover identity — never opacity/alphaTest.
+ * Mid-reveal label cutouts (alphaTest 0.08, opacity 0) must NOT match.
+ * @param {THREE.Material | null | undefined} mat
+ */
 export function isInvisibleCoverMaterial(mat) {
   if (!mat) return false;
+  if (mat.userData?.sidekickLabelProtected) return false;
   if (mat.name === INVISIBLE_COVER_SOURCE_NAME) return true;
   if (mat.name === SIDEKICK_COVER_MATERIAL_NAME) return true;
-  const opacity = Number.isFinite(mat.opacity) ? mat.opacity : 1;
-  const alphaTest = Number.isFinite(mat.alphaTest) ? mat.alphaTest : 0;
-  return alphaTest > 0 && opacity < 0.05;
+  return false;
 }
 
 /**
@@ -93,6 +156,8 @@ export function isSidekickKeypadMeshHealthy(mesh) {
  * Idempotent. Call as soon as `phoneRoot` exists, then again after any later
  * material pass (reveal fade, label swap). `ensureSidekickKeypadMaterials`
  * re-runs this if something assigns phong3 back onto the keys.
+ *
+ * Never targets label/decal meshes (`KeyboardText`, `sideButtons`).
  * @param {THREE.Object3D | null | undefined} phoneRoot
  */
 export function repairSidekickKeypadMaterials(phoneRoot) {
@@ -122,10 +187,14 @@ export function repairSidekickKeypadMaterials(phoneRoot) {
   phoneRoot.traverse((obj) => {
     if (!obj.isMesh) return;
     if (SIDEKICK_COVER_MESH_NAMES.includes(obj.name)) return;
+    if (isSidekickLabelMeshName(obj.name) || obj.userData?.sidekickLabelProtected) return;
 
     const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
     const namedKeypad = SIDEKICK_KEYPAD_MESH_NAMES.includes(obj.name);
-    const onCoverMat = mats.some((mat) => mat && (coverMats.has(mat) || isInvisibleCoverMaterial(mat)));
+    // Cover identity = shared phong3/cover instance or named cover material — not opacity.
+    const onCoverMat = mats.some(
+      (mat) => mat && (coverMats.has(mat) || isInvisibleCoverMaterial(mat))
+    );
     if (namedKeypad || onCoverMat) keypadMeshes.push(obj);
   });
 
@@ -145,7 +214,7 @@ export function repairSidekickKeypadMaterials(phoneRoot) {
 
 /**
  * Cheap watchdog — restore the keypad if anything reassigned phong3 / cover mat.
- * Safe to call every frame.
+ * Safe to call every frame. Never rewrites label/decal meshes.
  * @param {THREE.Object3D | null | undefined} phoneRoot
  * @returns {boolean} true when every keypad mesh is healthy
  */
@@ -155,6 +224,8 @@ export function ensureSidekickKeypadMaterials(phoneRoot) {
   let needsRepair = false;
   phoneRoot.traverse((obj) => {
     if (!obj.isMesh) return;
+    if (isSidekickLabelMeshName(obj.name) || obj.userData?.sidekickLabelProtected) return;
+
     const pinned = obj.userData.sidekickKeypadMaterial;
     if (pinned && obj.material !== pinned) {
       const current = Array.isArray(obj.material) ? obj.material[0] : obj.material;
@@ -167,12 +238,29 @@ export function ensureSidekickKeypadMaterials(phoneRoot) {
     if (SIDEKICK_KEYPAD_MESH_NAMES.includes(obj.name) && !isSidekickKeypadMeshHealthy(obj)) {
       needsRepair = true;
     }
-    if (!SIDEKICK_COVER_MESH_NAMES.includes(obj.name) && isInvisibleCoverMaterial(
-      Array.isArray(obj.material) ? obj.material[0] : obj.material
-    )) {
+    if (
+      !SIDEKICK_COVER_MESH_NAMES.includes(obj.name) &&
+      isInvisibleCoverMaterial(Array.isArray(obj.material) ? obj.material[0] : obj.material)
+    ) {
       needsRepair = true;
     }
   });
+
+  for (const name of SIDEKICK_FUSED_BUTTON_MESH_NAMES) {
+    const mesh = phoneRoot.getObjectByName(name);
+    if (!mesh?.isMesh) continue;
+    const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    const pinned = mesh.userData.sidekickFusedButtonMaterial;
+    if (pinned && mesh.material !== pinned) {
+      mesh.material = pinned;
+      mesh.visible = true;
+      continue;
+    }
+    // Reveal may set transparent mid-fade; only rebuild if the opaque pin is gone.
+    if (!mat?.userData?.sidekickFusedButtonProtected) {
+      applySidekickFusedButtonAtlas(mesh);
+    }
+  }
 
   if (needsRepair) repairSidekickKeypadMaterials(phoneRoot);
 
@@ -185,6 +273,55 @@ export function ensureSidekickKeypadMaterials(phoneRoot) {
 /**
  * @param {THREE.Object3D | null | undefined} phoneRoot
  */
+function describeMesh(obj) {
+  const mat = Array.isArray(obj.material) ? obj.material[0] : obj.material;
+  const map = mat?.map;
+  return {
+    name: obj.name,
+    visible: obj.visible,
+    material: mat?.name ?? null,
+    type: mat?.type ?? null,
+    map: map?.name || map?.image?.src?.split?.("/").pop?.() || (map ? "map" : null),
+    opacity: mat?.opacity ?? null,
+    transparent: Boolean(mat?.transparent),
+    alphaTest: mat?.alphaTest ?? null,
+    side: mat?.side ?? null,
+    labelProtected: Boolean(obj.userData?.sidekickLabelProtected),
+    keypadProtected: Boolean(obj.userData?.sidekickKeypadProtected)
+  };
+}
+
+/** Keypad + side-button neighborhood — body vs label identity for the repair lists. */
+export function debugSidekickHardware(phoneRoot) {
+  const names = [
+    "Buttons",
+    "KeyboardText",
+    "sideButtons",
+    "buttonsFace",
+    "bottonsSide",
+    "scrollButton",
+    "scrolButtonFrame",
+    "transparentCover"
+  ];
+  const listed = names.map((name) => {
+    const obj = phoneRoot?.getObjectByName?.(name);
+    return obj?.isMesh ? describeMesh(obj) : { name, missing: true };
+  });
+  const extra = [];
+  phoneRoot?.traverse?.((obj) => {
+    if (!obj.isMesh) return;
+    if (names.includes(obj.name)) return;
+    if (/button|key|pad|call|end|dpad|d-pad/i.test(obj.name)) extra.push(describeMesh(obj));
+  });
+  const side = listed.find((m) => m.name === "sideButtons");
+  const keyboard = listed.find((m) => m.name === "KeyboardText");
+  return {
+    meshes: listed.concat(extra),
+    fusedSideButtons: Boolean(side && !side.missing && side.map),
+    separateKeyboardDecal: Boolean(keyboard && !keyboard.missing && keyboard.map)
+  };
+}
+
 export function debugSidekickKeypad(phoneRoot) {
   const buttons = phoneRoot?.getObjectByName?.("Buttons");
   const cover = phoneRoot?.getObjectByName?.("transparentCover");
@@ -208,7 +345,8 @@ export function debugSidekickKeypad(phoneRoot) {
     buttonsAlphaTest: buttonMat?.alphaTest ?? null,
     buttonsProtected: Boolean(buttonMat?.userData?.sidekickKeypadProtected),
     sharesCoverMaterial: Boolean(buttonMat && coverMat && buttonMat === coverMat),
-    healthy: isSidekickKeypadMeshHealthy(buttons)
+    healthy: isSidekickKeypadMeshHealthy(buttons),
+    hardware: debugSidekickHardware(phoneRoot)
   };
 }
 
@@ -299,7 +437,15 @@ export function assertSidekickChassisMaterials(phoneRoot) {
   for (const decal of [sideButtons, keyboard]) {
     if (!decal?.isMesh) continue;
     const mat = Array.isArray(decal.material) ? decal.material[0] : decal.material;
-    if (!mat?.map) problems.push(`${decal.name} missing map`);
+    if (mat?.name === SIDEKICK_KEYPAD_MATERIAL_NAME || mat?.userData?.sidekickKeypadProtected) {
+      problems.push(`${decal.name} was paved with keypad plastic — label atlas lost`);
+      continue;
+    }
+    // Label atlases are authored maps; missing map skips the unlit swap (not the
+    // phong3-share landmine). Warn — do not fail the chassis integrity error.
+    if (!mat?.map) {
+      console.warn(`[Sidekick] ${decal.name} has no albedo map — label atlas skipped`);
+    }
   }
 
   if (problems.length) {

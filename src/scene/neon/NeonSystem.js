@@ -1,139 +1,94 @@
 import * as THREE from "three";
 import {
-  FOG_ATLAS,
-  NEON_FOG,
+  NEON_ARRIVE_RAD,
+  NEON_FLICKER_SEC,
+  NEON_FLICKER_TRAVEL_FRAC,
   NEON_FOG_LAYER,
+  NEON_GRADIENT_SCROLL,
+  NEON_LIGHT_COLOR_MAX_RATE,
+  NEON_LIGHT_COLOR_SCROLL,
   NEON_LIGHT_DECAY,
   NEON_LIGHT_DISTANCE,
   NEON_LIGHT_FALLOFF,
   NEON_LIGHT_HEIGHT,
+  NEON_CORE_MAX,
   NEON_MAX_EMISSIVE,
   NEON_MAX_LIGHT,
   vignetteAngle
 } from "../stage/constants.js";
-import { createFogRing } from "./createFogRing.js";
 import { FogDepthCapture } from "./FogDepthCapture.js";
 import { FogDebugOverlay } from "./FogDebugOverlay.js";
 import { makeNeonTube } from "./makeNeonTube.js";
+import { sampleNeonMapUv } from "./neonGradientTexture.js";
+import {
+  makeNeonFloorGlow,
+  seatNeonFloorGlow,
+  setNeonFloorGlowLevel,
+  applyDesktopFloorGlowClearance,
+  syncDesktopTowerFootprintClip
+} from "./neonFloorGlow.js";
 
 const _TUBE_WORLD = new THREE.Vector3();
-const _HAZE_LOOK = new THREE.Vector3();
 const _DRAW_SIZE = new THREE.Vector2();
-
-const HAZE_VERTEX = /* glsl */ `
-  varying vec2 vUv;
-  varying vec3 vWorld;
-  void main() {
-    vUv = uv;
-    vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-
-function makeHazeFragment() {
-  const { N, TILE, COLS, ROWS } = FOG_ATLAS;
-  return /* glsl */ `
-    varying vec2 vUv;
-    varying vec3 vWorld;
-    uniform sampler2D uFogAtlas;
-    uniform float uTime, uSpeed, uOpacity, uAlpha;
-    uniform vec2 uAtlasOffset;
-    uniform vec3 uColor;
-    const float N = ${N}.0;
-    const float COLS = ${COLS}.0;
-    const float ROWS = ${ROWS}.0;
-    const float TILE = ${TILE}.0;
-    const float FOOT = ${NEON_FOG.footprint}.0;
-
-    vec2 cellUV(vec2 uv, float idx) {
-      float col = mod(idx, COLS);
-      float row = floor(idx / COLS);
-      vec2 inset = clamp(uv, 0.0, 1.0) * (1.0 - 2.0 / TILE) + (1.0 / TILE);
-      return (vec2(col, row) + inset) / vec2(COLS, ROWS);
-    }
-
-    void main() {
-      vec2 uv = (vWorld.xz + FOOT * 0.5) / FOOT + uAtlasOffset;
-      float t  = fract(uTime * uSpeed * 0.1) * N;
-      float i0 = floor(t);
-      float i1 = mod(i0 + 1.0, N);
-      float b  = fract(t);
-      float n  = mix(
-        texture2D(uFogAtlas, cellUV(uv, i0)).r,
-        texture2D(uFogAtlas, cellUV(uv, i1)).r,
-        b
-      );
-      float topFade = 1.0 - smoothstep(0.12, 1.0, vUv.y);
-      float a = n * topFade * uAlpha * uOpacity;
-      gl_FragColor = vec4(uColor, a);
-    }
-  `;
-}
-
-function atlasUniform(fogMaterial) {
-  const uniforms = fogMaterial?.uniforms;
-  if (!uniforms) return null;
-  for (const key of Object.keys(uniforms)) {
-    if (/atlas/i.test(key)) return uniforms[key];
-  }
-  return null;
-}
+const _FOOT_COLOR = new THREE.Color();
+const _LIGHT_COLOR = new THREE.Color();
 
 /**
- * Four static per-stop lights, one shared fog ring, Y-billboard haze.
- * Intensity follows camera theta. Tubes stay put.
+ * Per-stop neon PointLights + tubes.
+ * Focus-only: inactive stops are dark; the active stop fades in near rest,
+ * flickers in the last ~7% of hop travel, and scrolls its emissive gradient.
+ * Atmosphere is VolumetricFogPass; FogDepthCapture feeds soft-contact depth.
  */
 export class NeonSystem {
   /**
    * @param {{
    *   scene: THREE.Scene,
    *   camera: THREE.Camera,
-   *   fogMaterial: THREE.Material,
    *   reducedMotion?: boolean,
    *   isCoarse?: boolean
    * }} opts
    */
-  constructor({ scene, camera, fogMaterial, reducedMotion = false, isCoarse = false }) {
+  constructor({ scene, camera, reducedMotion = false, isCoarse = false }) {
     this.scene = scene;
     this.camera = camera;
-    this.fogMaterial = fogMaterial;
     this.reducedMotion = reducedMotion;
     this.isCoarse = isCoarse;
     this.entries = [];
     this.stopLights = [];
-    this.hazeCards = [];
-    /** When true, `_updateHaze` keeps cards hidden (debugFogIsolate sticky). */
-    this._hazeIsolateOff = false;
 
     /** Live tune — defaults from constants; `__stage.setNeon` mutates these. */
     this._lightHeight = NEON_LIGHT_HEIGHT;
     this._maxLight = NEON_MAX_LIGHT;
 
-    this.fogRing = createFogRing(fogMaterial);
-    scene.add(this.fogRing);
+    this._wasSettled = false;
+    this._flickering = false;
+    this._flickerT = 0;
+    this._flickerIndex = -1;
+    this._flickerFiredForIndex = -1;
+    /** True only after leaving the flicker strike band — blocks intro-land flicker. */
+    this._flickerEligible = false;
+    /**
+     * Active stop whose arrive envelope has latched (settle / travel-in).
+     * Stop 0 never travels into itself on load — latch on first settle so
+     * neon-lit-content stays shown with a dead-still camera (§12).
+     */
+    this._arriveLatchedIndex = -1;
+    this._lastActiveIndex = -1;
+    this._gradientPhase = 0;
+    /** Slow V phase for PointLight color (independent of tube scroll). */
+    this._lightColorPhase = 0;
+    /** DEV/probe — freeze tube + light gradient scroll. */
+    this._freezeGradient = false;
+
     camera.layers.enable(NEON_FOG_LAYER);
 
-    /** Opaque depth pre-pass for fog soft fade (not a second composer). */
+    /** Opaque depth pre-pass for volumetric soft-contact. */
     this.depthCapture = new FogDepthCapture();
-    const depthU = fogMaterial?.uniforms;
-    if (depthU?.uSceneDepth) {
-      depthU.uSceneDepth.value = this.depthCapture.depthTexture;
-    }
-    if (depthU?.uSoftFade) {
-      depthU.uSoftFade.value = NEON_FOG.softFade;
-    }
 
     /** DEV depth / soft-term quads. Off until debugFogVis(). */
     this.debugOverlay = new FogDebugOverlay(camera, this.depthCapture.depthTexture);
   }
 
-  /**
-   * Depth-only layer-0 pass → fog `uSceneDepth`. Call once per frame before
-   * the beauty composer so soft fade matches this camera pose.
-   * @param {THREE.WebGLRenderer} renderer
-   * @param {THREE.Scene} scene
-   * @param {THREE.Camera} camera
-   */
   /**
    * Compile MeshDepthMaterial programs for GPU_HOLD_LAYER roots into the
    * offscreen depth target — not the live beauty frame.
@@ -143,25 +98,30 @@ export class NeonSystem {
     this.depthCapture.render(renderer, scene, camera, [], { includeHoldLayer: true });
   }
 
-  captureFogDepth(renderer, scene, camera) {
-    if (!this.depthCapture || !this.fogMaterial?.uniforms) return;
+  /**
+   * Latch arrive for the landing / active stop without a travel fade.
+   * Intro→first-settle handoff for stop 0 (C01) — content/neon one stable lit state.
+   * @param {number} index
+   */
+  armArriveForActiveStop(index = 0) {
+    const n = this.entries.length;
+    if (!n) return;
+    const i = ((index % n) + n) % n;
+    this._arriveLatchedIndex = i;
+    this._lastActiveIndex = i;
+    // Intro land sits inside the strike band — keep flicker disarmed.
+    this._flickerEligible = false;
+    this._flickering = false;
+    this._flickerT = 0;
+  }
 
-    // Include neon tubes — with soft fade they feather instead of punching holes.
+  captureFogDepth(renderer, scene, camera) {
+    if (!this.depthCapture) return;
+
     this.depthCapture.render(renderer, scene, camera, []);
 
-    const u = this.fogMaterial.uniforms;
     renderer.getDrawingBufferSize(_DRAW_SIZE);
-    if (u.uResolution?.value) u.uResolution.value.copy(_DRAW_SIZE);
-    if (u.uCameraNear) u.uCameraNear.value = camera.near;
-    if (u.uCameraFar) u.uCameraFar.value = camera.far;
-    if (u.uSceneDepth) u.uSceneDepth.value = this.depthCapture.depthTexture;
-    // uSoftFade is authored in constants / material init — do not stomp every frame.
-    this.debugOverlay?.sync(
-      camera,
-      camera.near,
-      camera.far,
-      u.uSoftFade?.value ?? NEON_FOG.softFade
-    );
+    this.debugOverlay?.sync(camera, camera.near, camera.far, 2.0);
   }
 
   /** Keep the depth target matched to the drawing buffer on resize. */
@@ -173,13 +133,27 @@ export class NeonSystem {
    * @param {{ def: { neonColors?: string[], name?: string, tubeLength?: number }, group: THREE.Group, tube?: THREE.Mesh }} vignette
    */
   attach(vignette) {
+    const hexColors = vignette.def.neonColors?.length
+      ? vignette.def.neonColors
+      : ["#00e5ff", "#ff2d95"];
+    const colors = hexColors.map((h) => new THREE.Color(h));
+    const dominant = colors[0].clone();
     const tube = makeNeonTube(vignette.def);
     vignette.group.add(tube);
     this._seatTubeOnFloor(tube, vignette.group);
+
+    const floorGlow = makeNeonFloorGlow(dominant);
+    vignette.group.add(floorGlow);
+    // Desktop tube sits near the tower — shrink/bias pool + full footprint clip
+    // so additive glow cannot soft-bleed onto the case (§12 / §20).
+    if (/desktop/i.test(vignette.def?.name ?? "")) {
+      applyDesktopFloorGlowClearance(floorGlow, vignette.group);
+    }
+    seatNeonFloorGlow(floorGlow, tube, vignette.group);
+
     vignette.group.updateMatrixWorld(true);
     tube.getWorldPosition(_TUBE_WORLD);
 
-    const dominant = new THREE.Color(vignette.def.neonColors?.[0] ?? "#00e5ff");
     const light = new THREE.PointLight(dominant, 0, NEON_LIGHT_DISTANCE, NEON_LIGHT_DECAY);
     light.name = `neon-stop-light-${this.entries.length}`;
     light.castShadow = false;
@@ -190,7 +164,7 @@ export class NeonSystem {
 
     const theta = Math.atan2(vignette.group.position.x, vignette.group.position.z);
     vignette.tube = tube;
-    this.entries.push({ vignette, tube, dominant, theta });
+    this.entries.push({ vignette, tube, floorGlow, dominant, colors, theta });
     this.stopLights.push({ light, theta });
   }
 
@@ -200,8 +174,9 @@ export class NeonSystem {
    */
   seatTubesOnFloor() {
     for (let i = 0; i < this.entries.length; i += 1) {
-      const { vignette, tube } = this.entries[i];
+      const { vignette, tube, floorGlow } = this.entries[i];
       this._seatTubeOnFloor(tube, vignette.group);
+      if (floorGlow) seatNeonFloorGlow(floorGlow, tube, vignette.group);
       vignette.group.updateMatrixWorld(true);
       tube.getWorldPosition(_TUBE_WORLD);
       const entry = this.stopLights[i];
@@ -217,44 +192,280 @@ export class NeonSystem {
    */
   _seatTubeOnFloor(tube, group) {
     const length = tube.userData.tubeLength ?? 4;
-    // group.position.y is the vignette's world Y (ring place + floor snap).
     tube.position.y = length * 0.5 - group.position.y;
   }
 
-  /** Build haze after every stop has attached. */
-  finishMount() {
-    this._buildHaze();
-  }
+  /** No-op — haze cards removed; kept so StageExperience call sites stay stable. */
+  finishMount() {}
 
   /**
    * @param {number} theta Camera orbit angle
    * @param {number} _total Stop count
    * @param {number} [time] Elapsed seconds
+   * @param {{
+   *   activeIndex?: number,
+   *   settled?: boolean,
+   *   dt?: number,
+   *   allowNeon?: boolean
+   * }} [opts]
    */
-  update(theta, _total, time = 0) {
+  update(theta, _total, time = 0, opts = {}) {
     const n = this.entries.length;
     if (!n) return;
 
-    const t = this.reducedMotion ? 0 : time;
-    const uniforms = this.fogMaterial?.uniforms;
-    if (uniforms?.uTime) uniforms.uTime.value = t;
-    const drift = uniforms?.uWorldDrift;
-    if (drift?.value) {
-      const amp = this.reducedMotion ? 0 : NEON_FOG.driftAmp;
-      drift.value.set(Math.sin(t * 0.15) * amp, Math.cos(t * 0.11) * amp);
+    const activeIndex = ((opts.activeIndex ?? 0) % n + n) % n;
+    const settled = Boolean(opts.settled);
+    const dt = Math.min(Math.max(opts.dt ?? 1 / 60, 0), 0.05);
+    const allowNeon = opts.allowNeon !== false;
+
+    if (activeIndex !== this._lastActiveIndex) {
+      this._lastActiveIndex = activeIndex;
+      this._flickerFiredForIndex = -1;
+      this._flickering = false;
+      this._flickerT = 0;
+      this._flickerEligible = false;
+      if (this._arriveLatchedIndex !== activeIndex) {
+        this._arriveLatchedIndex = -1;
+      }
     }
-    if (uniforms?.uCameraXZ?.value) {
-      uniforms.uCameraXZ.value.set(this.camera.position.x, this.camera.position.z);
+
+    const hopStep = (Math.PI * 2) / n;
+    const flickerStartDist = hopStep * NEON_FLICKER_TRAVEL_FRAC;
+    const activeDist = angularDistance(theta, this.entries[activeIndex].theta);
+
+    // Re-arm flicker / clear arrive latch only after leaving the arrive window.
+    // Strike-band re-arm (~0.14 rad) re-fired during spring settle → strobe.
+    if (activeDist > NEON_ARRIVE_RAD) {
+      this._flickerFiredForIndex = -1;
+      this._arriveLatchedIndex = -1;
+    }
+    // Must leave the strike band before a strike can arm — intro lands already
+    // inside it, so without this stop 0 flickers on a still load-rest camera.
+    if (activeDist > flickerStartDist) {
+      this._flickerEligible = true;
+    }
+
+    if (!allowNeon) {
+      this._flickering = false;
+      this._flickerT = 0;
+    } else if (
+      !this.reducedMotion &&
+      !this._flickering &&
+      this._flickerEligible &&
+      this._flickerFiredForIndex !== activeIndex &&
+      activeDist <= flickerStartDist
+    ) {
+      // Last ~7% of stop-to-stop travel — strike while arriving, not after settle.
+      this._flickering = true;
+      this._flickerT = 0;
+      this._flickerIndex = activeIndex;
+      this._flickerFiredForIndex = activeIndex;
+      this._flickerEligible = false;
+    }
+
+    // Settled inside the arrive window → latch (load-rest stop 0 never
+    // travels into its own fade). Holds until leaving NEON_ARRIVE_RAD.
+    if (allowNeon && settled && activeDist <= NEON_ARRIVE_RAD) {
+      this._arriveLatchedIndex = activeIndex;
+    }
+    this._wasSettled = settled;
+
+    if (this._flickering) {
+      this._flickerT += dt;
+      if (this._flickerT >= NEON_FLICKER_SEC) {
+        this._flickering = false;
+        this._flickerT = NEON_FLICKER_SEC;
+      }
+    }
+
+    if (!this.reducedMotion && allowNeon && !this._freezeGradient) {
+      this._gradientPhase = (this._gradientPhase + NEON_GRADIENT_SCROLL * dt) % 1;
+      // Cast-light hue drifts slower than the tube scroll — same gradient, capped rate
+      // so PC/canopy speculars do not crawl (§12 / §20.18).
+      this._lightColorPhase =
+        (this._lightColorPhase + NEON_LIGHT_COLOR_SCROLL * dt) % 1;
     }
 
     for (let i = 0; i < n; i += 1) {
-      const prox = neonProximity(theta, this.entries[i].theta);
-      this.entries[i].tube.material.emissiveIntensity =
-        (0.28 + 0.72 * prox) * NEON_MAX_EMISSIVE;
-      this.stopLights[i].light.intensity = prox * this._maxLight;
+      // Arrive envelope (content visibility) vs display level (lights/emissive).
+      // Flicker keys hit 0 — gating content on display level strobed the whole
+      // stop solid black. Content follows arrive only; flicker stays on glow.
+      let arriveLevel = 0;
+      let level = 0;
+      if (allowNeon && i === activeIndex) {
+        arriveLevel =
+          settled || this.reducedMotion
+            ? 1
+            : glslSmoothstep(NEON_ARRIVE_RAD, 0, activeDist);
+        if (this._arriveLatchedIndex === i) {
+          arriveLevel = 1;
+        }
+        level = arriveLevel;
+        if (this._flickering && i === this._flickerIndex) {
+          level *= neonFlickerMul(this._flickerT);
+        }
+      }
+
+      const tube = this.entries[i].tube;
+      const mat = tube?.material;
+      if (mat) {
+        // Option 1: luminance-compensated core under bloom (no Additive shell).
+        const map = mat.userData?.neonGradientMap ?? mat.map ?? mat.emissiveMap;
+        if (map && level > 1e-3 && !this.reducedMotion) {
+          map.offset.y = this._gradientPhase;
+        }
+
+        const bloomTarget = mat.userData?.neonCoreMax ?? NEON_CORE_MAX;
+        if (mat.uniforms?.uLevel) {
+          mat.uniforms.uLevel.value = level;
+          if (mat.uniforms.uBloomTarget) {
+            mat.uniforms.uBloomTarget.value = bloomTarget;
+          }
+          if (mat.uniforms.uMapOffset) {
+            mat.uniforms.uMapOffset.value.set(0, this._gradientPhase);
+          }
+          const bodyMat = mat.userData?.neonBodyMat;
+          if (bodyMat && "envMapIntensity" in bodyMat) {
+            bodyMat.envMapIntensity = level > 1e-3 ? 0.7 : 0.35;
+          }
+        } else if (mat.isMeshBasicMaterial) {
+          const coreGlow = level * bloomTarget;
+          mat.color.setRGB(coreGlow, coreGlow, coreGlow);
+          const bodyMat = mat.userData?.neonBodyMat;
+          if (bodyMat && "envMapIntensity" in bodyMat) {
+            bodyMat.envMapIntensity = level > 1e-3 ? 0.7 : 0.35;
+          }
+        } else if ("emissiveIntensity" in mat) {
+          mat.emissiveIntensity = level * NEON_MAX_EMISSIVE;
+        }
+      }
+
+      const light = this.stopLights[i].light;
+      light.intensity = level * this._maxLight;
+      // Cast light tracks the tube gradient. Bust (widest hue span) samples the
+      // SAME phase as the visible tube emissive — rate-cap lagged green↔cyan.
+      // Other stops keep slow phase + rate-cap (§12 / §20.18 speaker shimmer).
+      if (level > 1e-3) {
+        const gradientMap =
+          mat?.userData?.neonGradientMap ?? mat?.map ?? mat?.emissiveMap;
+        const isBust = /bust/i.test(this.entries[i].vignette?.def?.name ?? "");
+        if (gradientMap) {
+          if (isBust) {
+            // Live tube path: respect map.offset.y (= _gradientPhase) at mid UV.
+            sampleNeonMapUv(gradientMap, 0.5, 0.5, _LIGHT_COLOR);
+          } else {
+            sampleNeonMapUv(gradientMap, 0.5, this._lightColorPhase, _LIGHT_COLOR, {
+              ignoreOffset: true
+            });
+          }
+        } else {
+          _LIGHT_COLOR.copy(this.entries[i].dominant);
+        }
+        if (isBust) {
+          light.color.copy(_LIGHT_COLOR);
+        } else {
+          const maxStep = NEON_LIGHT_COLOR_MAX_RATE * Math.max(dt, 0);
+          light.color.r += THREE.MathUtils.clamp(
+            _LIGHT_COLOR.r - light.color.r,
+            -maxStep,
+            maxStep
+          );
+          light.color.g += THREE.MathUtils.clamp(
+            _LIGHT_COLOR.g - light.color.g,
+            -maxStep,
+            maxStep
+          );
+          light.color.b += THREE.MathUtils.clamp(
+            _LIGHT_COLOR.b - light.color.b,
+            -maxStep,
+            maxStep
+          );
+        }
+      }
+
+      // Floor pool/cone = exact tube-foot texel (CylinderGeometry side UV v=0).
+      const footMap =
+        mat?.userData?.neonGradientMap ?? mat?.map ?? mat?.emissiveMap;
+      if (footMap) {
+        sampleNeonMapUv(footMap, 0.5, 0, _FOOT_COLOR);
+      } else {
+        _FOOT_COLOR.copy(this.entries[i].dominant);
+      }
+      setNeonFloorGlowLevel(this.entries[i].floorGlow, level, _FOOT_COLOR);
+      if (this.entries[i].floorGlow?.userData?.desktopTowerClip) {
+        syncDesktopTowerFootprintClip(
+          this.entries[i].floorGlow,
+          this.entries[i].vignette?.group
+        );
+      }
+
+      // No lights → props must not read from IBL / ambient / POV spill.
+      // Gate a content parent (not per-mesh) so intro reveal / GPU-hold
+      // can keep owning child `.visible`. Latched stops ignore envelope noise.
+      this._syncContentLit(this.entries[i], arriveLevel, {
+        latched: this._arriveLatchedIndex === i
+      });
+    }
+  }
+
+  /**
+   * Reparent non-tube vignette children under `neon-lit-content` once, then
+   * toggle that group from the stop’s arrive envelope (not flicker zeros).
+   * Once arrive is latched for this stop, visibility follows the latch only —
+   * the envelope carries spring micro-noise that used to edge-chatter content.
+   * @param {{ vignette: { group?: THREE.Group }, tube?: THREE.Object3D, contentRoot?: THREE.Group, _contentLit?: boolean }} entry
+   * @param {number} arriveLevel Arrive smoothstep 0..1 (pre-flicker)
+   * @param {{ latched?: boolean }} [opts]
+   */
+  _syncContentLit(entry, arriveLevel, opts = {}) {
+    const group = entry?.vignette?.group;
+    if (!group) return;
+
+    let root = entry.contentRoot;
+    if (!root || root.parent !== group) {
+      root = null;
+      for (let i = 0; i < group.children.length; i += 1) {
+        if (group.children[i].name === "neon-lit-content") {
+          root = group.children[i];
+          break;
+        }
+      }
+      if (!root) {
+        root = new THREE.Group();
+        root.name = "neon-lit-content";
+        group.add(root);
+      }
+      entry.contentRoot = root;
     }
 
-    this._updateHaze(theta, t, atlasUniform(this.fogMaterial)?.value ?? null);
+    // Pull any siblings that mounted after the wrapper (GLB commit, blockout).
+    for (let i = group.children.length - 1; i >= 0; i -= 1) {
+      const child = group.children[i];
+      if (
+        child === root ||
+        child === entry.tube ||
+        child === entry.floorGlow ||
+        child.name === "neon-tube" ||
+        child.name === "neon-floor-glow"
+      ) {
+        continue;
+      }
+      root.add(child);
+    }
+
+    let lit;
+    if (opts.latched) {
+      // C04: latched-at-rest → content is ON from the latch alone.
+      lit = true;
+    } else {
+      // Travel arrive: ON threshold ABOVE OFF threshold. The old 1e-3 / 0.02
+      // pair turned content on at 1e-3 then immediately off until 0.02 —
+      // three-frame chatter while approaching a stop.
+      const wasLit = Boolean(entry._contentLit);
+      lit = wasLit ? arriveLevel > 0.02 : arriveLevel > 0.08;
+    }
+    entry._contentLit = lit;
+    root.visible = lit;
   }
 
   /**
@@ -286,37 +497,15 @@ export class NeonSystem {
   }
 
   /**
-   * Isolate the "second fog layer" report. Floor is MeshStandard (no reflection
-   * pass) — hiding it removes neon-stained floor. Feather is the radial band.
-   * @param {{ floor?: boolean, feather?: number, fog?: boolean }} opts
+   * Isolate neon floor stain. Feather/fog/haze knobs removed with the ring path.
+   * @param {{ floor?: boolean }} opts
    */
-  debugFogIsolate({ floor, feather, fog, haze } = {}) {
+  debugFogIsolate({ floor } = {}) {
     if (typeof floor === "boolean" && this._stageFloor) {
       this._stageFloor.visible = floor;
     }
-    const u = this.fogMaterial?.uniforms;
-    if (typeof feather === "number") {
-      const f = Math.max(0, feather);
-      if (u?.uFeather) u.uFeather.value = f;
-      if (u?.uFeatherInner) u.uFeatherInner.value = f;
-    }
-    if (typeof fog === "boolean" && this.fogRing) {
-      this.fogRing.visible = fog;
-    }
-    if (typeof haze === "boolean") {
-      this._hazeIsolateOff = !haze;
-      for (const card of this.hazeCards) {
-        if (card?.mesh) card.mesh.visible = haze;
-      }
-    }
     return {
-      floorVisible: this._stageFloor?.visible ?? null,
-      feather: u?.uFeather?.value ?? null,
-      featherInner: u?.uFeatherInner?.value ?? null,
-      fogVisible: this.fogRing?.visible ?? null,
-      hazeVisible: this.hazeCards.filter((c) => c.mesh.visible).length,
-      hazeTotal: this.hazeCards.length,
-      hazeIsolateOff: Boolean(this._hazeIsolateOff)
+      floorVisible: this._stageFloor?.visible ?? null
     };
   }
 
@@ -336,7 +525,6 @@ export class NeonSystem {
     this.captureFogDepth(renderer, scene, camera);
     const rt = this.depthCapture?.target;
     const draw = renderer.getDrawingBufferSize(new THREE.Vector2());
-    const u = this.fogMaterial?.uniforms;
     const samples = [];
     if (rt) {
       const pts = [
@@ -386,21 +574,6 @@ export class NeonSystem {
           rt.texture.magFilter === THREE.NearestFilter
       ),
       camera: { near: camera.near, far: camera.far },
-      uniforms: {
-        near: u?.uCameraNear?.value ?? null,
-        far: u?.uCameraFar?.value ?? null,
-        softFade: u?.uSoftFade?.value ?? null,
-        feather: u?.uFeather?.value ?? null,
-        resolution: u?.uResolution?.value
-          ? { x: u.uResolution.value.x, y: u.uResolution.value.y }
-          : null
-      },
-      nearFarMatch: Boolean(
-        u?.uCameraNear &&
-          u.uCameraFar &&
-          u.uCameraNear.value === camera.near &&
-          u.uCameraFar.value === camera.far
-      ),
       depthMatToneMapped: this.depthCapture?.depthMaterial?.toneMapped ?? null,
       rendererToneMapping: renderer.toneMapping,
       samples
@@ -409,10 +582,19 @@ export class NeonSystem {
 
   debugState() {
     return {
-      /** TEMP live knobs — bake into constants.js then delete `setNeon`. */
       height: this._lightHeight,
       maxLight: this._maxLight,
       defaults: { height: NEON_LIGHT_HEIGHT, maxLight: NEON_MAX_LIGHT },
+      focusOnly: true,
+      arriveRad: NEON_ARRIVE_RAD,
+      flickerTravelFrac: NEON_FLICKER_TRAVEL_FRAC,
+      flickerSec: NEON_FLICKER_SEC,
+      gradientScroll: NEON_GRADIENT_SCROLL,
+      flickering: this._flickering,
+      flickerFiredForIndex: this._flickerFiredForIndex,
+      flickerEligible: this._flickerEligible,
+      arriveLatchedIndex: this._arriveLatchedIndex,
+      gradientPhase: this._gradientPhase,
       lightCount: this.stopLights.length,
       lights: this.stopLights.map((s, i) => ({
         name: this.entries[i]?.vignette?.def?.name ?? i,
@@ -423,91 +605,16 @@ export class NeonSystem {
         layer0: s.light.layers.isEnabled(0),
         layer2: s.light.layers.isEnabled(NEON_FOG_LAYER)
       })),
-      ring: {
-        rInner: NEON_FOG.rInner,
-        rOuter: NEON_FOG.rOuter,
-        layer: NEON_FOG_LAYER,
-        softFade: NEON_FOG.softFade,
-        opacity: NEON_FOG.opacity,
-        feather: NEON_FOG.feather,
-        featherInner: NEON_FOG.featherInner,
-        distFadeStart: NEON_FOG.distFadeStart,
-        distFadeEnd: NEON_FOG.distFadeEnd,
-        depthCapture: Boolean(this.depthCapture?.depthTexture)
-      },
-      hazeVisible: this.hazeCards.filter((c) => c.mesh.visible).length,
-      hazeTotal: this.hazeCards.length
+      stops: this.entries.map((entry, i) => ({
+        name: entry?.vignette?.def?.name ?? i,
+        contentVisible: Boolean(entry?.contentRoot?.visible),
+        contentLit: Boolean(entry?._contentLit),
+        contentChildren: entry?.contentRoot?.children?.length ?? 0,
+        arriveLatched: this._arriveLatchedIndex === i,
+        contentFromLatch: this._arriveLatchedIndex === i
+      })),
+      depthCapture: Boolean(this.depthCapture?.depthTexture)
     };
-  }
-
-  _buildHaze() {
-    const count = this.isCoarse ? NEON_FOG.hazeCountCoarse : NEON_FOG.hazeCount;
-    const geo = new THREE.PlaneGeometry(NEON_FOG.hazeWidth, NEON_FOG.hazeHeight);
-    const frag = makeHazeFragment();
-
-    for (let i = 0; i < count; i += 1) {
-      const theta = (i / count) * Math.PI * 2;
-      const mat = new THREE.ShaderMaterial({
-        uniforms: {
-          uFogAtlas: { value: null },
-          uTime: { value: 0 },
-          uSpeed: { value: this.reducedMotion ? 0 : NEON_FOG.speed },
-          uOpacity: { value: NEON_FOG.hazeOpacity },
-          uAlpha: { value: 0 },
-          uAtlasOffset: {
-            value: new THREE.Vector2((i * 0.17) % 0.35, (i * 0.13) % 0.35)
-          },
-          uColor: { value: new THREE.Color(1, 1, 1) }
-        },
-        vertexShader: HAZE_VERTEX,
-        fragmentShader: frag,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        depthTest: true,
-        toneMapped: false,
-        side: THREE.DoubleSide
-      });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.name = `neon-haze-${i}`;
-      mesh.position.set(
-        Math.sin(theta) * NEON_FOG.hazeRadius,
-        NEON_FOG.hazeHeight * 0.5,
-        Math.cos(theta) * NEON_FOG.hazeRadius
-      );
-      mesh.layers.set(NEON_FOG_LAYER);
-      mesh.raycast = () => {};
-      this.scene.add(mesh);
-      this.hazeCards.push({ mesh, mat, theta });
-    }
-  }
-
-  _updateHaze(camTheta, time, atlas) {
-    if (!this.hazeCards.length) return;
-    if (this._hazeIsolateOff) {
-      for (const card of this.hazeCards) {
-        card.mesh.visible = false;
-      }
-      return;
-    }
-    for (const card of this.hazeCards) {
-      const prox = neonProximity(camTheta, card.theta);
-      if (prox < NEON_FOG.hazeCull) {
-        card.mesh.visible = false;
-        continue;
-      }
-      card.mesh.visible = true;
-      _HAZE_LOOK.set(this.camera.position.x, card.mesh.position.y, this.camera.position.z);
-      card.mesh.lookAt(_HAZE_LOOK);
-
-      const mix = twoNearestStops(card.theta, this.entries);
-      card.mat.uniforms.uColor.value.copy(mix.a).lerp(mix.b, mix.t);
-      card.mat.uniforms.uAlpha.value = prox;
-      card.mat.uniforms.uTime.value = time;
-      if (atlas && card.mat.uniforms.uFogAtlas.value !== atlas) {
-        card.mat.uniforms.uFogAtlas.value = atlas;
-      }
-    }
   }
 }
 
@@ -531,32 +638,33 @@ export function neonActiveAmount(theta, index, total) {
   return neonProximity(theta, vignetteAngle(index, total));
 }
 
-function twoNearestStops(theta, stops) {
-  const white = new THREE.Color(1, 1, 1);
-  if (!stops.length) return { a: white, b: white, t: 0 };
-  if (stops.length === 1) {
-    return { a: stops[0].dominant.clone(), b: stops[0].dominant.clone(), t: 0 };
-  }
-  let i0 = 0;
-  let i1 = 1;
-  let d0 = Infinity;
-  let d1 = Infinity;
-  for (let i = 0; i < stops.length; i += 1) {
-    const d = angularDistance(theta, stops[i].theta);
-    if (d < d0) {
-      d1 = d0;
-      i1 = i0;
-      d0 = d;
-      i0 = i;
-    } else if (d < d1) {
-      d1 = d;
-      i1 = i;
+/**
+ * Scripted neon strike — bright / dark bursts, then holds at 1.
+ * @param {number} t Seconds since settle rising edge
+ */
+export function neonFlickerMul(t) {
+  if (t <= 0) return 0;
+  if (t >= NEON_FLICKER_SEC) return 1;
+  const keys = [
+    [0.0, 0.0],
+    [0.03, 0.85],
+    [0.06, 0.0],
+    [0.1, 1.0],
+    [0.14, 0.12],
+    [0.18, 0.95],
+    [0.22, 0.0],
+    [0.28, 1.0],
+    [0.34, 0.35],
+    [0.4, 1.0],
+    [NEON_FLICKER_SEC, 1.0]
+  ];
+  for (let i = 0; i < keys.length - 1; i += 1) {
+    const [t0, v0] = keys[i];
+    const [t1, v1] = keys[i + 1];
+    if (t <= t1) {
+      const u = t1 === t0 ? 1 : (t - t0) / (t1 - t0);
+      return v0 + (v1 - v0) * u;
     }
   }
-  const t = d0 + d1 > 1e-5 ? d0 / (d0 + d1) : 0;
-  return {
-    a: stops[i0].dominant.clone(),
-    b: stops[i1].dominant.clone(),
-    t
-  };
+  return 1;
 }

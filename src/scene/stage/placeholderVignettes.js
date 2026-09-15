@@ -1,48 +1,10 @@
 import * as THREE from "three";
-import { buildPcSceneBlockout } from "../vignettes/pcSceneBlockout.js";
 import { STAGE_LABEL_RADIUS } from "./constants.js";
 
-export const monolithVignette = {
-  name: "Monolith",
-  tint: 0xffb37a,
-  neonColors: ["#ffb37a", "#ff5c33"],
-  desc: "Single subject, hard key light. The arrival vignette.",
-  build(group) {
-    buildPcSceneBlockout(group, { tint: 0xa8a8a8 });
-  }
-};
-
-export const orbitVignette = {
-  name: "Orbit",
-  tint: 0xc9a0ff,
-  desc: "Kinetic centerpiece. Placeholder for an interactive moment.",
-  build(group, animFns) {
-    const setup = buildPcSceneBlockout(group, { tint: 0x9a9a9a });
-    animFns.push((t) => {
-      setup.rotation.y = Math.PI * 0.12 + Math.sin(t * 0.35) * 0.04;
-    });
-  }
-};
-
-export const cubeVignette = {
-  name: "Cube",
-  tint: 0x8ecae6,
-  desc: "Placeholder stop — a cube until this vignette is built.",
-  build(group) {
-    const size = 1.8;
-    const cube = new THREE.Mesh(
-      new THREE.BoxGeometry(size, size, size),
-      new THREE.MeshStandardMaterial({
-        color: 0xc8c4ba,
-        roughness: 0.45,
-        metalness: 0.12
-      })
-    );
-    cube.name = "cube-placeholder";
-    cube.position.y = size / 2;
-    group.add(cube);
-  }
-};
+/** @deprecated Use BUST_HEIGHT — kept for any leftover imports. */
+export const BUST_ORB_DIAMETER = 4;
+/** @deprecated Use BUST_ORB_DIAMETER */
+export const MONOLITH_ORB_DIAMETER = BUST_ORB_DIAMETER;
 
 export function addDegreeLabels(world) {
   for (let d = 0; d < 360; d += 15) {

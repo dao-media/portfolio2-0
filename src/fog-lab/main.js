@@ -82,7 +82,7 @@ controls.dampingFactor = 0.06;
 controls.target.copy(LOOK);
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.06));
-scene.add(new THREE.HemisphereLight(0x8899aa, 0x141414, 0.04));
+scene.add(new THREE.HemisphereLight(0x8899aa, 0x070709, 0.04));
 
 /** Two stand-in neon PointLights at ring stops 0 and 1. */
 function placeNeonStandIn(index, hex, name) {

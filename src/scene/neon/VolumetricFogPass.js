@@ -52,8 +52,14 @@ uniform float uHeightFogHazeRangeY;
 uniform float uHeightFogHazeFloor;
 uniform float uFogDensityMultiplier;
 uniform float uDensityScale;
+uniform float uNearTubeDensityBoost;
+uniform float uNearTubeDensityRadius;
 uniform float uFalloffNoiseWarp;
 uniform float uFalloffCeilingJitter;
+uniform float uFogDistFadeStart;
+uniform float uFogDistFadeEnd;
+uniform float uFogNearFadeStart;
+uniform float uFogNearFadeEnd;
 uniform float uNoiseYSlice;
 uniform float uNoiseYScroll;
 uniform float uBaseRaymarchStepCount;
@@ -211,6 +217,27 @@ float sampleDensity(vec3 worldPos, float startYOffset) {
     float fade = max(uFogFloorFadeRangeY, 1e-3);
     dens *= smoothstep(uFogMinY, uFogMinY + fade, worldPos.y);
   }
+  float camDist = length(worldPos - uCameraPos);
+  // Near-camera soft-in: thin fog in front of near subjects (stop-0 bust).
+  if (uFogNearFadeEnd > 1e-3) {
+    dens *= smoothstep(uFogNearFadeStart, uFogNearFadeEnd, camDist);
+  }
+  // Far-arc soft-out: kill density before baseMaxRayLength so the ray cutoff
+  // is not a hard horizontal band (~42–50 m far arc vs 32 m march).
+  if (uFogDistFadeEnd > uFogDistFadeStart + 1e-3) {
+    dens *= 1.0 - smoothstep(uFogDistFadeStart, uFogDistFadeEnd, camDist);
+  }
+  // Volumetric halo — denser fog near active neon tubes (lit air around the source).
+  if (uNearTubeDensityBoost > 1e-4 && uNearTubeDensityRadius > 1e-4) {
+    float tubeProx = 0.0;
+    for (int i = 0; i < 4; i++) {
+      if (uLightIntensity[i] <= 1e-4) continue;
+      float td = length(worldPos - uLightPos[i]);
+      float g = exp( -(td * td) / max(2.0 * uNearTubeDensityRadius * uNearTubeDensityRadius, 1e-4) );
+      tubeProx = max(tubeProx, g);
+    }
+    dens *= mix(1.0, 1.0 + uNearTubeDensityBoost, tubeProx);
+  }
   return dens;
 }
 
@@ -228,14 +255,13 @@ vec3 inScatter(vec3 p, float density) {
     float a = lightAtten(p, uLightPos[i], uLightIntensity[i], uLightDistance[i], uLightDecay[i]);
     s += uLightColor[i] * a * 0.55;
   }
+  // Full in-scatter whenever density is authored — do NOT multiply by uDensityScale.
+  // Intro fade uses composite opacity instead (avoids bloom-crossing mid-ramp flash).
   s *= max(density, 0.05);
-  // Soft luminance cap: stacked mid-hop fill stays under bloom threshold 1.0;
-  // near-tube cores keep a fraction of excess so they can still punch through.
   float peak = max(s.r, max(s.g, s.b));
   float fillCap = max(uInScatterFillCap, 1e-3);
   if (peak > fillCap) {
-    float rolled = fillCap + (peak - fillCap) * clamp(uInScatterCoreKeep, 0.0, 1.0);
-    s *= rolled / peak;
+    s *= fillCap / peak;
   }
   return s;
 }
@@ -297,8 +323,24 @@ void main() {
 
   vec3 rayDir = normalize(endPos - startPos);
   float rayLen = length(endPos - startPos);
-  float steps = max(uBaseRaymarchStepCount, 1.0);
-  float stepSize = rayLen / steps;
+  // World step spacing from the 32 m / 64 budget (~0.5 m). Short rays (near
+  // screen-filling geo at stop 0) take fewer steps — never burn the full 64
+  // micro-samples against a 3–10 m depth hit.
+  //
+  // CRITICAL (temporal stability): do NOT feed live ceil(rayLen/spacing) straight
+  // into the march. Camera micro-jitter / depth flicker changes that integer
+  // every frame → sample lattice jumps → accumulated density pulses (global
+  // flashing + gray haze pop). Keep FIXED world spacing and QUANTIZE the step
+  // count into buckets so near stays cheap but the count is frame-stable.
+  float maxSteps = max(uBaseRaymarchStepCount, 1.0);
+  float stepSpacing = uBaseMaxRayLength / maxSteps;
+  float rawSteps = clamp(ceil(rayLen / max(stepSpacing, 1e-4)), 1.0, maxSteps);
+  const float STEP_BUCKET = 8.0;
+  float steps = min(
+    maxSteps,
+    max(STEP_BUCKET, floor(rawSteps / STEP_BUCKET + 0.5) * STEP_BUCKET)
+  );
+  float stepSize = stepSpacing;
 
   // Option 3: ONE ceiling offset per pixel (not per march sample).
   // Per-sample XZ jitter averages out along the ray and the lid stays flat.
@@ -348,6 +390,7 @@ uniform float uDepthSigma;
 uniform float uEnabled;
 uniform float uOutputDither;
 uniform float uTime;
+uniform float uCompositeOpacity;
 
 float readRawDepth(vec2 uv) {
   return texture2D(tDepth, uv).x;
@@ -395,14 +438,16 @@ void main() {
   fog /= max(wSum, 1e-4);
 
   // Screen-space output dither — breaks Mach banding on low-contrast alpha gradients.
-  // Separate from Bayer ray-start (along-ray). Grain is invisible at #141414; this is earlier.
+  // Spatial-only (no uTime) — animated Bayer crawled as an edge/vignette strobe.
+  // Separate from Bayer ray-start (along-ray). Grain is invisible at #070709; this is earlier.
   float dither = 0.0;
   if (uOutputDither > 1e-6) {
-    float b = bayer4(gl_FragCoord.xy + vec2(uTime * 47.0, uTime * 31.0));
+    float b = bayer4(gl_FragCoord.xy);
     dither = (b - 0.5) * uOutputDither;
   }
-  float a = clamp(fog.a + dither, 0.0, 1.0);
-  vec3 outRgb = mix(scene, fog.rgb, a);
+  float a = clamp(fog.a * uCompositeOpacity + dither, 0.0, 1.0);
+  vec3 fogRgb = fog.rgb * uCompositeOpacity;
+  vec3 outRgb = mix(scene, fogRgb, a);
   outRgb += dither;
   gl_FragColor = vec4(outRgb, 1.0);
 }
@@ -510,8 +555,14 @@ export class VolumetricFogPass extends Pass {
       uHeightFogHazeFloor: { value: d.heightFogHazeFloor },
       uFogDensityMultiplier: { value: d.fogDensityMultiplier },
       uDensityScale: { value: 1 },
+      uNearTubeDensityBoost: { value: 1.65 },
+      uNearTubeDensityRadius: { value: 1.35 },
       uFalloffNoiseWarp: { value: d.falloffNoiseWarp },
       uFalloffCeilingJitter: { value: d.falloffCeilingJitter },
+      uFogDistFadeStart: { value: d.fogDistFadeStart },
+      uFogDistFadeEnd: { value: d.fogDistFadeEnd },
+      uFogNearFadeStart: { value: d.fogNearFadeStart },
+      uFogNearFadeEnd: { value: d.fogNearFadeEnd },
       uNoiseYSlice: { value: d.noiseYSlice },
       uNoiseYScroll: { value: d.noiseYScroll },
       uBaseRaymarchStepCount: { value: d.baseRaymarchStepCount },
@@ -526,7 +577,7 @@ export class VolumetricFogPass extends Pass {
       uLightIntensity: { value: lights.intensity },
       uLightDistance: { value: lights.distance },
       uLightDecay: { value: lights.decay },
-      uAmbient: { value: 0.04 },
+      uAmbient: { value: 0.008 },
       uInScatterFillCap: { value: FOG_IN_SCATTER_FILL_CAP },
       uInScatterCoreKeep: { value: FOG_IN_SCATTER_CORE_KEEP },
       uEnabled: { value: 1 }
@@ -541,7 +592,8 @@ export class VolumetricFogPass extends Pass {
       uDepthSigma: { value: 0.0025 },
       uEnabled: { value: 1 },
       uOutputDither: { value: d.outputDither },
-      uTime: { value: 0 }
+      uTime: { value: 0 },
+      uCompositeOpacity: { value: 1 }
     });
 
     this.fullscreenMaterial = this.compositeMaterial;
@@ -559,7 +611,7 @@ export class VolumetricFogPass extends Pass {
   }
 
   /**
-   * Multiplier on authored density (heavy-effects fade-in 0→1).
+   * Multiplier on authored density (kept at 1 during intro — fade via composite opacity).
    * @param {number} scale
    */
   setDensityScale(scale) {
@@ -568,7 +620,19 @@ export class VolumetricFogPass extends Pass {
   }
 
   /**
-   * Soft in-scatter luminance cap (fill under bloom threshold; cores keep excess).
+   * Intro land fade — composite opacity 0→1 with density held at full (no in-scatter ramp flash).
+   * @param {number} opacity
+   */
+  setCompositeOpacity(opacity) {
+    const o = Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : 1;
+    if (this.compositeMaterial?.uniforms?.uCompositeOpacity) {
+      this.compositeMaterial.uniforms.uCompositeOpacity.value = o;
+    }
+  }
+
+  /**
+   * In-scatter fill luminance cap (hard clamp under bloom threshold).
+   * `coreKeep` is accepted for API compat but unused by the march shader.
    * @param {{ fillCap?: number, coreKeep?: number }} [opts]
    */
   setInScatterCap(opts = {}) {
@@ -598,6 +662,10 @@ export class VolumetricFogPass extends Pass {
     u.uFogDensityMultiplier.value = p.fogDensityMultiplier;
     u.uFalloffNoiseWarp.value = p.falloffNoiseWarp;
     u.uFalloffCeilingJitter.value = p.falloffCeilingJitter;
+    u.uFogDistFadeStart.value = p.fogDistFadeStart;
+    u.uFogDistFadeEnd.value = p.fogDistFadeEnd;
+    u.uFogNearFadeStart.value = p.fogNearFadeStart;
+    u.uFogNearFadeEnd.value = p.fogNearFadeEnd;
     u.uNoiseYSlice.value = p.noiseYSlice;
     u.uNoiseYScroll.value = p.noiseYScroll;
     u.uBaseRaymarchStepCount.value = p.baseRaymarchStepCount;

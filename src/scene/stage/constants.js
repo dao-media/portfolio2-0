@@ -3,7 +3,7 @@ import * as THREE from "three";
 export const STAGE_RADIUS = 18;
 
 /** Seamless floor, backdrop, and canvas clear color. */
-export const STAGE_BG = 0x141414;
+export const STAGE_BG = 0x070709;
 
 /** Camera sits this far past the look point on +Z — keeps vignette framing when radius changes. */
 const CAM_BACKOFF = 8.6 * 1.04;
@@ -42,22 +42,20 @@ export const SPOT_TARGET = LOOK.clone();
 
 export const AMBIENT_INTENSITY = 0.06;
 export const HEMI_INTENSITY = 0.04;
+/** Unused fill slot — keep **0** (ambient/hemi are the soft fill). */
 export const FILL_INTENSITY = 0;
 export const EXPOSURE = 1.18;
 /**
  * Neutral RoomEnvironment IBL on `scene.environment`.
- * The CRT cube capture must not be applied to the scene (it recolors every
- * MeshStandard material). Travel pack / T-rex are otherwise black silhouettes
- * against STAGE_BG — they need *some* env fill, but not key light. Spot **118**
- * + ACES **1.18** were tuned without IBL; full-strength RoomEnvironment (1.0)
- * washed every MeshStandard prop to glowing white. Keep this a modest fill.
+ * Keep **0** this pass — testing ambient/hemi fill only (not IBL).
  */
-export const STAGE_ENV_INTENSITY = 0.22;
+export const STAGE_ENV_INTENSITY = 0;
 
 /** 10 ft above the viewer's head — spotlight origin. */
 export const SPOT_HEIGHT_FT = 10;
 export const SPOT_HEIGHT_M = SPOT_HEIGHT_FT * 0.3048;
-export const SPOT_INTENSITY = 118;
+/** POV key light — **0** this pass; ambient/hemi carry soft fill. */
+export const SPOT_INTENSITY = 0;
 export const SPOT_ANGLE = Math.PI / 5.2;
 export const SPOT_PENUMBRA = 0.52;
 export const SPOT_DISTANCE = 52;
@@ -79,6 +77,18 @@ export const SPOT_SHADOW = {
   radius: 2.4
 };
 
+/**
+ * Soft contact pads under each vignette (MeshBasic floor cannot receive maps).
+ * Spot pad tracks the POV light; neon pad tracks the active tube PointLight.
+ */
+export const CONTACT_SHADOW_Y = 0.008;
+export const CONTACT_SHADOW_SPOT_OPACITY = 0;
+export const CONTACT_SHADOW_NEON_OPACITY = 0.18;
+export const CONTACT_SHADOW_SPOT_SCALE = 1.4;
+export const CONTACT_SHADOW_NEON_SCALE = 1.2;
+export const CONTACT_SHADOW_SPOT_OFFSET = 0.16;
+export const CONTACT_SHADOW_NEON_OFFSET = 0.2;
+
 /** Legacy post mask — disabled; lighting uses SpotLight.castShadow instead. */
 export const SPOT_MASK = {
   sharpness: 14,
@@ -91,27 +101,101 @@ export const SPOT_MASK = {
  */
 export const NEON_FOG_LAYER = 2;
 
-/** Whole-strip emissive — must sit above bloom luminanceThreshold. */
+/**
+ * Tube CORE bloom target luminance after per-hue compensation (Option 1).
+ * Must clear `NEON_BLOOM.luminanceThreshold` (~1.0) for every hue so bloom
+ * supplies the glow — Additive shell mesh removed (dark “light vacuum”).
+ */
+export const NEON_CORE_MAX = 1.85;
+/**
+ * @deprecated Shell mesh removed (Option 1). Kept so old probes importing the
+ * symbol do not crash; value unused at runtime.
+ */
+export const NEON_SHELL_INTENSITY = 0;
+/** @deprecated Shell mesh removed — no radial proxy. */
+export const NEON_SHELL_RADIUS = 0.155;
+/** @deprecated Tube glow no longer drives bloom; kept for probes that still import it. */
 export const NEON_MAX_EMISSIVE = 3.0;
-/** Physical PointLight intensity. If fog/CRT halos: raise height first, then lower this. */
-export const NEON_MAX_LIGHT = 10.0;
+/** Physical PointLight — hot core; short distance = steep falloff to black. */
+export const NEON_MAX_LIGHT = 28.0;
 export const NEON_LIGHT_HEIGHT = 1.0;
-export const NEON_LIGHT_DISTANCE = 8;
-export const NEON_LIGHT_DECAY = 2;
-/** Angular radius (rad) over which a stop light falls from 1 → 0. π = dark on the opposite arc. */
+/** Was 14 — pulled in so the pool collapses to black (single-source contrast). */
+export const NEON_LIGHT_DISTANCE = 6.5;
+export const NEON_LIGHT_DECAY = 2.6;
+/**
+ * Legacy angular falloff (all stops lit by proximity). Live neon is focus-only —
+ * see `NEON_ARRIVE_RAD` / flicker. Kept for tests / probes that still call
+ * `neonProximity`.
+ */
 export const NEON_LIGHT_FALLOFF = Math.PI;
+/** Only the focused stop lights; fade up inside this angular window (rad) of rest. */
+export const NEON_ARRIVE_RAD = 0.55;
+/**
+ * Neon strike flicker starts when remaining hop arc ≤ this fraction of a full
+ * stop-to-stop step (last ~7% of travel). Not on settle — by then it is already lit.
+ */
+export const NEON_FLICKER_TRAVEL_FRAC = 0.07;
+/** Flicker duration once the travel window is entered (seconds). */
+export const NEON_FLICKER_SEC = 0.48;
+/** Emissive-map V scroll (UV loops / second) for the looping tube gradient. */
+export const NEON_GRADIENT_SCROLL = 0.18;
+/**
+ * PointLight hue phase scroll — much slower than tube emissive so cast light
+ * reflects green↔cyan without crawling speculars (§12 / §20.18).
+ */
+export const NEON_LIGHT_COLOR_SCROLL = 0.028;
+/** Max RGB channel step per second toward the sampled gradient color. */
+export const NEON_LIGHT_COLOR_MAX_RATE = 0.12;
+/**
+ * Additive floor glow under each tube (anchors neon — soft pool + low cone).
+ * Sized in meters; opacity scales with that stop’s neon level.
+ */
+/** Soft foot-halo diameter (m) — readable spill without a lit MeshStandard apron. */
+export const NEON_FLOOR_GLOW_POOL = 0.92;
+/** Soft bounce cone — whisper of vertical contact at the tube foot. */
+export const NEON_FLOOR_GLOW_CONE_RADIUS = 0.11;
+export const NEON_FLOOR_GLOW_CONE_HEIGHT = 0.22;
+/** Peak pool opacity × neon level — planted foot on `#070709` (was 0.26, too dim). */
+export const NEON_FLOOR_GLOW_POOL_OPACITY = 0.48;
+/** Cone stump — keep soft; open rim hardens at grazing. */
+export const NEON_FLOOR_GLOW_CONE_OPACITY = 0.1;
+/** Sit above MeshBasic floor (+ lawn ground) to avoid z-fight. */
+export const NEON_FLOOR_GLOW_Y = 0.018;
+/**
+ * Desktop: pool stays centered on the tube foot (no sideways offset — that
+ * orphaned a floating glow in open floor). Clear the tower by shrinking radius
+ * only; group-local tower AABB clip is a safety net on the case footprint.
+ */
+export const NEON_FLOOR_GLOW_DESKTOP_POOL_SCALE = 0.34;
+/** Must stay 0 — offset pushed the pool off the tube into open floor. */
+export const NEON_FLOOR_GLOW_DESKTOP_POOL_OFFSET_X = 0;
+/**
+ * Desktop tower footprint in vignette-group local XZ (blockout tower ± pad).
+ * Do not extend this toward the tube — that clipped a centered foot pool.
+ */
+export const DESKTOP_TOWER_FOOTPRINT = Object.freeze({
+  minX: 0.48,
+  maxX: 1.68,
+  minZ: -0.95,
+  maxZ: 0.42
+});
+/** Soft fade (m) outside the tower AABB before glow returns to full. */
+export const DESKTOP_TOWER_FOOTPRINT_FEATHER = 0.1;
+/** Desktop pool peak opacity — readable foot under tube, under bloom extract. */
+export const NEON_FLOOR_GLOW_DESKTOP_POOL_OPACITY = 0.36;
 
 /** Bloom in the live composer, ahead of grain. Threshold 1 = only the active tube. */
 export const NEON_BLOOM = {
   luminanceThreshold: 1.0,
   luminanceSmoothing: 0.2,
   intensity: 1.2,
-  radius: 0.7,
+  /** Slightly wider Kawase halo — tube glow without Additive shell mesh. */
+  radius: 0.95,
   /** Bloom internals at half res — soft glow hides the scale. Try 0.66 if edges stair-step. */
   resolutionScale: 0.5
 };
 
-/** Baked fog atlas — 8×8 tiles, density in .r. Keep N/TILE/COLS/ROWS in lockstep with the runtime shader. */
+/** Baked fog atlas — removed with ring/haze (kept export only if debug tools import). */
 export const FOG_ATLAS = {
   N: 64,
   TILE: 256,
@@ -119,48 +203,13 @@ export const FOG_ATLAS = {
   ROWS: 8
 };
 
+/**
+ * Legacy ring/haze knobs — no longer mounted. Soft-fade Y kept for FogDebugOverlay.
+ * Volumetric distance fade lives in `fogConfig.js` (`fogDistFadeStart` / `End`).
+ */
 export const NEON_FOG = {
-  rInner: 14,
-  rOuter: 22,
   y: 0.05,
-  albedo: 0.75,
-  /** Ground-glow only — haze carries atmosphere. Was 0.85 when the ring was judged alone. */
-  opacity: 0.32,
-  speed: 1.0,
-  /** Spatial scale of the FBM bake over the ~44 m footprint (old 3.0 × 10/44). */
-  uScale: 0.7,
-  uLoopRadius: 1.5,
-  footprint: 44,
-  /** Outer radial feather (m). */
-  feather: 2.5,
-  /**
-   * Inner radial feather (m). Wider than outer so the hole edge is a gradient,
-   * not a hard strip — do not lower rInner / fill the disc.
-   */
-  featherInner: 6.0,
-  driftAmp: 4.0,
-  /**
-   * Soft-particle fade distance (m) vs opaque scene depth.
-   * Fog alpha → 0 as the ring approaches solid geometry (kills hard cuboid cuts).
-   */
-  softFade: 2.0,
-  /**
-   * World-XZ distance fade vs camera (m). Near arc at rest is ~6–14 m; far arc
-   * ~42–50 m. Fade **20 → 36** sits in the dead gap — far/horizon band dies,
-   * near pool stays full.
-   */
-  distFadeStart: 20,
-  distFadeEnd: 36,
-  /**
-   * Y-billboard haze cards — atmosphere. Ring is ground-glow only.
-   */
-  hazeCount: 20,
-  hazeCountCoarse: 12,
-  hazeHeight: 6,
-  hazeWidth: 5,
-  hazeRadius: 18,
-  hazeOpacity: 0.2,
-  hazeCull: 0.08
+  softFade: 2.0
 };
 
 /** Page-load gate: assets + fog bake cannot beat this wall-clock minimum. */

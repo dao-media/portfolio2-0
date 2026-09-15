@@ -4,7 +4,12 @@ export const PC_SETUP_TARGET_HEIGHT = 5.2;
 export const PC_MODEL_FRAME_INSET = 0.92;
 export const STAGE_FLOOR_Y = 0;
 
-const REF_HEIGHT = 2.05;
+/** Blockout authoring height before `PC_SETUP_TARGET_HEIGHT` uniform scale. */
+export const BLOCKOUT_REF_HEIGHT = 2.05;
+/** Authored CRT chassis height in blockout units (pre-scale). */
+export const BLOCKOUT_MONITOR_HEIGHT = 1.02;
+
+const REF_HEIGHT = BLOCKOUT_REF_HEIGHT;
 const DESK_MAT = "pc_1";
 
 const BOX_CORNERS = [
@@ -21,7 +26,7 @@ const BOX_CORNERS = [
 /** Blockout layout — no desk slab; props keep their authored height. */
 const PARTS = [
   { name: "tower", size: [0.58, 1.62, 0.72], pos: [1.02, 1.02, -0.28], color: 0xd0ccc0, roughness: 0.58 },
-  { name: "monitor", size: [1.35, 1.02, 0.14], pos: [-0.35, 1.35, -0.15], color: 0xd8d2c4, roughness: 0.55 },
+  { name: "monitor", size: [1.35, BLOCKOUT_MONITOR_HEIGHT, 0.14], pos: [-0.35, 1.35, -0.15], color: 0xd8d2c4, roughness: 0.55 },
   { name: "keyboard", size: [1.22, 0.08, 0.48], pos: [-0.18, 0.72, 0.52], color: 0xc8c4ba, roughness: 0.68 },
   { name: "mouse", size: [0.2, 0.06, 0.3], pos: [0.62, 0.72, 0.48], color: 0xb8b4aa, roughness: 0.62 },
   { name: "cd", size: [0.42, 0.05, 0.42], pos: [-0.92, 0.72, 0.34], color: 0xe8e8f0, roughness: 0.35, metalness: 0.25 },
@@ -33,12 +38,28 @@ function blockoutScale() {
   return PC_SETUP_TARGET_HEIGHT / REF_HEIGHT;
 }
 
+/** Uniform blockout scale applied to PARTS (and thus the Desktop CRT). */
+export function blockoutUniformScale() {
+  return blockoutScale();
+}
+
+/** Scene-space CRT chassis height after blockout scale — Sidekick prop scale key. */
+export function sceneMonitorHeightM() {
+  return BLOCKOUT_MONITOR_HEIGHT * blockoutScale();
+}
+
 function isFloorExcludedMesh(obj) {
   if (!obj.isMesh || !obj.visible) return true;
   if (!obj.geometry?.attributes?.position) return true;
-  if (obj.name.includes("glow")) return true;
+  // Neon tubes sit on STAGE_FLOOR_Y by design — if they anchor the snap, the
+  // PC / pack float ~0.5 m above the floor (Desktop hover bug).
+  if (obj.name.includes("glow") || obj.name.includes("neon") || obj.name.includes("contact-shadow")) {
+    return true;
+  }
   const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-  return materials.some((mat) => mat?.name?.includes("cable"));
+  return materials.some(
+    (mat) => mat?.name?.includes("cable") || mat?.name?.includes("neon")
+  );
 }
 
 function withVisibleBlockoutRef(blockoutSetup, fn) {

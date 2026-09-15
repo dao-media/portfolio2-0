@@ -75,7 +75,7 @@ export function introTrackEase(linear) {
 
 /**
  * Sample the pageload → ground-rest camera track.
- * t=0 aerial, t=1 monolith ground rest (matches _applyCameraPose fast path).
+ * t=0 aerial, t=1 bust ground rest (matches _applyCameraPose fast path).
  *
  * @param {number} trackT — 0→1 linear intro clock
  * @param {number} [descent=INTRO_TRACK_DESCENT]

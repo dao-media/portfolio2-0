@@ -16,6 +16,12 @@ function isIgnorableConsoleError(text) {
   return /Failed to load resource:.*favicon/i.test(text);
 }
 
+function isFatalWebglConsole(text) {
+  return /GL_INVALID_FRAMEBUFFER|Framebuffer is incomplete|Attachment has zero size/i.test(
+    text
+  );
+}
+
 async function canvasLooksLit(page) {
   const png = await page.locator("#scene-canvas").screenshot({ type: "png" });
   const stats = await page.evaluate(() => {
@@ -57,6 +63,7 @@ async function hop(page) {
 
 const errors = [];
 const pageErrors = [];
+const webglFbErrors = [];
 
 const server = await createServer({
   root: process.cwd(),
@@ -80,12 +87,54 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 page.setDefaultTimeout(BOOT_MS);
 
+// Catch WebGL incomplete-FB even when Chrome only emits a warning / silent getError.
+await page.addInitScript(() => {
+  const wrap = (proto) => {
+    const orig = proto.getContext;
+    proto.getContext = function (type, attrs) {
+      const ctx = orig.call(this, type, attrs);
+      if (!ctx || this.__glFbHooked) return ctx;
+      if (type !== "webgl" && type !== "webgl2") return ctx;
+      this.__glFbHooked = true;
+      const log = (window.__glFbIncomplete = []);
+      const enumName = (e) => {
+        if (e === ctx.INVALID_FRAMEBUFFER_OPERATION) return "INVALID_FRAMEBUFFER_OPERATION";
+        if (e === ctx.INVALID_OPERATION) return "INVALID_OPERATION";
+        if (e === ctx.INVALID_VALUE) return "INVALID_VALUE";
+        return String(e);
+      };
+      const check = (label) => {
+        const e = ctx.getError();
+        if (!e) return;
+        if (e === ctx.INVALID_FRAMEBUFFER_OPERATION) {
+          log.push(`GL_${enumName(e)} via ${label}`);
+        }
+      };
+      for (const name of ["clear", "drawArrays", "drawElements", "blitFramebuffer"]) {
+        if (typeof ctx[name] !== "function") continue;
+        const fn = ctx[name].bind(ctx);
+        ctx[name] = function (...args) {
+          const r = fn(...args);
+          check(name);
+          return r;
+        };
+      }
+      return ctx;
+    };
+  };
+  wrap(HTMLCanvasElement.prototype);
+});
+
 page.on("pageerror", (err) => {
   pageErrors.push(String(err?.message || err));
 });
 page.on("console", (msg) => {
-  if (msg.type() !== "error") return;
   const text = msg.text();
+  if (isFatalWebglConsole(text)) {
+    webglFbErrors.push(text);
+    return;
+  }
+  if (msg.type() !== "error") return;
   if (isIgnorableConsoleError(text)) return;
   errors.push(text);
 });
@@ -106,7 +155,7 @@ try {
     console.log("✓ canvas present after load gate");
   }
 
-  // Full hop cycle: Monolith → Desktop → Sidekick → Travel → Monolith.
+  // Full hop cycle: Bust → Desktop → Sidekick → Travel → Bust.
   for (let i = 0; i < 4; i += 1) {
     await hop(page);
   }
@@ -159,6 +208,35 @@ try {
     fail(`console errors:\n  ${errors.join("\n  ")}`);
   } else {
     console.log("✓ no console errors");
+  }
+
+  const hooked = await page.evaluate(() => window.__glFbIncomplete ?? []);
+  const allFb = [...webglFbErrors, ...hooked];
+  if (allFb.length) {
+    fail(
+      `WebGL incomplete framebuffer (${allFb.length}):\n  ${[...new Set(allFb)].slice(0, 12).join("\n  ")}`
+    );
+  } else {
+    console.log("✓ no GL_INVALID_FRAMEBUFFER / incomplete attachment");
+  }
+
+  // Sanity: volumetric / composer RTs must be non-zero after hop cycle.
+  const rt = await page.evaluate(() => {
+    const stage = window.__stage;
+    const fog = stage?.volumetricFog?.fogTarget;
+    const input = stage?.post?.composer?.inputBuffer;
+    return {
+      fog: fog ? { w: fog.width, h: fog.height } : null,
+      input: input ? { w: input.width, h: input.height } : null,
+      volSized: Boolean(stage?.volumetricFog?._hasValidSize)
+    };
+  });
+  if (!rt.input || rt.input.w < 1 || rt.input.h < 1) {
+    fail(`composer inputBuffer zero-size: ${JSON.stringify(rt.input)}`);
+  } else if (rt.fog && (rt.fog.w < 1 || rt.fog.h < 1)) {
+    fail(`volumetric fogTarget zero-size: ${JSON.stringify(rt.fog)}`);
+  } else {
+    console.log(`✓ RTs sized input=${rt.input.w}x${rt.input.h} fog=${rt.fog?.w}x${rt.fog?.h}`);
   }
 } catch (error) {
   fail(error.stack || error.message || String(error));

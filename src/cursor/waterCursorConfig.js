@@ -1,7 +1,26 @@
 /** Default tunables for WaterCursor — override via `new WaterCursor({ config: { ... } })`. */
 
-/** Stable release — harmonic SDF, momentum heading, stretch/wave springs. */
-export const WATER_CURSOR_VERSION = "1.0.0";
+import {
+  WATER_CURSOR_BLOW_EXPONENT,
+  WATER_CURSOR_NECK_PINCH,
+  WATER_CURSOR_RECOIL_PUSH_PX,
+  WATER_CURSOR_RIM_SLURP_BAND,
+  WATER_CURSOR_SNAP_THRESHOLD
+} from "./waterCursorRimConfig.js";
+
+export {
+  WATER_CURSOR_BLOW_EXPONENT,
+  WATER_CURSOR_NECK_PINCH,
+  WATER_CURSOR_RECOIL_PUSH_PX,
+  WATER_CURSOR_RIM_SLURP_BAND,
+  WATER_CURSOR_SNAP_THRESHOLD,
+  WATER_CURSOR_RIM_PARAM_SCHEMA,
+  createWaterCursorRimParams,
+  rimBlowFromProximity
+} from "./waterCursorRimConfig.js";
+
+/** Stable release — surface-tension rim couple (blow / neck / recoil). */
+export const WATER_CURSOR_VERSION = "1.3.0";
 
 export const DEFAULT_WATER_CURSOR_CONFIG = {
   /** Visible blob diameter in CSS pixels (~24–32). */
@@ -46,6 +65,36 @@ export const DEFAULT_WATER_CURSOR_CONFIG = {
   omegaMax: 6,
   /** Phase travel multiplier vs angular velocity. */
   waveTravel: 1.5,
+
+  /**
+   * Edge-glitch rim field — surface tension × edge (blob response only).
+   * Driven by EdgeGlitchSystem.sampleRimField (signed d) + rim response curves.
+   */
+  /** @deprecated Prefer recoilPushPx — kept for sanitize / older callers. */
+  rimPushPx: 22,
+  /** followRate scale at full blow (lower = resists the wind). */
+  rimFollowDamp: 0.42,
+  /** Mild leftover — blow shape is shader teardrop now (kept for sanitize compat). */
+  rimBlowStretch: 0.0,
+  /** Peak liquid slurp deformation when straddling the alpha edge. */
+  rimSlurp: 0.62,
+  /** |d| UV half-width of the crossing / tip-round zone. */
+  rimSlurpBand: WATER_CURSOR_RIM_SLURP_BAND,
+  /** Deep-inside free zone — past this, rim couple is off (round free blob). */
+  rimInsideFree: 0.022,
+  /** Blend heading toward tip-into-edge while slurping. */
+  rimSlurpAngleBlend: 0.72,
+  /** Damp rate for incoming rim field (1/s). */
+  rimFieldSmooth: 16,
+
+  /** Surface-tension blow ease-in exponent (hold round → give way near edge). */
+  blowExponent: WATER_CURSOR_BLOW_EXPONENT,
+  /** Waist pinch at threshold (0–1 → ~0 radius). */
+  neckPinch: WATER_CURSOR_NECK_PINCH,
+  /** CSS-px center recoil away from glitch at full blow. */
+  recoilPushPx: WATER_CURSOR_RECOIL_PUSH_PX,
+  /** Inside |d| past which recoil / blow snap off. */
+  snapThreshold: WATER_CURSOR_SNAP_THRESHOLD,
 
   /** Hover swell disabled — cursor stays constant size on this site. */
   hoverScale: 1,
