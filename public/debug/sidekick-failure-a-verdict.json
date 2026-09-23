@@ -1,0 +1,17 @@
+{
+  "buttonsHasNormalMap": false,
+  "sideButtonsHasNormalMap": false,
+  "onlyNormalMapInTree": [
+    {
+      "name": "polySurface341",
+      "visible": false,
+      "mat": "carkey1",
+      "hasTangent": false,
+      "normalImg": "2048x2048",
+      "mapImg": "2048x2048"
+    }
+  ],
+  "stripProbeStrippedCount": 0,
+  "screenshotNonormal": "public/debug/sidekick-buttons-nonormal.png",
+  "note": "§20.11 normalMap/tangent theory does NOT apply to CALL/END or Buttons. CALL/END atlas is TmobileButtons on sideButtons; KeyButton noisy atlas is only on pruned polySurface341/carkey1."
+}

@@ -1,0 +1,31 @@
+{
+  "knobs": {
+    "ambient": 0,
+    "hemi": 0,
+    "envIntensity": 0,
+    "spot": 0,
+    "neonIntensity": 28,
+    "neonDistance": 6.5,
+    "neonDecay": 2.6,
+    "fogDensityScale": 1,
+    "fogOpacity": 1,
+    "fogNearBoost": 1.65,
+    "volFade": 1
+  },
+  "flash": {
+    "avg": 20.97,
+    "maxDev": 0.17,
+    "n": 24
+  },
+  "screen": {
+    "cornerBlack": 20.37,
+    "neonCore": 33.15,
+    "coreOverCorner": 1.63,
+    "bustZoneL": 14.48,
+    "leafLeft": 41.8,
+    "leafRight": 75.57,
+    "leafRatioRL": 1.808,
+    "leafN": 15912
+  },
+  "errs": []
+}

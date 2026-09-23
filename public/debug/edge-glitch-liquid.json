@@ -1,0 +1,118 @@
+{
+  "ok": true,
+  "shoulderUv": {
+    "u": 0.697265625,
+    "v": 0.482421875,
+    "d": 0.1195082813501358,
+    "bbox": {
+      "minU": 0.357421875,
+      "maxU": 0.630859375,
+      "minV": 0.138671875,
+      "maxV": 0.763671875
+    }
+  },
+  "uniforms": {
+    "bulgeAmp": 14,
+    "liquidReveal": 3,
+    "edgeLight": 0.35,
+    "liquidArm": 0.15,
+    "glitchArm": 0.06,
+    "neonHue": {
+      "r": 0.323,
+      "g": 1,
+      "b": 0.014
+    },
+    "hasNormalBulge": true,
+    "hasRim": true,
+    "hasLiquidReveal": true,
+    "hasDualArm": true,
+    "noCurlPsi": true,
+    "debug": {
+      "stage": 3,
+      "enabled": true,
+      "applied": true,
+      "csmCount": 0,
+      "csmRemoved": true,
+      "bandOuter": 0.028,
+      "cursorOuter": 0.028,
+      "spanAlong": 0.028,
+      "spanOut": 0.032,
+      "spanIn": 0.016,
+      "liquidArmOuter": 0.15,
+      "glitchArmOuter": 0.06,
+      "armOuter": 0.15,
+      "armRamp": 1.5,
+      "tearBands": 88,
+      "intensity": 0.2,
+      "rgbSplitPx": 14,
+      "revealBoost": 3.5,
+      "tearAmpPx": 42,
+      "bulgeAmpPx": 14,
+      "bulgeAmpSmooth": 14,
+      "bleedAmpSmooth": 14,
+      "liquidReveal": 3,
+      "edgeLightAmount": 0.35,
+      "edgeLightCap": 0.4,
+      "bleedViscosity": 10,
+      "surfaceTension": 1.4,
+      "sdfSize": 256,
+      "pointerLive": true,
+      "cursorUv": {
+        "x": 0.697265625,
+        "y": 0.482421875
+      },
+      "dCursor": 0.12609384953975677,
+      "liquidGate": 0.0636249690695078,
+      "glitchGate": 0,
+      "cursorGate": 0.0636249690695078,
+      "edgeProx": 0.0636249690695078,
+      "tubeEnabled": true,
+      "approach": "LOCKED liquid: dual arms (liquid far / glitch close) + SDF-normal bulge + neon rim whisper + liquidReveal. Diamond + FogDepth occ. bonusCount 0.",
+      "activeRoot": "bust",
+      "activeRoots": [
+        "bust"
+      ],
+      "occSoft": 0.004,
+      "occBias": 0.0015,
+      "hasSceneDepth": true,
+      "hasSceneDepthUniform": true,
+      "bonusCount": 0,
+      "bonusIntensity": 0.75,
+      "bonusRhythm": 12,
+      "overlayVisible": false,
+      "defaults": {
+        "liquidArmOuter": 0.15,
+        "glitchArmOuter": 0.06,
+        "armRamp": 1.5,
+        "spanAlong": 0.028,
+        "spanOut": 0.032,
+        "spanIn": 0.016,
+        "intensity": 0.2,
+        "rgbSplitPx": 16,
+        "revealBoost": 3.5,
+        "tearAmpPx": 54,
+        "bulgeAmpPx": 14,
+        "liquidReveal": 3,
+        "edgeLightAmount": 0.35,
+        "bleedViscosity": 10,
+        "surfaceTension": 1.4,
+        "bonusCount": 0,
+        "bonusIntensity": 0.75,
+        "bonusRhythm": 12
+      }
+    }
+  },
+  "vision": {
+    "brightPx": 13553,
+    "meanLuma": 120.4,
+    "neonishPx": 9731
+  },
+  "frameMs": {
+    "medianMs": 19.3,
+    "meanMs": 27.21,
+    "p90Ms": 44.3
+  },
+  "png": "public/debug/edge-glitch-liquid-shoulder.png",
+  "locked": true,
+  "note": "LOCKED liquid: neon rim whisper + liquidReveal bulge along SDF normal; dual arms; no more liquid knobs."
+}

@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "ts": 1789515196649,
+  "frameMs": {
+    "avgMs": 55.72,
+    "maxMs": 317,
+    "n": 35
+  },
+  "lawn": {
+    "hasGrass": true,
+    "lawnParams": {
+      "coverageNoiseScale": 3.2,
+      "edgeFalloff": 1.55,
+      "stragglerDensity": 0.45,
+      "shapeDistortion": 0.55
+    },
+    "index": 0
+  },
+  "png": "public/debug/lawn-edge-rest.png",
+  "note": "Expect irregular islanded lawn edge — no circular disc, no short-grass fringe."
+}

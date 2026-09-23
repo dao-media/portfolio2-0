@@ -1,0 +1,460 @@
+{
+  "meshCount": 26,
+  "interesting": [
+    {
+      "name": "Buttons",
+      "visible": true,
+      "renderOrder": 0,
+      "vertCount": 7285,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "hasTangent": false,
+      "hasNormal": true,
+      "materials": [
+        {
+          "uuid": "bc5dab11-0d2d-4db9-9fb4-91b8380efe1d",
+          "name": "phong3",
+          "type": "MeshPhysicalMaterial",
+          "transparent": false,
+          "opacity": 0,
+          "alphaTest": 0.5,
+          "side": 2,
+          "metalness": 0.20000000298023224,
+          "roughness": 0,
+          "depthTest": true,
+          "depthWrite": true,
+          "map": null,
+          "emissiveMap": null,
+          "normalMap": null,
+          "bumpMap": null,
+          "alphaMap": null,
+          "userData": {
+            "sidekickKeypadProtected": false,
+            "sidekickKeypadMaterial": false
+          }
+        }
+      ],
+      "materialUuids": [
+        "bc5dab11-0d2d-4db9-9fb4-91b8380efe1d"
+      ],
+      "normalMapWithoutTangent": false
+    },
+    {
+      "name": "buttonsFace",
+      "visible": true,
+      "renderOrder": 0,
+      "vertCount": 2198,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "hasTangent": false,
+      "hasNormal": true,
+      "materials": [
+        {
+          "uuid": "cb372007-cad2-4e01-b082-0e1e8bdd36d9",
+          "name": "blinn1",
+          "type": "MeshPhysicalMaterial",
+          "transparent": false,
+          "opacity": 1,
+          "alphaTest": 0,
+          "side": 2,
+          "metalness": 0,
+          "roughness": 0.7487671971321106,
+          "depthTest": true,
+          "depthWrite": true,
+          "map": null,
+          "emissiveMap": null,
+          "normalMap": null,
+          "bumpMap": null,
+          "alphaMap": null,
+          "userData": {
+            "sidekickKeypadProtected": false,
+            "sidekickKeypadMaterial": false
+          }
+        }
+      ],
+      "materialUuids": [
+        "cb372007-cad2-4e01-b082-0e1e8bdd36d9"
+      ],
+      "normalMapWithoutTangent": false
+    },
+    {
+      "name": "KeyboardText",
+      "visible": true,
+      "renderOrder": 0,
+      "vertCount": 4225,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "hasTangent": false,
+      "hasNormal": true,
+      "materials": [
+        {
+          "uuid": "b293f782-4660-46e5-97c0-840b0a1624eb",
+          "name": "lambert3",
+          "type": "MeshPhysicalMaterial",
+          "transparent": false,
+          "opacity": 1,
+          "alphaTest": 0,
+          "side": 2,
+          "metalness": 1,
+          "roughness": 0.5527864098548889,
+          "depthTest": true,
+          "depthWrite": true,
+          "map": null,
+          "emissiveMap": null,
+          "normalMap": null,
+          "bumpMap": null,
+          "alphaMap": null,
+          "userData": {
+            "sidekickKeypadProtected": false,
+            "sidekickKeypadMaterial": false
+          }
+        }
+      ],
+      "materialUuids": [
+        "b293f782-4660-46e5-97c0-840b0a1624eb"
+      ],
+      "normalMapWithoutTangent": false
+    },
+    {
+      "name": "scrolButtonFrame",
+      "visible": true,
+      "renderOrder": 0,
+      "vertCount": 160,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "hasTangent": false,
+      "hasNormal": true,
+      "materials": [
+        {
+          "uuid": "cb372007-cad2-4e01-b082-0e1e8bdd36d9",
+          "name": "blinn1",
+          "type": "MeshPhysicalMaterial",
+          "transparent": false,
+          "opacity": 1,
+          "alphaTest": 0,
+          "side": 2,
+          "metalness": 0,
+          "roughness": 0.7487671971321106,
+          "depthTest": true,
+          "depthWrite": true,
+          "map": null,
+          "emissiveMap": null,
+          "normalMap": null,
+          "bumpMap": null,
+          "alphaMap": null,
+          "userData": {
+            "sidekickKeypadProtected": false,
+            "sidekickKeypadMaterial": false
+          }
+        }
+      ],
+      "materialUuids": [
+        "cb372007-cad2-4e01-b082-0e1e8bdd36d9"
+      ],
+      "normalMapWithoutTangent": false
+    },
+    {
+      "name": "scrollButton",
+      "visible": true,
+      "renderOrder": 0,
+      "vertCount": 188,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "hasTangent": false,
+      "hasNormal": true,
+      "materials": [
+        {
+          "uuid": "a635856c-53e7-4727-8f4e-6e237110573c",
+          "name": "lambert5",
+          "type": "MeshPhysicalMaterial",
+          "transparent": true,
+          "opacity": 0.9421399831771851,
+          "alphaTest": 0,
+          "side": 2,
+          "metalness": 1,
+          "roughness": 0.5527864098548889,
+          "depthTest": true,
+          "depthWrite": false,
+          "map": null,
+          "emissiveMap": null,
+          "normalMap": null,
+          "bumpMap": null,
+          "alphaMap": null,
+          "userData": {
+            "sidekickKeypadProtected": false,
+            "sidekickKeypadMaterial": false
+          }
+        }
+      ],
+      "materialUuids": [
+        "a635856c-53e7-4727-8f4e-6e237110573c"
+      ],
+      "normalMapWithoutTangent": false
+    },
+    {
+      "name": "sideButtons",
+      "visible": true,
+      "renderOrder": 0,
+      "vertCount": 4656,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "hasTangent": false,
+      "hasNormal": true,
+      "materials": [
+        {
+          "uuid": "11a2291f-3e35-4e05-988f-c896a56d4841",
+          "name": "phong4",
+          "type": "MeshPhysicalMaterial",
+          "transparent": false,
+          "opacity": 1,
+          "alphaTest": 0,
+          "side": 2,
+          "metalness": 0,
+          "roughness": 0.1728724241256714,
+          "depthTest": true,
+          "depthWrite": true,
+          "map": null,
+          "emissiveMap": null,
+          "normalMap": null,
+          "bumpMap": null,
+          "alphaMap": null,
+          "userData": {
+            "sidekickKeypadProtected": false,
+            "sidekickKeypadMaterial": false
+          }
+        }
+      ],
+      "materialUuids": [
+        "11a2291f-3e35-4e05-988f-c896a56d4841"
+      ],
+      "normalMapWithoutTangent": false
+    },
+    {
+      "name": "Screen",
+      "visible": true,
+      "renderOrder": 0,
+      "vertCount": 975,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "hasTangent": false,
+      "hasNormal": true,
+      "materials": [
+        {
+          "uuid": "9b329198-e08f-4094-9f39-d59c4fba2d2f",
+          "name": "SCREENIMAGE",
+          "type": "MeshPhysicalMaterial",
+          "transparent": false,
+          "opacity": 1,
+          "alphaTest": 0,
+          "side": 2,
+          "metalness": 1,
+          "roughness": 0.5527864098548889,
+          "depthTest": true,
+          "depthWrite": true,
+          "map": null,
+          "emissiveMap": null,
+          "normalMap": null,
+          "bumpMap": null,
+          "alphaMap": null,
+          "userData": {
+            "sidekickKeypadProtected": false,
+            "sidekickKeypadMaterial": false
+          }
+        }
+      ],
+      "materialUuids": [
+        "9b329198-e08f-4094-9f39-d59c4fba2d2f"
+      ],
+      "normalMapWithoutTangent": false
+    },
+    {
+      "name": "ScreenFrame",
+      "visible": true,
+      "renderOrder": 0,
+      "vertCount": 1697,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "hasTangent": false,
+      "hasNormal": true,
+      "materials": [
+        {
+          "uuid": "32cb24f7-718a-46aa-89a1-6e9955da0619",
+          "name": "alu",
+          "type": "MeshPhysicalMaterial",
+          "transparent": false,
+          "opacity": 1,
+          "alphaTest": 0,
+          "side": 2,
+          "metalness": 1,
+          "roughness": 0.5527864098548889,
+          "depthTest": true,
+          "depthWrite": true,
+          "map": null,
+          "emissiveMap": null,
+          "normalMap": null,
+          "bumpMap": null,
+          "alphaMap": null,
+          "userData": {
+            "sidekickKeypadProtected": false,
+            "sidekickKeypadMaterial": false
+          }
+        }
+      ],
+      "materialUuids": [
+        "32cb24f7-718a-46aa-89a1-6e9955da0619"
+      ],
+      "normalMapWithoutTangent": false
+    },
+    {
+      "name": "transparentCover",
+      "visible": true,
+      "renderOrder": 0,
+      "vertCount": 975,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "hasTangent": false,
+      "hasNormal": true,
+      "materials": [
+        {
+          "uuid": "bc5dab11-0d2d-4db9-9fb4-91b8380efe1d",
+          "name": "phong3",
+          "type": "MeshPhysicalMaterial",
+          "transparent": false,
+          "opacity": 0,
+          "alphaTest": 0.5,
+          "side": 2,
+          "metalness": 0.20000000298023224,
+          "roughness": 0,
+          "depthTest": true,
+          "depthWrite": true,
+          "map": null,
+          "emissiveMap": null,
+          "normalMap": null,
+          "bumpMap": null,
+          "alphaMap": null,
+          "userData": {
+            "sidekickKeypadProtected": false,
+            "sidekickKeypadMaterial": false
+          }
+        }
+      ],
+      "materialUuids": [
+        "bc5dab11-0d2d-4db9-9fb4-91b8380efe1d"
+      ],
+      "normalMapWithoutTangent": false
+    }
+  ],
+  "sharedMaterialInstances": [
+    {
+      "uuid": "cb372007-cad2-4e01-b082-0e1e8bdd36d9",
+      "materialName": "blinn1",
+      "meshes": [
+        "bottom",
+        "bottonsSide",
+        "buttonsFace",
+        "curvedFace",
+        "middlePlastic",
+        "scrolButtonFrame"
+      ]
+    },
+    {
+      "uuid": "32cb24f7-718a-46aa-89a1-6e9955da0619",
+      "materialName": "alu",
+      "meshes": [
+        "bottomPlastic",
+        "Sides",
+        "ScreenFrame"
+      ]
+    },
+    {
+      "uuid": "bc5dab11-0d2d-4db9-9fb4-91b8380efe1d",
+      "materialName": "phong3",
+      "meshes": [
+        "Buttons",
+        "transparentCover"
+      ]
+    },
+    {
+      "uuid": "3b6b5bde-aa8f-43e0-9337-d770e47c2128",
+      "materialName": "phong5",
+      "meshes": [
+        "jack",
+        "speaker",
+        "speakerFrame1"
+      ]
+    },
+    {
+      "uuid": "77055fbc-db9a-4f0c-aa16-eae5cc2e828f",
+      "materialName": "lambert1",
+      "meshes": [
+        "magnet",
+        "rivet",
+        "rivet1",
+        "swivelPart"
+      ]
+    },
+    {
+      "uuid": "5547a4a5-be6e-4f36-ae6b-3c04c490f450",
+      "materialName": "silver",
+      "meshes": [
+        "MetalBrace",
+        "speakerFrame2"
+      ]
+    }
+  ],
+  "allMeshNames": [
+    "Buttons",
+    "KeyboardText",
+    "MetalBrace",
+    "Screen",
+    "ScreenFrame",
+    "Sides",
+    "bottom",
+    "bottomPlastic",
+    "bottonsSide",
+    "buttonsFace",
+    "curvedFace",
+    "jack",
+    "magnet",
+    "middlePlastic",
+    "polySurface341",
+    "polySurface343",
+    "rivet",
+    "rivet1",
+    "scrolButtonFrame",
+    "scrollButton",
+    "sideButtons",
+    "speaker",
+    "speakerFrame1",
+    "speakerFrame2",
+    "swivelPart",
+    "transparentCover"
+  ]
+}

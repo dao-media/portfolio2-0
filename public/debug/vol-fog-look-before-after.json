@@ -1,0 +1,32 @@
+{
+  "before": {
+    "file": "vol-fog-look-before-rest.png",
+    "params": {
+      "falloffNoiseWarp": 0,
+      "fogDistFadeStart": 120,
+      "fogDistFadeEnd": 120,
+      "noisePow": 3
+    },
+    "edge": {
+      "maxContrast": 24.5,
+      "maxContrastY": 311
+    }
+  },
+  "after": {
+    "file": "vol-fog-look-after-rest.png",
+    "params": {
+      "falloffNoiseWarp": 1.5,
+      "fogDistFadeStart": 24,
+      "fogDistFadeEnd": 32,
+      "noisePow": 3,
+      "baseMaxRayLength": 32,
+      "baseRaymarchStepCount": 64,
+      "stepM": 0.5
+    },
+    "edge": {
+      "maxContrast": 24.8,
+      "maxContrastY": 311
+    }
+  },
+  "note": "noisePow left at 3 — drop to 2.5 only if columns remain after warp"
+}

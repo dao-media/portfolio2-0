@@ -25,8 +25,8 @@ export const SCROLL_CAPTURE_MESH_IDS = {
   finalPcScreen: "final-pc-screen",
   /** Sidekick body — click target only. Does NOT capture wheel (too large a hit area). */
   sidekick: "sidekick-phone",
-  /** Travel pack + T-rex — click opens the pack. Does NOT capture wheel. */
-  travelPack: "travel-pack"
+  /** Archaeology stop — click zooms; pack morph retired. Does NOT capture wheel. */
+  archaeology: "archaeology"
 };
 
 /** Parallax damp-zone ids (registered via createParallaxDampZones). */

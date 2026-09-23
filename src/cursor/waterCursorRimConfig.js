@@ -32,7 +32,7 @@ export const WATER_CURSOR_RIM_PARAM_SCHEMA = /** @type {WaterCursorRimParamSpec[
     key: "recoilPushPx",
     constName: "WATER_CURSOR_RECOIL_PUSH_PX",
     type: "number",
-    default: 10,
+    default: 8,
     min: 0,
     max: 48,
     step: 0.5,
@@ -54,7 +54,7 @@ export const WATER_CURSOR_RIM_PARAM_SCHEMA = /** @type {WaterCursorRimParamSpec[
     key: "snapThreshold",
     constName: "WATER_CURSOR_SNAP_THRESHOLD",
     type: "number",
-    default: 0.01,
+    default: 0.012,
     min: 0.002,
     max: 0.05,
     step: 0.001,
@@ -78,15 +78,16 @@ export const WATER_CURSOR_BLOW_EXPONENT = 2.8;
 /** Gate lateral squeeze (0–1). Shader floors waist so the mass stays one blob. */
 export const WATER_CURSOR_NECK_PINCH = 0.72;
 /** CSS-px center recoil away from glitch at full blow (fight the push — keep modest). */
-export const WATER_CURSOR_RECOIL_PUSH_PX = 10;
+export const WATER_CURSOR_RECOIL_PUSH_PX = 8;
 /** |d| UV half-width of crossing / neck zone. */
 export const WATER_CURSOR_RIM_SLURP_BAND = 0.032;
 /** Inside |d| past which recoil snaps off. */
-export const WATER_CURSOR_SNAP_THRESHOLD = 0.01;
+export const WATER_CURSOR_SNAP_THRESHOLD = 0.012;
 
 /**
  * Surface-tension resistance: hold round, then give way near the edge.
  * smoothstep then pow — double back-load (ease-in, not linear stretch).
+ * The live curve is the GLSL copy in `waterCursorRimResolveShader` — keep them identical.
  * @param {number} proximity 0–1 linear arm proximity
  * @param {number} exponent back-loaded power (≥1)
  */

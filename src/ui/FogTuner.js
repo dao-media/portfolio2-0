@@ -19,12 +19,21 @@ import { FOG_PARAM_SCHEMA, FOG_DEFAULTS, createFogParams } from "../fog/fogConfi
 
 /** Keys shown at the top of the slider list. */
 const PRIORITY = [
-  "fogDensityMultiplier",
   "noisePow",
+  "globalScale",
+  "noiseBias",
+  "fogDensityMultiplier",
+  "subjectWrapBoost",
+  "subjectWrapResidual",
+  "subjectWrapRadius",
+  "subjectWrapMaxY",
   "falloffNoiseWarp",
   "noiseSpeed",
   "fogDistFadeStart",
   "fogDistFadeEnd",
+  "fogSoftContactRange",
+  "fogEdgeSoft",
+  "fogEdgeDepth",
   "heightFogExpK",
   "heightFogHazeStartY",
   "heightFogHazeFloor",
@@ -37,17 +46,27 @@ const PRIORITY = [
 /** Friendlier display names. */
 const LABELS = {
   fogDensityMultiplier:   "density",
-  noisePow:               "noise pow",
+  noisePow:               "scatter (noise pow)",
+  globalScale:            "scatter size (↓=bigger)",
   noiseSpeed:             "travel speed",
   heightFogExpK:          "exp falloff k",
   heightFogHazeStartY:    "haze start Y",
   heightFogHazeRangeY:    "haze range Y",
   heightFogHazeFloor:     "haze floor",
   outputDither:           "output dither",
+  digitalNoiseAmount:     "digital noise",
+  digitalNoiseCell:       "digital cell m",
+  subjectWrapBoost:       "subject wrap",
+  subjectWrapResidual:    "wrap residual (anti-waterline)",
+  subjectWrapRadius:      "wrap radius",
+  subjectWrapMaxY:        "wrap max Y",
   falloffCeilingJitter:   "ceiling jitter",
   falloffNoiseWarp:       "noise warp",
   fogDistFadeStart:       "dist fade start",
   fogDistFadeEnd:         "dist fade end",
+  fogSoftContactRange:    "soft contact fade (m)",
+  fogEdgeSoft:            "silhouette soft",
+  fogEdgeDepth:           "silhouette depth",
   fogNearFadeStart:       "near fade start",
   fogNearFadeEnd:         "near fade end",
   noiseMovementX:         "wind X",
@@ -57,7 +76,6 @@ const LABELS = {
   heightFogFactor:        "height fog factor",
   baseRaymarchStepCount:  "ray steps",
   baseMaxRayLength:       "ray length",
-  globalScale:            "global scale",
   halfRes:                "half-res",
   noiseBias:              "noise bias",
   fogFadeOutRangeY:       "fade-out range",
@@ -188,7 +206,13 @@ export class FogTuner {
   }
 
   _pushToStage() {
-    window.__stage?.setVolumetricParams?.(this._params);
+    const stage = window.__stage;
+    // Fog systems are not constructed when STAGE_FOG_ENABLED is false — keep
+    // the tuner UI, but do not push params into a missing pass.
+    if (stage && !stage.volumetricFog) {
+      return;
+    }
+    stage?.setVolumetricParams?.(this._params);
   }
 
   // ─── Panel construction ──────────────────────────────────────────────────────
@@ -436,6 +460,11 @@ export class FogTuner {
   }
 
   open() {
+    if (window.__stage && !window.__stage.volumetricFog) {
+      console.info(
+        "[FogTuner] STAGE_FOG_ENABLED=false — flip flag to restore fog; panel stays no-op"
+      );
+    }
     this._open = true;
     this._panel.hidden = false;
     this._toggleBtn.classList.add("is-active");
@@ -477,7 +506,7 @@ const FOG_TUNER_CSS = `
 /* ── Toggle button ───────────────────────────────────────── */
 #fog-tuner-toggle {
   position: fixed;
-  bottom: 72px;
+  top: 68px;
   right: 16px;
   z-index: 9000;
   width: 34px;

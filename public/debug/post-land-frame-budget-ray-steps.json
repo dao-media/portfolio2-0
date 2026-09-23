@@ -1,0 +1,139 @@
+{
+  "note": "ANGLE relative only — not mid-GPU absolute",
+  "cases": [
+    {
+      "label": "fog-off",
+      "avgMs": 9.88961424332344,
+      "maxMs": 157.79999999999927,
+      "n": 337,
+      "fog": {
+        "mode": "haze",
+        "enabled": false,
+        "densityScale": 0,
+        "fade": 0,
+        "depthPacked": true,
+        "halfRes": true,
+        "hasDepth": true,
+        "hasValidSize": true,
+        "fogTarget": {
+          "w": 640,
+          "h": 400
+        },
+        "near": 0.1,
+        "far": 220,
+        "steps": 46,
+        "density": 0.4,
+        "fillCap": 0.88,
+        "lightIntensities": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "noiseFrozen": false
+      }
+    },
+    {
+      "label": "ray32-steps16",
+      "avgMs": 8.50698795203703,
+      "maxMs": 57.79999999999927,
+      "n": 415,
+      "fog": {
+        "mode": "volumetric",
+        "enabled": true,
+        "densityScale": 1,
+        "fade": 1,
+        "depthPacked": true,
+        "halfRes": true,
+        "hasDepth": true,
+        "hasValidSize": true,
+        "fogTarget": {
+          "w": 640,
+          "h": 400
+        },
+        "near": 0.1,
+        "far": 220,
+        "steps": 16,
+        "density": 0.4,
+        "fillCap": 0.88,
+        "lightIntensities": [
+          10,
+          5,
+          0,
+          4.999999999999999
+        ],
+        "noiseFrozen": false
+      }
+    },
+    {
+      "label": "ray20-steps28",
+      "avgMs": 8.314251781472683,
+      "maxMs": 9.30000000000291,
+      "n": 421,
+      "fog": {
+        "mode": "volumetric",
+        "enabled": true,
+        "densityScale": 1,
+        "fade": 1,
+        "depthPacked": true,
+        "halfRes": true,
+        "hasDepth": true,
+        "hasValidSize": true,
+        "fogTarget": {
+          "w": 640,
+          "h": 400
+        },
+        "near": 0.1,
+        "far": 220,
+        "steps": 28,
+        "density": 0.4,
+        "fillCap": 0.88,
+        "lightIntensities": [
+          10,
+          5,
+          0,
+          4.999999999999999
+        ],
+        "noiseFrozen": false
+      }
+    },
+    {
+      "label": "ray32-steps46",
+      "avgMs": 8.31348314628172,
+      "maxMs": 9.400000000001455,
+      "n": 445,
+      "fog": {
+        "mode": "volumetric",
+        "enabled": true,
+        "densityScale": 1,
+        "fade": 1,
+        "depthPacked": true,
+        "halfRes": true,
+        "hasDepth": true,
+        "hasValidSize": true,
+        "fogTarget": {
+          "w": 640,
+          "h": 400
+        },
+        "near": 0.1,
+        "far": 220,
+        "steps": 46,
+        "density": 0.4,
+        "fillCap": 0.88,
+        "lightIntensities": [
+          10,
+          5,
+          0,
+          4.999999999999999
+        ],
+        "noiseFrozen": false
+      }
+    }
+  ],
+  "deltaMs": {
+    "16vsOff": -1.38,
+    "28vsOff": -1.58,
+    "46vsOff": -1.58,
+    "46vs16": -0.19
+  }
+}

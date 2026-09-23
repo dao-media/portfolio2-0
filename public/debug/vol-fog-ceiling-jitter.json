@@ -1,0 +1,208 @@
+{
+  "gate": "GATE4-option3-ceiling-jitter",
+  "captures": [
+    {
+      "mode": "off",
+      "pose": "rest",
+      "file": "vol-fog-ceiling-off-rest.png",
+      "edge": {
+        "topY": 316,
+        "mag": 11.86,
+        "top3": [
+          {
+            "y": 316,
+            "mag": 11.86
+          },
+          {
+            "y": 315,
+            "mag": 11.67
+          },
+          {
+            "y": 663,
+            "mag": 11.48
+          }
+        ],
+        "rowRoughness": [
+          86.83,
+          80.31,
+          75.65,
+          68.55,
+          66.17
+        ],
+        "rowRoughMean": 75.5
+      }
+    },
+    {
+      "mode": "off",
+      "pose": "pitch-down",
+      "file": "vol-fog-ceiling-off-pitch-down.png",
+      "edge": {
+        "topY": 543,
+        "mag": 11.9,
+        "top3": [
+          {
+            "y": 543,
+            "mag": 11.9
+          },
+          {
+            "y": 544,
+            "mag": 11.71
+          },
+          {
+            "y": 545,
+            "mag": 9.22
+          }
+        ],
+        "rowRoughness": [
+          63.5,
+          61.31,
+          48.27,
+          51.47,
+          51.32
+        ],
+        "rowRoughMean": 55.17
+      }
+    },
+    {
+      "mode": "off",
+      "pose": "pitch-up",
+      "file": "vol-fog-ceiling-off-pitch-up.png",
+      "edge": {
+        "topY": 439,
+        "mag": 11.01,
+        "top3": [
+          {
+            "y": 439,
+            "mag": 11.01
+          },
+          {
+            "y": 438,
+            "mag": 10.69
+          },
+          {
+            "y": 437,
+            "mag": 10.05
+          }
+        ],
+        "rowRoughness": [
+          2.73,
+          6.05,
+          84.72,
+          81.13,
+          73.91
+        ],
+        "rowRoughMean": 49.71
+      }
+    },
+    {
+      "mode": "on",
+      "pose": "rest",
+      "file": "vol-fog-ceiling-on-rest.png",
+      "edge": {
+        "topY": 316,
+        "mag": 11.64,
+        "top3": [
+          {
+            "y": 316,
+            "mag": 11.64
+          },
+          {
+            "y": 315,
+            "mag": 11.45
+          },
+          {
+            "y": 663,
+            "mag": 11.39
+          }
+        ],
+        "rowRoughness": [
+          82.36,
+          76,
+          71.81,
+          65.53,
+          62.97
+        ],
+        "rowRoughMean": 71.73
+      }
+    },
+    {
+      "mode": "on",
+      "pose": "pitch-down",
+      "file": "vol-fog-ceiling-on-pitch-down.png",
+      "edge": {
+        "topY": 543,
+        "mag": 10.84,
+        "top3": [
+          {
+            "y": 543,
+            "mag": 10.84
+          },
+          {
+            "y": 544,
+            "mag": 10.81
+          },
+          {
+            "y": 192,
+            "mag": 9.54
+          }
+        ],
+        "rowRoughness": [
+          67.75,
+          68.61,
+          49.76,
+          49.06,
+          54.23
+        ],
+        "rowRoughMean": 57.88
+      }
+    },
+    {
+      "mode": "on",
+      "pose": "pitch-up",
+      "file": "vol-fog-ceiling-on-pitch-up.png",
+      "edge": {
+        "topY": 439,
+        "mag": 13.36,
+        "top3": [
+          {
+            "y": 439,
+            "mag": 13.36
+          },
+          {
+            "y": 438,
+            "mag": 12.83
+          },
+          {
+            "y": 437,
+            "mag": 12.11
+          }
+        ],
+        "rowRoughness": [
+          3.69,
+          6.66,
+          85.88,
+          82.51,
+          74.88
+        ],
+        "rowRoughMean": 50.72
+      }
+    }
+  ],
+  "cost": {
+    "fogOffAvgMs": 15.85476190476191,
+    "fogOnAvgMs": 17.112931034482745,
+    "deltaMs": 1.2581691297208355,
+    "priorB_deltaMs": 1.3
+  },
+  "uniforms": {
+    "falloffCeilingJitter": 3.5,
+    "heightFogExpK": 0.35,
+    "fogMaxY": 8,
+    "hasCeilingJitter": true
+  },
+  "fogConfigDefaults": {
+    "heightFogExpK": 0.35,
+    "fogMaxY": 8,
+    "falloffCeilingJitter": 3.5
+  }
+}

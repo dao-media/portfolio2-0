@@ -1,0 +1,669 @@
+/* Duo Mail — Apple Mail–inspired two-column panel over the 3D phone screen. */
+
+.duo-mail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+}
+
+.duo-mail-overlay.is-open {
+  /* Stay none — only the Mail panel captures input so Duo/canvas stay clickable. */
+  pointer-events: none;
+}
+
+.duo-mail__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: rgba(4, 12, 18, 0.12);
+  cursor: default;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.duo-mail-overlay.is-open .duo-mail__backdrop {
+  opacity: 1;
+}
+
+/* Projection — beams ramp via --mail-beams (JS); pulses are the hero morph */
+.duo-mail__beams {
+  --mail-beams: 0;
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  mix-blend-mode: screen;
+  transition: none;
+}
+
+.duo-mail__beams.is-on {
+  opacity: var(--mail-beams, 1);
+}
+
+.duo-mail__frustum {
+  fill: rgba(100, 220, 255, 0.05);
+  stroke: none;
+  opacity: calc(var(--mail-beams, 1) * 0.9);
+}
+
+.duo-mail__beam {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.duo-mail__beam--halo {
+  stroke-width: 4;
+  opacity: 0.12;
+}
+
+.duo-mail__beam--core {
+  stroke-width: 0.7;
+  opacity: 0.22;
+}
+
+/* Shape echoes — crisp Duo face peel → Mail square (outline-forward) */
+.duo-mail__pulses {
+  opacity: 0;
+  transition: none;
+}
+
+.duo-mail__pulses.is-on {
+  opacity: 1;
+}
+
+.duo-mail__pulse {
+  fill: rgba(120, 220, 255, 0.08);
+  stroke: rgba(200, 252, 255, 0.92);
+  stroke-width: 1.75;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.duo-mail__pulse--1 {
+  fill: rgba(100, 210, 255, 0.05);
+  stroke: rgba(170, 245, 255, 0.62);
+}
+
+.duo-mail__pulse--2 {
+  fill: rgba(80, 200, 255, 0.03);
+  stroke: rgba(140, 230, 255, 0.4);
+}
+
+.duo-mail {
+  --duo-mail-emit: rgba(120, 230, 255, 0.55);
+  --duo-mail-emit-soft: rgba(100, 210, 255, 0.28);
+  --mail-glitch: 0;
+  --mail-glitch-shift: 0px;
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 14px;
+  /* Glass + cyan emission — reads as a hologram projection, not a solid window. */
+  background:
+    linear-gradient(
+      165deg,
+      rgba(210, 245, 255, 0.22) 0%,
+      rgba(236, 248, 252, 0.78) 42%,
+      rgba(200, 236, 248, 0.72) 100%
+    );
+  color: #1c1c1e;
+  font-family: -apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  border: 1px solid rgba(160, 235, 255, 0.45);
+  box-shadow:
+    0 0 0 1px rgba(200, 250, 255, 0.2),
+    0 0 18px var(--duo-mail-emit-soft),
+    0 0 42px rgba(80, 200, 255, 0.35),
+    0 0 72px rgba(60, 180, 255, 0.18),
+    0 22px 48px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(230, 255, 255, 0.55),
+    inset 0 0 28px rgba(140, 230, 255, 0.12);
+  opacity: 0;
+  transform: scale(0.94);
+  transform-origin: center right;
+  transition:
+    opacity 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  visibility: hidden;
+  z-index: 1;
+  pointer-events: auto;
+}
+
+/* GlitchQL edge — RGB rim + scan tears, armed by cursor near the panel edge */
+.duo-mail__edge-glitch {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 4;
+  opacity: 0;
+  mix-blend-mode: screen;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(255, 60, 90, calc(var(--mail-glitch) * 0.35)) 0,
+      transparent 2px,
+      transparent calc(100% - 2px),
+      rgba(60, 220, 255, calc(var(--mail-glitch) * 0.35)) 100%
+    );
+  box-shadow:
+    calc(var(--mail-glitch-shift) * -1) 0 0 rgba(255, 40, 80, calc(var(--mail-glitch) * 0.55)),
+    var(--mail-glitch-shift) 0 0 rgba(40, 220, 255, calc(var(--mail-glitch) * 0.55)),
+    inset 0 0 0 1px rgba(160, 240, 255, calc(var(--mail-glitch) * 0.4));
+  transition: opacity 0.12s linear;
+}
+
+.duo-mail.is-edge-glitch .duo-mail__edge-glitch {
+  opacity: 1;
+  animation: duo-mail-edge-tear 0.28s steps(2, end) infinite;
+}
+
+.duo-mail.is-edge-glitch {
+  filter: contrast(1.04) saturate(1.08);
+}
+
+@keyframes duo-mail-edge-tear {
+  0% {
+    clip-path: polygon(
+      0 0,
+      100% 0,
+      100% 18%,
+      0 18%,
+      0 32%,
+      100% 32%,
+      100% 48%,
+      0 48%,
+      0 61%,
+      100% 61%,
+      100% 77%,
+      0 77%,
+      0 100%,
+      100% 100%,
+      100% 88%,
+      0 88%
+    );
+    transform: translateX(0);
+  }
+  50% {
+    clip-path: polygon(
+      0 0,
+      100% 0,
+      100% 14%,
+      0 14%,
+      0 29%,
+      100% 29%,
+      100% 44%,
+      0 44%,
+      0 58%,
+      100% 58%,
+      100% 73%,
+      0 73%,
+      0 100%,
+      100% 100%,
+      100% 91%,
+      0 91%
+    );
+    transform: translateX(calc(var(--mail-glitch-shift) * 0.6));
+  }
+  100% {
+    clip-path: polygon(
+      0 0,
+      100% 0,
+      100% 21%,
+      0 21%,
+      0 35%,
+      100% 35%,
+      100% 51%,
+      0 51%,
+      0 64%,
+      100% 64%,
+      100% 80%,
+      0 80%,
+      0 100%,
+      100% 100%,
+      100% 86%,
+      0 86%
+    );
+    transform: translateX(calc(var(--mail-glitch-shift) * -0.4));
+  }
+}
+
+.duo-mail::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 3;
+  box-shadow:
+    inset 0 0 0 1px rgba(180, 245, 255, 0.35),
+    inset 0 0 24px rgba(120, 230, 255, 0.1);
+}
+
+.duo-mail::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 3;
+  background: linear-gradient(
+    125deg,
+    rgba(200, 250, 255, 0.2) 0%,
+    transparent 28%,
+    transparent 72%,
+    rgba(120, 220, 255, 0.08) 100%
+  );
+  mix-blend-mode: screen;
+  opacity: 0.85;
+}
+
+.duo-mail.is-visible {
+  opacity: 1;
+  transform: scale(1);
+  animation: duo-mail-emit 2.8s ease-in-out infinite;
+}
+
+@keyframes duo-mail-emit {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(200, 250, 255, 0.2),
+      0 0 18px var(--duo-mail-emit-soft),
+      0 0 42px rgba(80, 200, 255, 0.32),
+      0 0 72px rgba(60, 180, 255, 0.16),
+      0 22px 48px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 rgba(230, 255, 255, 0.55),
+      inset 0 0 28px rgba(140, 230, 255, 0.12);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(210, 255, 255, 0.35),
+      0 0 26px var(--duo-mail-emit),
+      0 0 56px rgba(90, 215, 255, 0.42),
+      0 0 90px rgba(70, 190, 255, 0.24),
+      0 22px 48px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 rgba(240, 255, 255, 0.65),
+      inset 0 0 36px rgba(150, 235, 255, 0.18);
+  }
+}
+
+.duo-mail.is-dragging {
+  transition: none;
+  user-select: none;
+  animation: none;
+}
+
+/* Entrance: JS drives layout + opacity via hologram pulse (no CSS slide). */
+.duo-mail.is-entering {
+  transition: none;
+  animation: none;
+  visibility: visible;
+}
+
+.duo-mail.is-emerging {
+  transition:
+    left 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    top 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    width 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    height 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.duo-mail__chrome {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: linear-gradient(
+    180deg,
+    rgba(200, 242, 255, 0.55) 0%,
+    rgba(220, 238, 246, 0.75) 100%
+  );
+  border-bottom: 1px solid rgba(100, 200, 230, 0.28);
+  box-shadow: inset 0 1px 0 rgba(230, 255, 255, 0.4);
+  flex-shrink: 0;
+  cursor: grab;
+  touch-action: none;
+}
+
+.duo-mail.is-dragging .duo-mail__chrome {
+  cursor: grabbing;
+}
+
+.duo-mail__traffic {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.duo-mail__traffic-btn {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+  box-shadow: inset 0 -1px 1px rgba(0, 0, 0, 0.18);
+}
+
+.duo-mail__traffic-btn:nth-child(1) {
+  background: #ff5f57;
+}
+
+.duo-mail__traffic-btn:nth-child(2) {
+  background: #febc2e;
+}
+
+.duo-mail__traffic-btn:nth-child(3) {
+  background: #28c840;
+}
+
+.duo-mail__traffic-btn:hover {
+  filter: brightness(1.08);
+}
+
+.duo-mail__traffic-btn:active {
+  filter: brightness(0.92);
+}
+
+.duo-mail__title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: center;
+  color: #3a3a3c;
+  pointer-events: none;
+  padding-right: 42px; /* optical center opposite traffic lights */
+}
+
+.duo-mail__body {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  /* iPad Mail landscape ≈ 30% list / 70% preview (`DUO_MAIL_LIST_FRAC`). */
+  grid-template-columns:
+    minmax(0, var(--duo-mail-list, 0.32fr))
+    minmax(0, var(--duo-mail-preview, 0.68fr));
+  min-height: 0;
+  flex: 1;
+}
+
+.duo-mail__list {
+  overflow: auto;
+  border-right: 1px solid rgba(80, 180, 210, 0.18);
+  background: rgba(255, 255, 255, 0.55);
+  overscroll-behavior: contain;
+}
+
+.duo-mail__row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  padding: 12px 12px 12px 14px;
+  border: none;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+.duo-mail__row:hover {
+  background: rgba(0, 160, 220, 0.08);
+}
+
+.duo-mail__row.is-active {
+  background: rgba(80, 200, 240, 0.16);
+}
+
+.duo-mail__row-from {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1c1c1e;
+  line-height: 1.3;
+}
+
+.duo-mail__row-subject {
+  font-size: 16px;
+  font-weight: 500;
+  color: #3a3a3c;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.35;
+}
+
+.duo-mail__row-snippet {
+  font-size: 14px;
+  color: #636366;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.4;
+}
+
+.duo-mail__preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 16px;
+  overflow: auto;
+  background: rgba(240, 250, 255, 0.45);
+  overscroll-behavior: contain;
+  min-height: 0;
+}
+
+.duo-mail__preview-empty {
+  margin: auto;
+  font-size: 16px;
+  color: #636366;
+}
+
+.duo-mail__preview-from {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.duo-mail__preview-subject {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.duo-mail__preview-cat {
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #636366;
+  line-height: 1.35;
+}
+
+.duo-mail__hero {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #1a1a22, #3a3a48);
+}
+
+.duo-mail__hero.is-missing,
+.duo-mail__hero--placeholder {
+  display: block;
+  background: linear-gradient(135deg, #1c2333 0%, #3d4a6b 50%, #1a1a22 100%);
+}
+
+.duo-mail__hero--placeholder[data-slug="sad-trials"] {
+  background: linear-gradient(135deg, #0d3b4c, #1a8a9a);
+}
+
+.duo-mail__hero--placeholder[data-slug="312-truck"] {
+  background: linear-gradient(135deg, #3a1a0a, #c45a1a);
+}
+
+.duo-mail__hero--placeholder[data-slug="vedara-ventures"] {
+  background: linear-gradient(135deg, #1a1428, #6b4a9a);
+}
+
+.duo-mail__hero--placeholder[data-slug="nar-app"] {
+  background: linear-gradient(135deg, #0a2818, #2a8a5a);
+}
+
+.duo-mail__hero--placeholder[data-slug="schedually"] {
+  background: linear-gradient(135deg, #1a2030, #3a6aaa);
+}
+
+.duo-mail__preview-summary {
+  font-size: 16px;
+  line-height: 1.5;
+  color: #3a3a3c;
+}
+
+.duo-mail__actions {
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.duo-mail__open-cs {
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #007aff;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.15s ease;
+  min-height: 44px;
+}
+
+.duo-mail__open-cs:hover {
+  background: #0066d6;
+}
+
+.duo-mail__open-cs:active {
+  transform: scale(0.98);
+}
+
+/* Resize handles */
+.duo-mail__resize {
+  position: absolute;
+  z-index: 2;
+  touch-action: none;
+}
+
+.duo-mail__resize--n {
+  top: 0;
+  left: 10px;
+  right: 10px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.duo-mail__resize--s {
+  bottom: 0;
+  left: 10px;
+  right: 10px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.duo-mail__resize--e {
+  top: 10px;
+  right: 0;
+  bottom: 10px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.duo-mail__resize--w {
+  top: 10px;
+  left: 0;
+  bottom: 10px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.duo-mail__resize--ne {
+  top: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
+}
+
+.duo-mail__resize--nw {
+  top: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+}
+
+.duo-mail__resize--se {
+  bottom: 0;
+  right: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+}
+
+.duo-mail__resize--sw {
+  bottom: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
+}
+
+@media (max-width: 560px) {
+  .duo-mail__body {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 0.38fr) minmax(0, 0.62fr);
+  }
+
+  .duo-mail__list {
+    border-right: none;
+    border-bottom: 1px solid rgba(80, 180, 210, 0.14);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .duo-mail,
+  .duo-mail__backdrop,
+  .duo-mail__beams,
+  .duo-mail__pulses {
+    transition: none;
+  }
+
+  .duo-mail.is-visible {
+    animation: none;
+  }
+
+  .duo-mail.is-edge-glitch .duo-mail__edge-glitch {
+    animation: none;
+  }
+}

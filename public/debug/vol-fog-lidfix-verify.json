@@ -1,0 +1,236 @@
+{
+  "gate": "GATE4-slab-edge-verify",
+  "metric": "all-rows max ±8 contrast (open side cols)",
+  "noteStudioHorizon": "Quarter-density studio horizon (shell/floor seam) is a separate issue — do not chase here.",
+  "restFull": {
+    "maxContrast": 4.6,
+    "maxContrastY": 372,
+    "above": 17.6,
+    "below": 13,
+    "upperMean": 10.7,
+    "lowerMean": 13.4
+  },
+  "restQuarter": {
+    "maxContrast": 4.5,
+    "maxContrastY": 660,
+    "above": 19.2,
+    "below": 14.7,
+    "upperMean": 10.6,
+    "lowerMean": 10.5
+  },
+  "contrastRatio": 0.9782608695652175,
+  "maxContrastYPinned": false,
+  "hardEdgeSurvives": false,
+  "pitch": [
+    {
+      "pose": "rest",
+      "maxContrast": 4.6,
+      "maxContrastY": 372
+    },
+    {
+      "pose": "pitch-down",
+      "maxContrast": 17.6,
+      "maxContrastY": 603
+    },
+    {
+      "pose": "pitch-up",
+      "maxContrast": 4.6,
+      "maxContrastY": 496
+    }
+  ],
+  "fogConfigFromUniforms": {
+    "density": 0.4,
+    "expK": 1.55,
+    "fogMaxY": 12.8,
+    "fogMinY": -0.1,
+    "floorFade": 3.6,
+    "startY": -1,
+    "endY": 0,
+    "densSoftFloor": true,
+    "clipSkipsAllWhenExp": true
+  },
+  "pass": true,
+  "note": "PASS — no density-locked hard slab edge on all-rows metric",
+  "captures": [
+    {
+      "density": 0.4,
+      "tag": "full",
+      "pose": "rest",
+      "applied": {
+        "height": 2.85,
+        "lookAtY": 2.35,
+        "pitchDeg": -2.8165155242159146
+      },
+      "uniforms": {
+        "density": 0.4,
+        "expK": 1.55,
+        "fogMaxY": 12.8,
+        "fogMinY": -0.1,
+        "floorFade": 3.6,
+        "startY": -1,
+        "endY": 0,
+        "densSoftFloor": true,
+        "clipSkipsAllWhenExp": true
+      },
+      "file": "vol-fog-lidfix-full-rest.png",
+      "edge": {
+        "maxContrast": 4.6,
+        "maxContrastY": 372,
+        "above": 17.6,
+        "below": 13,
+        "upperMean": 10.7,
+        "lowerMean": 13.4
+      }
+    },
+    {
+      "density": 0.4,
+      "tag": "full",
+      "pose": "pitch-down",
+      "applied": {
+        "height": 2.85,
+        "lookAtY": 1.1500000000000001,
+        "pitchDeg": -9.495961508524227
+      },
+      "uniforms": {
+        "density": 0.4,
+        "expK": 1.55,
+        "fogMaxY": 12.8,
+        "fogMinY": -0.1,
+        "floorFade": 3.6,
+        "startY": -1,
+        "endY": 0,
+        "densSoftFloor": true,
+        "clipSkipsAllWhenExp": true
+      },
+      "file": "vol-fog-lidfix-full-pitch-down.png",
+      "edge": {
+        "maxContrast": 17.6,
+        "maxContrastY": 603,
+        "above": 10.2,
+        "below": 27.9,
+        "upperMean": 11.5,
+        "lowerMean": 13.7
+      }
+    },
+    {
+      "density": 0.4,
+      "tag": "full",
+      "pose": "pitch-up",
+      "applied": {
+        "height": 2.85,
+        "lookAtY": 3.55,
+        "pitchDeg": 3.9400783565724447
+      },
+      "uniforms": {
+        "density": 0.4,
+        "expK": 1.55,
+        "fogMaxY": 12.8,
+        "fogMinY": -0.1,
+        "floorFade": 3.6,
+        "startY": -1,
+        "endY": 0,
+        "densSoftFloor": true,
+        "clipSkipsAllWhenExp": true
+      },
+      "file": "vol-fog-lidfix-full-pitch-up.png",
+      "edge": {
+        "maxContrast": 4.6,
+        "maxContrastY": 496,
+        "above": 17.6,
+        "below": 13,
+        "upperMean": 12.4,
+        "lowerMean": 10.3
+      }
+    },
+    {
+      "density": 0.1,
+      "tag": "quarter",
+      "pose": "rest",
+      "applied": {
+        "height": 2.85,
+        "lookAtY": 2.35,
+        "pitchDeg": -2.8165155242159146
+      },
+      "uniforms": {
+        "density": 0.1,
+        "expK": 1.55,
+        "fogMaxY": 12.8,
+        "fogMinY": -0.1,
+        "floorFade": 3.6,
+        "startY": -1,
+        "endY": 0,
+        "densSoftFloor": true,
+        "clipSkipsAllWhenExp": true
+      },
+      "file": "vol-fog-lidfix-quarter-rest.png",
+      "edge": {
+        "maxContrast": 4.5,
+        "maxContrastY": 660,
+        "above": 19.2,
+        "below": 14.7,
+        "upperMean": 10.6,
+        "lowerMean": 10.5
+      }
+    },
+    {
+      "density": 0.1,
+      "tag": "quarter",
+      "pose": "pitch-down",
+      "applied": {
+        "height": 2.85,
+        "lookAtY": 1.1500000000000001,
+        "pitchDeg": -9.495961508524227
+      },
+      "uniforms": {
+        "density": 0.1,
+        "expK": 1.55,
+        "fogMaxY": 12.8,
+        "fogMinY": -0.1,
+        "floorFade": 3.6,
+        "startY": -1,
+        "endY": 0,
+        "densSoftFloor": true,
+        "clipSkipsAllWhenExp": true
+      },
+      "file": "vol-fog-lidfix-quarter-pitch-down.png",
+      "edge": {
+        "maxContrast": 19,
+        "maxContrastY": 605,
+        "above": 11.8,
+        "below": 30.8,
+        "upperMean": 10.7,
+        "lowerMean": 13.4
+      }
+    },
+    {
+      "density": 0.1,
+      "tag": "quarter",
+      "pose": "pitch-up",
+      "applied": {
+        "height": 2.85,
+        "lookAtY": 3.55,
+        "pitchDeg": 3.9400783565724447
+      },
+      "uniforms": {
+        "density": 0.1,
+        "expK": 1.55,
+        "fogMaxY": 12.8,
+        "fogMinY": -0.1,
+        "floorFade": 3.6,
+        "startY": -1,
+        "endY": 0,
+        "densSoftFloor": true,
+        "clipSkipsAllWhenExp": true
+      },
+      "file": "vol-fog-lidfix-quarter-pitch-up.png",
+      "edge": {
+        "maxContrast": 4.5,
+        "maxContrastY": 496,
+        "above": 15.8,
+        "below": 11.3,
+        "upperMean": 12.3,
+        "lowerMean": 8.2
+      }
+    }
+  ]
+}

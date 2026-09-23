@@ -1,0 +1,62 @@
+{
+  "ok": true,
+  "shoulderUv": {
+    "u": 0.400390625,
+    "v": 0.478515625,
+    "d": 0.012352647259831429,
+    "bbox": {
+      "minU": 0.365234375,
+      "maxU": 0.623046875,
+      "minV": 0.146484375,
+      "maxV": 0.755859375
+    }
+  },
+  "debug": {
+    "rgbSplitPx": 14,
+    "injectAmount": 0.75,
+    "tearAmpPx": 42,
+    "injectHue": {
+      "r": 0.14412847084818123,
+      "g": 0.9301108583738498,
+      "b": 0.12743768042608497
+    },
+    "bonusCount": 0,
+    "dCursor": 0.016105882823467255,
+    "cursorGate": 0.7699159596647536
+  },
+  "shaderCheck": {
+    "hasRgbSplitPx": true,
+    "hasInject": true,
+    "hasTearAmpPx": true,
+    "noBleedTouch": true,
+    "params": {
+      "armOuter": 0.07,
+      "armRamp": 1,
+      "spanAlong": 0.028,
+      "spanOut": 0.016,
+      "spanIn": 0.016,
+      "intensity": 0.2,
+      "rgbSplitPx": 14,
+      "injectAmount": 0.75,
+      "tearAmpPx": 42,
+      "bonusCount": 0,
+      "bonusIntensity": 0.75,
+      "bonusRhythm": 16
+    }
+  },
+  "frameMs": {
+    "bonus0": {
+      "bonusCount": 0,
+      "medianMs": 36.5,
+      "meanMs": 43.44
+    },
+    "bonus2": {
+      "bonusCount": 2,
+      "medianMs": 36.8,
+      "meanMs": 45.16
+    },
+    "deltaMs": 0.3
+  },
+  "png": "public/debug/edge-glitch-loud-shoulder.png",
+  "note": "Expect LOUD chromatic fringe + neon/white emissive flashes on dark bust shoulder."
+}

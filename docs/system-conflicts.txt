@@ -1,0 +1,284 @@
+Portfolio 2.0 — System Conflict Report
+======================================
+Updated 13 Sep 2026 · read-only synthesis · no code changes in this pass.
+
+Sources: code-explorer inventory, code-architect ownership map, code-reviewer
+residual risks (incl. Option 2 neon shell); live deltas through 13 Sep
+(neon-only POV spot probe, Bust lawn / apple knobs).
+
+Canvas twin (optional): system-conflicts.canvas.tsx under Cursor project canvases/
+
+
+LIVE DELTA (13 Sep)
+-------------------
+Committed **single-source neon** (no fill/key restore): `SPOT_INTENSITY` **0**,
+`AMBIENT_INTENSITY` / `HEMI_INTENSITY` / `STAGE_ENV_INTENSITY` **0**,
+neon peak **28** / distance **6.5** / decay **2.6**. Fog land fade is
+**`uCompositeOpacity`** at **`introComplete`** (density full); bloom held **0**
+across the ramp then soft-returns (~180 ms). Near-tube density boost **×1.65**.
+`STAGE_BG` **`#070709`**. PointLight hue slow-lerps gradient (rate-capped).
+Bust lawn: clearance **1.75 m** + patchy rim. Do **not** restore spot as fill.
+
+
+VERDICT
+-------
+The stage works via careful temporal gating and tribal landmines, not sealed
+ownership. Highest-risk fights: shared settle/index clocks, content visibility
+co-ownership, and one bloom luminance budget shared by neon, fog, and screens.
+Option 2 removed tubes from that budget — Sidekick/CRT/fog cores did not.
+
+With POV spot at **0**, C07’s “spot flattens canopy” path is **latent**; C12
+(IBL / neon / MeshBasic fills) is the **active** key-light conflict. Restoring
+spot **118** without the leaf `onBeforeCompile` patches reopens C07 immediately.
+
+Counts: 6× P1 · 8× P2 · 0× P0 ship-break found
+(C07 severity temporarily muted while spot intensity is 0)
+
+
+RANKED CONFLICTS
+----------------
+
+C01  P1  Aerial-hold settle lights neon; drop kills it
+     Systems: CameraRig.isSettled × allowNeon × contentRoot
+     Symptom: Stop-0 flash in air → blackout on drop → pop on land
+     Files:   StageExperience._tickNeon, CameraRig.armIntroDescent,
+              NeonSystem._syncContentLit
+
+C02  P1  isZoomed / focus flags flip before springs land
+     Systems: CameraRig.zoom × focusBlend × CRT boot / Sidekick slide
+     Symptom: UI unfocus or boot while camera still dollying
+     Files:   CameraRig.advance/zoom*, StageExperience._syncCameraRigZoom
+
+C03  P1  Hop-start index vs live theta framing
+     Systems: rig.state.index × theta spring × NeonSystem × HUD
+     Symptom: Empty mid-hop; STAGE ° disagrees with caption until land
+     Files:   CameraRig.advance, NeonSystem.update, _getDisplayStageDegrees
+
+C05  P1  One bloom budget for tubes, screens, LEDs, fog cores
+     Systems: NEON_BLOOM × Option 2 shell × CRT/Sidekick × fog fill
+     Symptom: Retune bloom for one look blows or kills the others
+     Files:   PostPass, constants.NEON_BLOOM, makeNeonTube,
+              SidekickScrollballLed, fogConfig
+
+C08  P1  Triple visibility: GPU hold × opacity reveal × contentRoot
+     Systems: stageModelReveal × NeonSystem × vignette mesh.visible
+     Symptom: Invisible “loaded” props; contact pads vanish with dark stops
+     Files:   stageModelReveal, NeonSystem._syncContentLit, _tickModelReveal
+
+C06  P1  Fog heavy-effects gate vs DEV setVolumetricEnabled
+     Systems: _tickVolumetricFog × intro heavy timer × FogTuner
+     Symptom: Fog won’t stay on in console; pops ~2s after integrate
+     Files:   StageExperience._tickVolumetricFog, FogTuner
+
+C04  P2  Arrive latch / flicker / content gate = three clocks
+     Systems: arriveLevel × level × _arriveLatchedIndex × hysteresis
+     Symptom: Edge chatter if mistuned; reduced-motion skips strike
+     Files:   NeonSystem.update, NEON_ARRIVE_RAD / NEON_FLICKER_*
+
+C07  P2  Layer policy: spot L0 vs neon L0+2 vs MeshBasic shell
+     Systems: POV spot × neon PointLights × FogDepthCapture
+     LIVE:    `SPOT_INTENSITY` **0** — spot path dormant; neon is sole key.
+              Leaf spot×0 / indirect×0 patches in BustVignette still required
+              the moment intensity returns to **118**.
+     Symptom: (when spot on) Grey fog if spot hits L2; canopy “globally lit”
+              if leaf patches missing; (spot off) props live or die with neon
+     Files:   _mountPovSpotlight, NeonSystem, FogDepthCapture, BustVignette
+
+C09  P2  Orphan intro-track / parallax knobs vs live CameraRig
+     Systems: stageCameraTrack × PARALLAX_CAM_* × createParallax 0.245
+     Symptom: Agents retune dead knobs; expected handoff never runs
+     Files:   constants, stageParallaxMotion, CameraRig, parallax.js
+
+C10  P2  Scroll settle gate vs click zoom (no settle)
+     Systems: scrollAdvance introComplete×settled × vignetteClick
+     Symptom: Zoom available earlier than scroll; mid-hop zoom redirect
+     Files:   StageExperience._initCameraRig, vignetteClick
+
+C11  P2  Scroll-capture blend hysteresis vs stage wheel
+     Systems: captureBlend × SCROLL_CAPTURE_WHEEL_ON/OFF × Sidekick
+     Symptom: Dead wheel near CRT, or ring scroll eaten if blend regresses
+     Files:   _onWheel, stageAnimationPolicy
+
+C12  P2  IBL / envMapIntensity / MeshBasic competing fills  ← ACTIVE KEY
+     Systems: STAGE_ENV_INTENSITY × per-mat env × unlit studio × neon only
+     LIVE:    With spot **0**, RoomEnvironment **0.22** + focus neon **10** are
+              the only keys. Raising global env washes MeshStandard; cutting
+              neon leaves silhouettes on STAGE_BG. Spot contact pad is also **0**
+              — only neon contact pad remains.
+     Symptom: Silhouettes when neon off; wash if global env raised
+     Files:   LiveStageEnvironment, BustVignette, makeNeonTube,
+              VignetteContactShadows, constants (SPOT_INTENSITY / STAGE_ENV_*)
+
+C13  P2  reducedMotion short-circuits systems differently
+     Systems: bloom / fog / neon / parallax / cursor / intro
+     Symptom: a11y mode looks “broken” vs full path (no bloom/strike)
+     Files:   StageExperience, NeonSystem, PostPass options
+
+C14  P2  __stage mutators desync constants / live ticks
+     Systems: setNeon × setVolumetric* × FogTuner
+     Symptom: Works in session, wrong after reload; floor gone after isolate
+     Files:   StageExperience probes, NeonSystem.setNeon
+
+
+ARCHITECTURAL RISK RANKING
+--------------------------
+1. Neon content gate ↔ intro reveal ↔ vignette visibility
+   Why: Three writers on “can you see this mesh”
+
+2. Bloom threshold ↔ fog ↔ screens/LEDs ↔ (legacy) tubes
+   Why: One luminance treaty; Option 2 only moved tubes out
+
+3. isSettled / introComplete / allowNeon / heavy-effects timers
+   Why: Temporal races: hop theft, land hitch, fog/neon out of phase
+
+4. current ↔ rig.state.index ↔ hardcoded stop indices
+   Why: Wrong stop boot/capture; fifth stop is a rewrite hazard
+
+5. Neon-only key (spot **0**) ↔ IBL fill ↔ FogDepthCapture
+   Why: While spot is off, silhouettes / wash / soft-contact holes track neon
+   + env, not L0 spot policy. Restoring **118** returns the old L0↔L2 fight.
+
+
+HANDOVER MAP — WHO OWNS WHAT
+----------------------------
+Settle
+  Owner:   CameraRig.state.isSettled
+  Spoiler: Scroll also needs introComplete; aerial hold counts as settled
+
+Stop index
+  Owner:   CameraRig.state.index (hop start)
+  Spoiler: StageExperience.current mirror; hardcoded vignettes[1|2|3]
+
+Theta / framing
+  Owner:   CameraRig.state.theta + parallax offset
+  Spoiler: Neon arrive vs entry θ; HUD degrees use live θ
+
+Neon glow level
+  Owner:   NeonSystem level (arrive × flicker × allowNeon)
+  Spoiler: __stage.setNeon peaks; reducedMotion skips flicker
+
+Content visibility
+  Owner:   NeonSystem contentRoot (arriveLevel + hysteresis)
+  Spoiler: GPU hold L3, reveal opacity, placeholder .visible, Sidekick meshes
+
+Bloom
+  Owner:   PostPass / NEON_BLOOM
+  Spoiler: Any toneMapped:false emitter above threshold; fog cores
+
+Fog density
+  Owner:   _tickVolumetricFog + fogConfig
+  Spoiler: Heavy-effects gate; DEV enable overwritten; neon lights feed in-scatter
+
+Focus / zoom
+  Owner:   CameraRig.isZoomed + springs
+  Spoiler: Legacy focusBlend snapped for Desktop/Sidekick side effects
+
+Vignette key light (LIVE)
+  Owner:   Neon PointLight (focus stop) + STAGE_ENV_INTENSITY **0.22**
+  Spoiler: `SPOT_INTENSITY` **0** — POV SpotLight present but dark; do not
+           “fix” dark props by raising env or enabling spot L2
+
+
+OPPOSING CONDITIONALS
+---------------------
+A: Neon content — allowNeon + arrive
+B: Intro drop — !allowNeon
+
+A: Aerial hold — isSettled true
+B: Scroll — introComplete && isSettled
+
+A: Flicker — level → 0
+B: Content gate — arriveLevel stays up
+
+A: Option 2 tubes — under bloom threshold
+B: CRT / Sidekick LEDs — bright enough to extract
+
+A: setVolumetricEnabled(true) — fog on
+B: _tickVolumetricFog pre-heavy — fog off every frame
+
+A: Scroll hop — isSettled
+B: Click zoom — no settle gate
+
+A: Caption / neon — destination index
+B: STAGE ° readout — live theta
+
+A: POV spot — intensity **0** (layers {0} still configured)
+B: Neon lights — layers {0, 2}; sole live key while spot is off
+
+A: Spot contact pad — opacity **0**
+B: Neon contact pad — opacity **0.18** (only pad that still reads)
+
+
+RESIDUAL RISK AFTER OPTION 2 NEON SHELL
+---------------------------------------
+Tubes (OK)
+  Core ≤0.68, shell peak-norm ×0.92 — under bloom threshold 1.0.
+  Glow is Additive shell, not bloom extract.
+
+Shared bloom (OPEN)
+  Sidekick LED peaks 5.2/8.5, PC emissives 2.4/2.8, fog cores keep excess
+  over fill 0.88 — still compete for NEON_BLOOM.
+
+Shell + fog (STACK)
+  Beauty Additive shell then volumetric then bloom: composite near an active
+  tube can still trip threshold locally.
+
+Neon-only key (PROBE)
+  Spot **0** removes vignette key + spot shadows. Looks live on neon alone;
+  Archaeology/T-rex/bust still need IBL **0.22** or they silhouette. Flipping spot
+  back to **118** without re-checking leaf patches + contact-pad opacity
+  reopens C07/C12 overnight.
+
+
+DEAD PATHS AGENTS MAY REVIVE INTO CONFLICT
+------------------------------------------
+- NEON_MAX_EMISSIVE Standard branch — re-blooms tubes if revived
+- neonProximity + NEON_LIGHT_FALLOFF — re-lights all stops vs content hide
+- Deleted SpotlightBloomPass / fog atlas ring — doubles glow if restored
+- Raising NEON_SHELL_INTENSITY / NEON_CORE_MAX above 1.0 undoes Option 2
+- Enabling POV spot on layer 2 → grey fog wash
+- Restoring `SPOT_INTENSITY` **118** without Bust leaf spot×0 patches →
+  canopy “globally lit” (C07 / landmine §21)
+- Raising `STAGE_ENV_INTENSITY` toward 1.0 while spot is off → white wash
+- CRT cube applyToScene: true → washes MeshStandard stage
+- CameraRig constructor scrollAdvance overwritten by Stage — wire the wrong one
+- Lawn fade band back to **0.09→0.96** → bald rim patches (Bust stop look)
+
+
+CLEAN / INTENTIONAL COUPLINGS
+-----------------------------
+- No dual runtime load from masters/ — vignettes use /assets/models only
+- Single beauty composer: Render → volumetric → bloom → grain(0)
+- Camera pose owned by CameraRig; vignettes call zoom/advance only
+- Parallax offset after pose — does not feed springs
+- Focus-only neon (proximity helpers are leftover API)
+- Fog depth packing contract coherent (BasicDepthPacking + undo)
+- Scroll mid-travel does not queue hops
+- Option 2: core/shell under threshold; content on arrive not flicker
+- Spot intensity gated: castShadow / configureSpotShadow only when > 0
+
+
+CONCEPTUAL SEAMS (LATER — NOT THIS PASS)
+----------------------------------------
+Publish StagePhase clock · one ActiveStop authority · split NeonLighting vs
+NeonContentGate · named LuminanceBudget roles · LayerRegistry · StopDescriptor
+registry · quarantine legacy exports in constants.js · decide spot-on vs
+neon-only as a named lighting mode (not a silent constant flip).
+
+
+ESSENTIAL FILES
+---------------
+src/scene/StageExperience.js
+src/scene/camera/CameraRig.js
+src/scene/camera/scrollAdvance.js
+src/scene/neon/NeonSystem.js
+src/scene/stage/constants.js
+src/scene/stage/PostPass.js
+src/scene/neon/VolumetricFogPass.js
+src/fog/fogConfig.js
+src/scene/stage/stageModelReveal.js
+src/scene/stage/stageAnimationPolicy.js
+src/scene/neon/makeNeonTube.js
+src/scene/vignettes/BustVignette.js
+src/scene/stage/VignetteContactShadows.js
+src/scene/stage/LiveStageEnvironment.js

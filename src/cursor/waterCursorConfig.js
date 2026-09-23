@@ -20,7 +20,7 @@ export {
 } from "./waterCursorRimConfig.js";
 
 /** Stable release — surface-tension rim couple (blow / neck / recoil). */
-export const WATER_CURSOR_VERSION = "1.3.0";
+export const WATER_CURSOR_VERSION = "1.3.1";
 
 export const DEFAULT_WATER_CURSOR_CONFIG = {
   /** Visible blob diameter in CSS pixels (~24–32). */
@@ -68,7 +68,7 @@ export const DEFAULT_WATER_CURSOR_CONFIG = {
 
   /**
    * Edge-glitch rim field — surface tension × edge (blob response only).
-   * Driven by EdgeGlitchSystem.sampleRimField (signed d) + rim response curves.
+   * GPU: WaterCursor samples EdgeSilhouetteSdf.getTexture() (no readPixels).
    */
   /** @deprecated Prefer recoilPushPx — kept for sanitize / older callers. */
   rimPushPx: 22,

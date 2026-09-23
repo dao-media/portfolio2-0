@@ -155,7 +155,7 @@ try {
     console.log("✓ canvas present after load gate");
   }
 
-  // Full hop cycle: Bust → Desktop → Sidekick → Travel → Bust.
+  // Full hop cycle: Bust → Desktop → Sidekick → Archaeology → Bust.
   for (let i = 0; i < 4; i += 1) {
     await hop(page);
   }
@@ -165,13 +165,13 @@ try {
       const stage = window.__stage;
       const desktop = stage?.vignettes?.[1]?.instance;
       const sidekick = stage?.vignettes?.[2]?.instance;
-      const travel = stage?.vignettes?.[3]?.instance;
+      const archaeology = stage?.vignettes?.[3]?.instance;
       const buttons = sidekick?.sidekickRoot?.getObjectByName?.("Buttons");
       return Boolean(
         desktop?.pcRoot &&
           desktop?.screenMesh &&
           buttons &&
-          travel?.packRoot
+          archaeology?.shelfRoot
       );
     },
     { timeout: BOOT_MS }
@@ -181,14 +181,23 @@ try {
     const stage = window.__stage;
     const desktop = stage.vignettes[1].instance;
     const sidekick = stage.vignettes[2].instance;
-    const travel = stage.vignettes[3].instance;
+    const archaeology = stage.vignettes[3].instance;
     const buttons = sidekick.sidekickRoot.getObjectByName("Buttons");
     return {
       pcRoot: Boolean(desktop.pcRoot),
       screenMesh: Boolean(desktop.screenMesh),
       buttons: Boolean(buttons),
-      packRoot: Boolean(travel.packRoot),
-      rexRoot: Boolean(travel.rexRoot)
+      shelfRoot: Boolean(archaeology.shelfRoot),
+      venusRoot: Boolean(archaeology.venusRoot),
+      lucyRoot: Boolean(archaeology.lucyRoot),
+      trojanHorseRoot: Boolean(archaeology.trojanHorseRoot),
+      olmecHeadRoot: Boolean(archaeology.olmecHeadRoot),
+      oliveBoatRoot: Boolean(archaeology.oliveBoatRoot),
+      cuneiformRoot: Boolean(archaeology.cuneiformRoot),
+      ishtarGateRoot: Boolean(archaeology.ishtarGateRoot),
+      ptolemyRoot: Boolean(archaeology.ptolemyRoot),
+      divjeBabeFluteRoot: Boolean(archaeology.divjeBabeFluteRoot),
+      neanderthalRoot: Boolean(archaeology.neanderthalRoot)
     };
   });
 
@@ -196,8 +205,28 @@ try {
   else console.log("✓ Desktop CRT present");
   if (!meshes.buttons) fail("Sidekick Buttons mesh missing after hop cycle");
   else console.log("✓ Sidekick Buttons present");
-  if (!meshes.packRoot) fail("Travel pack missing after hop cycle");
-  else console.log("✓ Travel pack present");
+  if (!meshes.shelfRoot) fail("Archaeology shelving unit missing after hop cycle");
+  else console.log("✓ Archaeology shelving present");
+  if (!meshes.venusRoot) fail("Archaeology Venus missing after hop cycle");
+  else console.log("✓ Archaeology Venus present");
+  if (!meshes.lucyRoot) fail("Archaeology Lucy missing after hop cycle");
+  else console.log("✓ Archaeology Lucy present");
+  if (!meshes.trojanHorseRoot) fail("Archaeology Trojan Horse missing after hop cycle");
+  else console.log("✓ Archaeology Trojan Horse present");
+  if (!meshes.olmecHeadRoot) fail("Archaeology Olmec Head missing after hop cycle");
+  else console.log("✓ Archaeology Olmec Head present");
+  if (!meshes.oliveBoatRoot) fail("Archaeology Olive Wood Boat missing after hop cycle");
+  else console.log("✓ Archaeology Olive Wood Boat present");
+  if (!meshes.cuneiformRoot) fail("Archaeology Cuneiform Tablet missing after hop cycle");
+  else console.log("✓ Archaeology Cuneiform Tablet present");
+  if (!meshes.ishtarGateRoot) fail("Archaeology Ishtar Gate missing after hop cycle");
+  else console.log("✓ Archaeology Ishtar Gate present");
+  if (!meshes.ptolemyRoot) fail("Archaeology Ptolemy bust missing after hop cycle");
+  else console.log("✓ Archaeology Ptolemy present");
+  if (!meshes.divjeBabeFluteRoot) fail("Archaeology Divje Babe Flute missing after hop cycle");
+  else console.log("✓ Archaeology Divje Babe Flute present");
+  if (!meshes.neanderthalRoot) fail("Archaeology Neanderthal missing after hop cycle");
+  else console.log("✓ Archaeology Neanderthal present");
 
   if (pageErrors.length) {
     fail(`page errors:\n  ${pageErrors.join("\n  ")}`);
@@ -245,7 +274,7 @@ try {
       const stage = window.__stage;
       const desktop = stage?.vignettes?.[1]?.instance;
       const sidekick = stage?.vignettes?.[2]?.instance;
-      const travel = stage?.vignettes?.[3]?.instance;
+      const archaeology = stage?.vignettes?.[3]?.instance;
       return {
         locked: stage?.locked,
         introComplete: stage?.introComplete,
@@ -253,14 +282,17 @@ try {
         pcRoot: Boolean(desktop?.pcRoot),
         screenMesh: Boolean(desktop?.screenMesh),
         sidekickRoot: Boolean(sidekick?.sidekickRoot),
-        packRoot: Boolean(travel?.packRoot),
-        rexRoot: Boolean(travel?.rexRoot),
+        shelfRoot: Boolean(archaeology?.shelfRoot),
         sidekickSettled: sidekick?._modelLoadSettled,
         sidekickPending: Boolean(sidekick?._pendingScene),
         sidekickError: sidekick?._modelLoadError ?? null,
-        travelSettled: travel?._modelLoadSettled,
-        travelPending: Boolean(travel?._pendingPack || travel?._pendingRex),
-        travelError: travel?._modelLoadError ?? null
+        archaeologySettled: archaeology?._modelLoadSettled,
+        archaeologyPending: Boolean(
+          archaeology?._pendingShelf ||
+            archaeology?._pendingVenus ||
+            archaeology?._pendingLucy
+        ),
+        archaeologyError: archaeology?._modelLoadError ?? null
       };
     });
     console.error("stage snap:", JSON.stringify(snap));

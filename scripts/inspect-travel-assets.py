@@ -1,4 +1,4 @@
-"""Inspect travel-pack + T-rex OBJs in Blender. Does not write source files."""
+"""Inspect legacy travel-pack + T-rex (Archaeology stop uses shelf/finds now) OBJs in Blender. Does not write source files."""
 import bpy
 import json
 import math
@@ -100,8 +100,8 @@ report = {
     "pack": inspect_dir(
         "pack",
         PACK_DIR,
-        "Travel pack.obj",
-        "Travel pack.mtl",
+        "Legacy travel pack.obj",
+        "Legacy travel pack.mtl",
         "Travel_Backpack_Standing_01_002.mtl",
     ),
     "rex": inspect_dir(

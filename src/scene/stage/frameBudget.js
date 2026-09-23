@@ -52,7 +52,8 @@ export function createFrameBudget() {
       if (idx < 0) return;
       const open = stack.splice(idx, 1)[0];
       const ms = performance.now() - open.t;
-      spans.push({ name: open.name, ms: Math.round(ms), t: Math.round(open.t) });
+      spans.push({ name: open.name, ms: Math.round(ms * 100) / 100, t: Math.round(open.t) });
+      if (spans.length > 240) spans.splice(0, spans.length - 240);
       tags.push(`${open.name}:${Math.round(ms)}ms`);
     },
 
@@ -79,10 +80,28 @@ export function createFrameBudget() {
         slot.ms += row.dtMs;
         byTag[key] = slot;
       }
+      /** Rolling per-pass averages from start/endSpan (every frame, not only slow). */
+      const passMs = {};
+      for (const span of spans) {
+        const slot = passMs[span.name] ?? { n: 0, totalMs: 0, lastMs: 0 };
+        slot.n += 1;
+        slot.totalMs += span.ms;
+        slot.lastMs = span.ms;
+        passMs[span.name] = slot;
+      }
+      const passes = {};
+      for (const [name, slot] of Object.entries(passMs)) {
+        passes[name] = {
+          n: slot.n,
+          lastMs: slot.lastMs,
+          avgMs: slot.n ? +(slot.totalMs / slot.n).toFixed(2) : 0
+        };
+      }
       return {
         slowCount: slow.length,
         worst: slow.slice().sort((a, b) => b.dtMs - a.dtMs).slice(0, 12),
         spans: spans.slice(-24),
+        passes,
         byTag
       };
     },

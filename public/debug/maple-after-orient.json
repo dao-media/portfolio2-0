@@ -1,0 +1,298 @@
+{
+  "mapleBounds": {
+    "size": [
+      3.2036124126849157,
+      3.08,
+      3.6958943929848687
+    ],
+    "min": [
+      0.34819362739964665,
+      0,
+      16.902052803507566
+    ],
+    "max": [
+      3.5518060400845624,
+      3.08,
+      20.597947196492434
+    ]
+  },
+  "bustBounds": {
+    "size": [
+      2.4885481574812873,
+      4,
+      1.9861226669148557
+    ],
+    "min": [
+      -1.2920446084489796,
+      0,
+      17.007975495514422
+    ],
+    "max": [
+      1.1965035490323075,
+      4,
+      18.994098162429278
+    ]
+  },
+  "mapleMats": [
+    {
+      "tag": "maple",
+      "mesh": "VP_Japanese_Maple_v1_1",
+      "mat": "VP_Jap_Maple_bark_1",
+      "type": "MeshPhysicalMaterial",
+      "hasMap": true,
+      "hasNormal": false,
+      "env": 1,
+      "rough": 0.8999999761581421,
+      "metal": 0,
+      "transmission": 1,
+      "thickness": 0,
+      "transparent": false,
+      "opacity": 1,
+      "emissiveIntensity": 1,
+      "toneMapped": true,
+      "castShadow": false
+    },
+    {
+      "tag": "maple",
+      "mesh": "VP_Japanese_Maple_v1_2",
+      "mat": "VP_Jap_Maple_bark_2",
+      "type": "MeshPhysicalMaterial",
+      "hasMap": true,
+      "hasNormal": false,
+      "env": 1,
+      "rough": 0.8999999761581421,
+      "metal": 0,
+      "transmission": 1,
+      "thickness": 0,
+      "transparent": false,
+      "opacity": 1,
+      "emissiveIntensity": 1,
+      "toneMapped": true,
+      "castShadow": false
+    },
+    {
+      "tag": "maple",
+      "mesh": "VP_Japanese_Maple_v1_3",
+      "mat": "VP_jap_maple_leaf_2",
+      "type": "MeshPhysicalMaterial",
+      "hasMap": true,
+      "hasNormal": false,
+      "env": 1,
+      "rough": 0.8775255084037781,
+      "metal": 0,
+      "transmission": 1,
+      "thickness": 0,
+      "transparent": false,
+      "opacity": 1,
+      "emissiveIntensity": 1,
+      "toneMapped": true,
+      "castShadow": false
+    },
+    {
+      "tag": "maple",
+      "mesh": "VP_Japanese_Maple_v1_4",
+      "mat": "VP_jap_maple_leaf_3",
+      "type": "MeshPhysicalMaterial",
+      "hasMap": true,
+      "hasNormal": false,
+      "env": 1,
+      "rough": 0.8356832265853882,
+      "metal": 0,
+      "transmission": 1,
+      "thickness": 0,
+      "transparent": false,
+      "opacity": 1,
+      "emissiveIntensity": 1,
+      "toneMapped": true,
+      "castShadow": false
+    },
+    {
+      "tag": "maple",
+      "mesh": "VP_Japanese_Maple_v1_5",
+      "mat": "VP_jap_maple_leaf_1",
+      "type": "MeshPhysicalMaterial",
+      "hasMap": true,
+      "hasNormal": false,
+      "env": 1,
+      "rough": 0.8621594905853271,
+      "metal": 0,
+      "transmission": 1,
+      "thickness": 0,
+      "transparent": false,
+      "opacity": 1,
+      "emissiveIntensity": 1,
+      "toneMapped": true,
+      "castShadow": false
+    },
+    {
+      "tag": "maple",
+      "mesh": "VP_pot_earth_round_small",
+      "mat": "VP_pot_v3_earth",
+      "type": "MeshPhysicalMaterial",
+      "hasMap": false,
+      "hasNormal": false,
+      "env": 1,
+      "rough": 0.8999999761581421,
+      "metal": 0,
+      "transmission": 1,
+      "thickness": 0,
+      "transparent": false,
+      "opacity": 1,
+      "emissiveIntensity": 1,
+      "toneMapped": true,
+      "castShadow": true
+    },
+    {
+      "tag": "maple",
+      "mesh": "VP_pot_inside_plastic_pot_small",
+      "mat": "VP_pot_v3_inside",
+      "type": "MeshPhysicalMaterial",
+      "hasMap": false,
+      "hasNormal": false,
+      "env": 1,
+      "rough": 0.8999999761581421,
+      "metal": 0,
+      "transmission": 1,
+      "thickness": 0,
+      "transparent": false,
+      "opacity": 1,
+      "emissiveIntensity": 1,
+      "toneMapped": true,
+      "castShadow": true
+    },
+    {
+      "tag": "maple",
+      "mesh": "VP_pot_metal_brushed",
+      "mat": "VP_metal_brushed",
+      "type": "MeshPhysicalMaterial",
+      "hasMap": false,
+      "hasNormal": false,
+      "env": 1,
+      "rough": 0.8550862073898315,
+      "metal": 0,
+      "transmission": 1,
+      "thickness": 0,
+      "transparent": false,
+      "opacity": 1,
+      "emissiveIntensity": 1,
+      "toneMapped": true,
+      "castShadow": true
+    }
+  ],
+  "bustMats": [
+    {
+      "tag": "bust",
+      "mesh": "Mesh_0",
+      "mat": "Mesh_0_material",
+      "type": "MeshStandardMaterial",
+      "hasMap": true,
+      "hasNormal": true,
+      "env": 1,
+      "rough": 1,
+      "metal": 1,
+      "transmission": null,
+      "thickness": null,
+      "transparent": false,
+      "opacity": 1,
+      "emissiveIntensity": 1,
+      "toneMapped": true,
+      "castShadow": true
+    }
+  ],
+  "tubeMats": [
+    {
+      "name": "neon-tube",
+      "type": "MeshStandardMaterial",
+      "emissiveIntensity": 3,
+      "toneMapped": false,
+      "color": "000000",
+      "emissive": "ffffff",
+      "env": 0,
+      "rough": 0.35,
+      "metal": 0.1,
+      "map": false,
+      "emissiveMap": true
+    },
+    {
+      "name": "neon-floor-glow-pool",
+      "type": "MeshBasicMaterial",
+      "toneMapped": false,
+      "color": "5ff574",
+      "map": true,
+      "emissiveMap": false
+    },
+    {
+      "name": "neon-floor-glow-cone",
+      "type": "MeshBasicMaterial",
+      "toneMapped": false,
+      "color": "5ff574",
+      "map": true,
+      "emissiveMap": false
+    },
+    {
+      "name": "contact-shadow-neon",
+      "type": "MeshBasicMaterial",
+      "toneMapped": false,
+      "color": "396104",
+      "map": true,
+      "emissiveMap": false
+    }
+  ],
+  "lights": [
+    {
+      "type": "SpotLight",
+      "name": "",
+      "intensity": 118,
+      "color": "fff2e0"
+    },
+    {
+      "type": "RectAreaLight",
+      "name": "",
+      "intensity": 0,
+      "color": "f1f1f1"
+    },
+    {
+      "type": "PointLight",
+      "name": "",
+      "intensity": 0,
+      "color": "f1f1f1"
+    },
+    {
+      "type": "AmbientLight",
+      "name": "",
+      "intensity": 0.06,
+      "color": "ffffff"
+    },
+    {
+      "type": "HemisphereLight",
+      "name": "",
+      "intensity": 0.04,
+      "color": "d8dce8"
+    },
+    {
+      "type": "PointLight",
+      "name": "neon-stop-light-0",
+      "intensity": 10,
+      "color": "9dff1a"
+    },
+    {
+      "type": "PointLight",
+      "name": "neon-stop-light-1",
+      "intensity": 0,
+      "color": "00e5ff"
+    },
+    {
+      "type": "PointLight",
+      "name": "neon-stop-light-2",
+      "intensity": 0,
+      "color": "8c2dff"
+    },
+    {
+      "type": "PointLight",
+      "name": "neon-stop-light-3",
+      "intensity": 0,
+      "color": "ff3d1a"
+    }
+  ],
+  "envIntensity": 0.22
+}

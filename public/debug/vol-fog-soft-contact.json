@@ -1,0 +1,510 @@
+{
+  "gate": "GATE4-step3-soft-contact",
+  "nearFarMatch": true,
+  "packedOk": true,
+  "sizeOk": true,
+  "sheetNearFarMatch": true,
+  "hasErrors": false,
+  "errors": [],
+  "prep": {
+    "volumetric": {
+      "enabled": true,
+      "depthPacked": true,
+      "halfRes": true,
+      "hasDepth": true,
+      "near": 0.1,
+      "far": 120,
+      "steps": 16,
+      "density": 0.16,
+      "lightIntensities": [
+        10,
+        5,
+        0,
+        4.999999999999999
+      ]
+    },
+    "capture": {
+      "rt": {
+        "width": 1280,
+        "height": 800,
+        "minFilter": 1003,
+        "magFilter": 1003,
+        "generateMipmaps": false,
+        "type": 1009,
+        "colorSpace": ""
+      },
+      "drawingBuffer": {
+        "width": 1280,
+        "height": 800
+      },
+      "sizeMatch": true,
+      "nearest": true,
+      "camera": {
+        "near": 0.1,
+        "far": 120
+      },
+      "uniforms": {
+        "near": 0.1,
+        "far": 120,
+        "softFade": 2,
+        "feather": 2.5,
+        "resolution": {
+          "x": 1280,
+          "y": 800
+        }
+      },
+      "nearFarMatch": true,
+      "depthMatToneMapped": false,
+      "rendererToneMapping": 4,
+      "samples": [
+        {
+          "nx": 0.5,
+          "ny": 0.5,
+          "rgba": [
+            2,
+            2,
+            2,
+            255
+          ],
+          "packed": 0.00784313725490196,
+          "sceneDepth": 0.9921568627450981,
+          "sceneViewZ": -11.534
+        },
+        {
+          "nx": 0.5,
+          "ny": 0.22,
+          "rgba": [
+            2,
+            2,
+            2,
+            255
+          ],
+          "packed": 0.00784313725490196,
+          "sceneDepth": 0.9921568627450981,
+          "sceneViewZ": -11.534
+        },
+        {
+          "nx": 0.5,
+          "ny": 0.72,
+          "rgba": [
+            2,
+            2,
+            2,
+            255
+          ],
+          "packed": 0.00784313725490196,
+          "sceneDepth": 0.9921568627450981,
+          "sceneViewZ": -11.534
+        },
+        {
+          "nx": 0.2,
+          "ny": 0.4,
+          "rgba": [
+            1,
+            1,
+            1,
+            255
+          ],
+          "packed": 0.00392156862745098,
+          "sceneDepth": 0.996078431372549,
+          "sceneViewZ": -21.045
+        },
+        {
+          "nx": 0.8,
+          "ny": 0.4,
+          "rgba": [
+            1,
+            1,
+            1,
+            255
+          ],
+          "packed": 0.00392156862745098,
+          "sceneDepth": 0.996078431372549,
+          "sceneViewZ": -21.045
+        }
+      ]
+    },
+    "isolate": {
+      "floorVisible": true,
+      "feather": 2.5,
+      "featherInner": 6,
+      "fogVisible": false,
+      "hazeVisible": 0,
+      "hazeTotal": 20,
+      "hazeIsolateOff": true
+    }
+  },
+  "sidekick": {
+    "volumetric": {
+      "enabled": true,
+      "depthPacked": true,
+      "halfRes": true,
+      "hasDepth": true,
+      "near": 0.1,
+      "far": 120,
+      "steps": 16,
+      "density": 0.16,
+      "lightIntensities": [
+        7.536468233285157e-13,
+        5.000002377467513,
+        9.999999999999247,
+        4.9999976225324865
+      ]
+    },
+    "capture": {
+      "rt": {
+        "width": 1280,
+        "height": 800,
+        "minFilter": 1003,
+        "magFilter": 1003,
+        "generateMipmaps": false,
+        "type": 1009,
+        "colorSpace": ""
+      },
+      "drawingBuffer": {
+        "width": 1280,
+        "height": 800
+      },
+      "sizeMatch": true,
+      "nearest": true,
+      "camera": {
+        "near": 0.1,
+        "far": 120
+      },
+      "uniforms": {
+        "near": 0.1,
+        "far": 120,
+        "softFade": 2,
+        "feather": 2.5,
+        "resolution": {
+          "x": 1280,
+          "y": 800
+        }
+      },
+      "nearFarMatch": true,
+      "depthMatToneMapped": false,
+      "rendererToneMapping": 4,
+      "samples": [
+        {
+          "nx": 0.5,
+          "ny": 0.5,
+          "rgba": [
+            3,
+            3,
+            3,
+            255
+          ],
+          "packed": 0.011764705882352941,
+          "sceneDepth": 0.9882352941176471,
+          "sceneViewZ": -7.944
+        },
+        {
+          "nx": 0.5,
+          "ny": 0.22,
+          "rgba": [
+            2,
+            2,
+            2,
+            255
+          ],
+          "packed": 0.00784313725490196,
+          "sceneDepth": 0.9921568627450981,
+          "sceneViewZ": -11.534
+        },
+        {
+          "nx": 0.5,
+          "ny": 0.72,
+          "rgba": [
+            0,
+            0,
+            0,
+            255
+          ],
+          "packed": 0,
+          "sceneDepth": 1,
+          "sceneViewZ": -120
+        },
+        {
+          "nx": 0.2,
+          "ny": 0.4,
+          "rgba": [
+            1,
+            1,
+            1,
+            255
+          ],
+          "packed": 0.00392156862745098,
+          "sceneDepth": 0.996078431372549,
+          "sceneViewZ": -21.045
+        },
+        {
+          "nx": 0.8,
+          "ny": 0.4,
+          "rgba": [
+            1,
+            1,
+            1,
+            255
+          ],
+          "packed": 0.00392156862745098,
+          "sceneDepth": 0.996078431372549,
+          "sceneViewZ": -21.045
+        }
+      ]
+    },
+    "sidekick": {
+      "current": 2,
+      "aligned": true,
+      "isOpen": false,
+      "swiveling": false,
+      "sidekickRootPosition": [
+        0,
+        2.3319259011889963,
+        2.4
+      ],
+      "restPoseReady": true,
+      "sidekickScale": 7.741528554808817,
+      "keypad": {
+        "buttonsFound": true,
+        "buttonsVisible": true,
+        "buttonsMaterial": "sidekick_keypad_opaque",
+        "buttonsOpacity": 1,
+        "buttonsTransparent": false,
+        "buttonsAlphaTest": 0,
+        "buttonsProtected": true,
+        "sharesCoverMaterial": false,
+        "healthy": true,
+        "hardware": {
+          "meshes": [
+            {
+              "name": "Buttons",
+              "visible": true,
+              "material": "sidekick_keypad_opaque",
+              "type": "MeshPhysicalMaterial",
+              "map": null,
+              "opacity": 1,
+              "transparent": false,
+              "alphaTest": 0,
+              "side": 2,
+              "labelProtected": false,
+              "keypadProtected": true
+            },
+            {
+              "name": "KeyboardText",
+              "visible": false,
+              "material": "lambert3",
+              "type": "MeshBasicMaterial",
+              "map": "TmobileKeyboard",
+              "opacity": 1,
+              "transparent": true,
+              "alphaTest": 0.08,
+              "side": 2,
+              "labelProtected": true,
+              "keypadProtected": false
+            },
+            {
+              "name": "sideButtons",
+              "visible": true,
+              "material": "phong4",
+              "type": "MeshPhysicalMaterial",
+              "map": "TmobileButtons",
+              "opacity": 1,
+              "transparent": false,
+              "alphaTest": 0,
+              "side": 2,
+              "labelProtected": true,
+              "keypadProtected": false
+            },
+            {
+              "name": "buttonsFace",
+              "visible": true,
+              "material": "blinn1",
+              "type": "MeshPhysicalMaterial",
+              "map": null,
+              "opacity": 1,
+              "transparent": false,
+              "alphaTest": 0,
+              "side": 2,
+              "labelProtected": false,
+              "keypadProtected": false
+            },
+            {
+              "name": "bottonsSide",
+              "visible": true,
+              "material": "blinn1",
+              "type": "MeshPhysicalMaterial",
+              "map": null,
+              "opacity": 1,
+              "transparent": false,
+              "alphaTest": 0,
+              "side": 2,
+              "labelProtected": false,
+              "keypadProtected": false
+            },
+            {
+              "name": "scrollButton",
+              "visible": true,
+              "material": "sidekick_scrollball_resin",
+              "type": "MeshPhysicalMaterial",
+              "map": null,
+              "opacity": 0.7500000000696504,
+              "transparent": true,
+              "alphaTest": 0,
+              "side": 0,
+              "labelProtected": false,
+              "keypadProtected": false
+            },
+            {
+              "name": "scrolButtonFrame",
+              "visible": true,
+              "material": "blinn1",
+              "type": "MeshPhysicalMaterial",
+              "map": null,
+              "opacity": 1,
+              "transparent": false,
+              "alphaTest": 0,
+              "side": 2,
+              "labelProtected": false,
+              "keypadProtected": false
+            },
+            {
+              "name": "transparentCover",
+              "visible": false,
+              "material": "sidekick_cover_mask",
+              "type": "MeshPhysicalMaterial",
+              "map": null,
+              "opacity": 0,
+              "transparent": false,
+              "alphaTest": 0.5,
+              "side": 2,
+              "labelProtected": false,
+              "keypadProtected": false
+            }
+          ],
+          "fusedSideButtons": true,
+          "separateKeyboardDecal": true
+        }
+      }
+    }
+  },
+  "zoomed": {
+    "volumetric": {
+      "enabled": true,
+      "depthPacked": true,
+      "halfRes": true,
+      "hasDepth": true,
+      "near": 0.1,
+      "far": 120,
+      "steps": 16,
+      "density": 0.16,
+      "lightIntensities": [
+        5.395161643615727e-30,
+        5.000000000000007,
+        10,
+        4.999999999999996
+      ]
+    },
+    "capture": {
+      "rt": {
+        "width": 1280,
+        "height": 800,
+        "minFilter": 1003,
+        "magFilter": 1003,
+        "generateMipmaps": false,
+        "type": 1009,
+        "colorSpace": ""
+      },
+      "drawingBuffer": {
+        "width": 1280,
+        "height": 800
+      },
+      "sizeMatch": true,
+      "nearest": true,
+      "camera": {
+        "near": 0.1,
+        "far": 120
+      },
+      "uniforms": {
+        "near": 0.1,
+        "far": 120,
+        "softFade": 2,
+        "feather": 2.5,
+        "resolution": {
+          "x": 1280,
+          "y": 800
+        }
+      },
+      "nearFarMatch": true,
+      "depthMatToneMapped": false,
+      "rendererToneMapping": 4,
+      "samples": [
+        {
+          "nx": 0.5,
+          "ny": 0.5,
+          "rgba": [
+            7,
+            7,
+            7,
+            255
+          ],
+          "packed": 0.027450980392156862,
+          "sceneDepth": 0.9725490196078431,
+          "sceneViewZ": -3.538
+        },
+        {
+          "nx": 0.5,
+          "ny": 0.22,
+          "rgba": [
+            2,
+            2,
+            2,
+            255
+          ],
+          "packed": 0.00784313725490196,
+          "sceneDepth": 0.9921568627450981,
+          "sceneViewZ": -11.534
+        },
+        {
+          "nx": 0.5,
+          "ny": 0.72,
+          "rgba": [
+            0,
+            0,
+            0,
+            255
+          ],
+          "packed": 0,
+          "sceneDepth": 1,
+          "sceneViewZ": -120
+        },
+        {
+          "nx": 0.2,
+          "ny": 0.4,
+          "rgba": [
+            0,
+            0,
+            0,
+            255
+          ],
+          "packed": 0,
+          "sceneDepth": 1,
+          "sceneViewZ": -120
+        },
+        {
+          "nx": 0.8,
+          "ny": 0.4,
+          "rgba": [
+            0,
+            0,
+            0,
+            255
+          ],
+          "packed": 0,
+          "sceneDepth": 1,
+          "sceneViewZ": -120
+        }
+      ]
+    }
+  },
+  "note": "Visual: check vol-fog-soft-contact-*.png for hard cuts / dark halos at prop silhouettes. Depth clamp should end march at opaque surface (no sheet soft-fade needed)."
+}

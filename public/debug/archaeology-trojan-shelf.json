@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "info": {
+    "hasHorse": true,
+    "hasVenus": true,
+    "horseY": 3.060000000000001,
+    "venusY": 2.1550609756097567,
+    "horseName": "trojan-horse-root",
+    "horseVisible": true,
+    "horseChildMeshes": 3,
+    "errors": null
+  },
+  "errors": []
+}

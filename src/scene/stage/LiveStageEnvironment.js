@@ -121,7 +121,7 @@ export class LiveStageEnvironment {
   }
 
   /**
-   * Static studio IBL for stage MeshStandard materials (travel pack, T-rex, PC chassis).
+   * Static studio IBL for stage MeshStandard materials (Archaeology props, stele, PC chassis).
    * Separate from the CRT cube capture so glass reflections stay monitor-local.
    * @returns {THREE.Texture}
    */
@@ -157,6 +157,12 @@ export class LiveStageEnvironment {
     this.cubeCamera.position.copy(position);
     tagFrame("shader-compile");
     this.cubeCamera.update(this.renderer, this.virtualScene);
+
+    // CubeCamera shrinks the active viewport to a cube face — restore CSS size.
+    const size = new THREE.Vector2();
+    this.renderer.getSize(size);
+    this.renderer.setViewport(0, 0, Math.max(1, size.x), Math.max(1, size.y));
+    this.renderer.setScissorTest(false);
 
     this._pmremTarget = this._pmrem.fromCubemap(this.target.texture, this._pmremTarget);
     const envTex = this._pmremTarget.texture;

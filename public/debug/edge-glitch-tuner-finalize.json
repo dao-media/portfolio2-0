@@ -1,0 +1,33 @@
+{
+  "label": "current",
+  "ts": 1789697549521,
+  "updated": [
+    "armOuter",
+    "armRamp",
+    "spanAlong",
+    "spanOut",
+    "spanIn",
+    "intensity",
+    "rgbSplitPx",
+    "revealBoost",
+    "tearAmpPx",
+    "bonusCount",
+    "bonusIntensity",
+    "bonusRhythm"
+  ],
+  "skipped": [],
+  "params": {
+    "armOuter": 0.09,
+    "armRamp": 1.5,
+    "spanAlong": 0.028,
+    "spanOut": 0.032,
+    "spanIn": 0.016,
+    "intensity": 0.2,
+    "rgbSplitPx": 16,
+    "revealBoost": 3.5,
+    "tearAmpPx": 54,
+    "bonusCount": 0,
+    "bonusIntensity": 0.75,
+    "bonusRhythm": 12
+  }
+}

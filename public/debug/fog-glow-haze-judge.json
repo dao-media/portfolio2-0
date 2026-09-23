@@ -1,0 +1,75 @@
+{
+  "neon": {
+    "height": 1,
+    "maxLight": 10,
+    "defaults": {
+      "height": 1,
+      "maxLight": 10
+    },
+    "lightCount": 4,
+    "lights": [
+      {
+        "name": "Monolith",
+        "intensity": 10,
+        "color": "#9dff1a",
+        "theta": 0,
+        "y": 1,
+        "layer0": true,
+        "layer2": true
+      },
+      {
+        "name": "Retro Desktop",
+        "intensity": 5,
+        "color": "#00e5ff",
+        "theta": 1.5707963267948966,
+        "y": 1,
+        "layer0": true,
+        "layer2": true
+      },
+      {
+        "name": "Sidekick",
+        "intensity": 0,
+        "color": "#8c2dff",
+        "theta": 3.141592653589793,
+        "y": 1,
+        "layer0": true,
+        "layer2": true
+      },
+      {
+        "name": "Archaeology",
+        "intensity": 4.999999999999999,
+        "color": "#ff3d1a",
+        "theta": -1.5707963267948968,
+        "y": 1,
+        "layer0": true,
+        "layer2": true
+      }
+    ],
+    "ring": {
+      "rInner": 14,
+      "rOuter": 22,
+      "layer": 2,
+      "softFade": 2,
+      "opacity": 0.32,
+      "feather": 2.5,
+      "featherInner": 6,
+      "distFadeStart": 20,
+      "distFadeEnd": 36,
+      "depthCapture": true
+    },
+    "hazeVisible": 17,
+    "hazeTotal": 20
+  },
+  "uniforms": {
+    "opacity": 0.32,
+    "feather": 2.5,
+    "featherInner": 6,
+    "distFadeStart": 20,
+    "distFadeEnd": 36,
+    "softFade": 2,
+    "cameraXZ": {
+      "x": 0,
+      "y": 28.1632
+    }
+  }
+}

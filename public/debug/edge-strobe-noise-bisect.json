@@ -1,0 +1,1076 @@
+{
+  "results": {
+    "noiseFrozen_fogBloom": {
+      "id": "noiseFrozen_fogBloom",
+      "noiseFrozen": true,
+      "parallax": false,
+      "fog": true,
+      "bloom": true,
+      "regions": {
+        "top": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "bottom": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "left": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "right": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "center": {
+          "avg": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0.04,
+          "n": 180
+        }
+      },
+      "edgeMaxFfAvg": 0,
+      "centerMaxFf": 0,
+      "sample": [
+        {
+          "i": 0,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.294539696699375,
+          "fogTime": 0,
+          "noiseFrozen": true
+        },
+        {
+          "i": 1,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2970985191793045,
+          "fogTime": 0,
+          "noiseFrozen": true
+        },
+        {
+          "i": 2,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.294691418376449,
+          "fogTime": 0,
+          "noiseFrozen": true
+        },
+        {
+          "i": 3,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2940154861730593,
+          "fogTime": 0,
+          "noiseFrozen": true
+        },
+        {
+          "i": 4,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2939775557537907,
+          "fogTime": 0,
+          "noiseFrozen": true
+        }
+      ]
+    },
+    "noiseLive_fogBloom": {
+      "id": "noiseLive_fogBloom",
+      "noiseFrozen": false,
+      "parallax": false,
+      "fog": true,
+      "bloom": true,
+      "regions": {
+        "top": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "bottom": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "left": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "right": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "center": {
+          "avg": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0.05,
+          "n": 180
+        }
+      },
+      "edgeMaxFfAvg": 0,
+      "centerMaxFf": 0,
+      "sample": [
+        {
+          "i": 0,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2946672970561992,
+          "fogTime": 11.97599999999999,
+          "noiseFrozen": false
+        },
+        {
+          "i": 1,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2975054415700271,
+          "fogTime": 12.017100000023833,
+          "noiseFrozen": false
+        },
+        {
+          "i": 2,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.294474148082069,
+          "fogTime": 12.072999999999992,
+          "noiseFrozen": false
+        },
+        {
+          "i": 3,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2944879571810877,
+          "fogTime": 12.106400000095359,
+          "noiseFrozen": false
+        },
+        {
+          "i": 4,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2943224264049948,
+          "fogTime": 12.124499999999992,
+          "noiseFrozen": false
+        }
+      ]
+    },
+    "noiseLive_fogOnly": {
+      "id": "noiseLive_fogOnly",
+      "noiseFrozen": false,
+      "parallax": false,
+      "fog": true,
+      "bloom": false,
+      "regions": {
+        "top": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "bottom": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "left": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "right": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "center": {
+          "avg": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0.05,
+          "n": 180
+        }
+      },
+      "edgeMaxFfAvg": 0,
+      "centerMaxFf": 0,
+      "sample": [
+        {
+          "i": 0,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2946776092774301,
+          "fogTime": 18.19220000004768,
+          "noiseFrozen": false
+        },
+        {
+          "i": 1,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2971226404995544,
+          "fogTime": 18.278800000071524,
+          "noiseFrozen": false
+        },
+        {
+          "i": 2,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.294474148082069,
+          "fogTime": 18.309400000095366,
+          "noiseFrozen": false
+        },
+        {
+          "i": 3,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2947810883140047,
+          "fogTime": 18.35110000002384,
+          "noiseFrozen": false
+        },
+        {
+          "i": 4,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2943086173059761,
+          "fogTime": 18.38060000002384,
+          "noiseFrozen": false
+        }
+      ]
+    },
+    "noiseLive_bloomOnly": {
+      "id": "noiseLive_bloomOnly",
+      "noiseFrozen": false,
+      "parallax": false,
+      "fog": false,
+      "bloom": true,
+      "regions": {
+        "top": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "bottom": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "left": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "right": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "center": {
+          "avg": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0.05,
+          "n": 180
+        }
+      },
+      "edgeMaxFfAvg": 0,
+      "centerMaxFf": 0,
+      "sample": [
+        {
+          "i": 0,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2964467082961637,
+          "fogTime": 24.90899999999998,
+          "noiseFrozen": false
+        },
+        {
+          "i": 1,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2983848349687783,
+          "fogTime": 24.950300000071508,
+          "noiseFrozen": false
+        },
+        {
+          "i": 2,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2956466726137372,
+          "fogTime": 24.98390000009535,
+          "noiseFrozen": false
+        },
+        {
+          "i": 3,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2951500802854587,
+          "fogTime": 25.012100000023825,
+          "noiseFrozen": false
+        },
+        {
+          "i": 4,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.294984549509366,
+          "fogTime": 25.031700000047667,
+          "noiseFrozen": false
+        }
+      ]
+    },
+    "noiseLive_renderOnly": {
+      "id": "noiseLive_renderOnly",
+      "noiseFrozen": false,
+      "parallax": false,
+      "fog": false,
+      "bloom": false,
+      "regions": {
+        "top": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "bottom": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "left": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "right": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "center": {
+          "avg": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0.04,
+          "n": 180
+        }
+      },
+      "edgeMaxFfAvg": 0,
+      "centerMaxFf": 0,
+      "sample": [
+        {
+          "i": 0,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2941189652096337,
+          "fogTime": 30.16690000009533,
+          "noiseFrozen": false
+        },
+        {
+          "i": 1,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.297122640499554,
+          "fogTime": 30.209800000071485,
+          "noiseFrozen": false
+        },
+        {
+          "i": 2,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2952776806422832,
+          "fogTime": 30.23849999999996,
+          "noiseFrozen": false
+        },
+        {
+          "i": 3,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2951121498661904,
+          "fogTime": 30.266300000071485,
+          "noiseFrozen": false
+        },
+        {
+          "i": 4,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2948569491525417,
+          "fogTime": 30.2846000000238,
+          "noiseFrozen": false
+        }
+      ]
+    },
+    "noiseLive_fogBloom_parallax": {
+      "id": "noiseLive_fogBloom_parallax",
+      "noiseFrozen": false,
+      "parallax": true,
+      "fog": true,
+      "bloom": true,
+      "regions": {
+        "top": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "bottom": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "left": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "right": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "center": {
+          "avg": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0.04,
+          "n": 180
+        }
+      },
+      "edgeMaxFfAvg": 0,
+      "centerMaxFf": 0,
+      "sample": [
+        {
+          "i": 0,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2950224799286345,
+          "fogTime": 34.96180000007151,
+          "noiseFrozen": false
+        },
+        {
+          "i": 1,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2973916503122211,
+          "fogTime": 35.018400000095355,
+          "noiseFrozen": false
+        },
+        {
+          "i": 2,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2952535593220336,
+          "fogTime": 35.06320000004767,
+          "noiseFrozen": false
+        },
+        {
+          "i": 3,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.295291489741302,
+          "fogTime": 35.10320000004767,
+          "noiseFrozen": false
+        },
+        {
+          "i": 4,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2945776271186435,
+          "fogTime": 35.13580000007151,
+          "noiseFrozen": false
+        }
+      ]
+    },
+    "noiseFrozen_fogOnly": {
+      "id": "noiseFrozen_fogOnly",
+      "noiseFrozen": true,
+      "parallax": false,
+      "fog": true,
+      "bloom": false,
+      "regions": {
+        "top": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "bottom": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "left": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "right": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0,
+          "n": 180
+        },
+        "center": {
+          "avg": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "hfEnergy": 0.05,
+          "n": 180
+        }
+      },
+      "edgeMaxFfAvg": 0,
+      "centerMaxFf": 0,
+      "sample": [
+        {
+          "i": 0,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.29426719000892,
+          "fogTime": 0,
+          "noiseFrozen": true
+        },
+        {
+          "i": 1,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2977606422836756,
+          "fogTime": 0,
+          "noiseFrozen": true
+        },
+        {
+          "i": 2,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2944224085637819,
+          "fogTime": 0,
+          "noiseFrozen": true
+        },
+        {
+          "i": 3,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2947672792149858,
+          "fogTime": 0,
+          "noiseFrozen": true
+        },
+        {
+          "i": 4,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2944500267618193,
+          "fogTime": 0,
+          "noiseFrozen": true
+        }
+      ]
+    }
+  },
+  "diagnosis": {
+    "a_exactPass": "NOT REPRODUCED under dead-still lab conditions",
+    "b_exactTerm": "With frozen neon+gradient and settled fog/bloom, edge maxFrameDelta ≈ 0 even with live fog noise in this run — strobe may require live neon flicker, cursor motion, or a different timing window (during bloom soft-return / heavy-effects arm)",
+    "c_evidence": {
+      "ranked": [
+        {
+          "id": "noiseFrozen_fogBloom",
+          "edgeMaxFfAvg": 0,
+          "centerMaxFf": 0,
+          "regions": {
+            "top": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "bottom": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "left": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "right": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "center": {
+              "avg": 1.3,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0.04,
+              "n": 180
+            }
+          }
+        },
+        {
+          "id": "noiseLive_fogBloom",
+          "edgeMaxFfAvg": 0,
+          "centerMaxFf": 0,
+          "regions": {
+            "top": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "bottom": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "left": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "right": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "center": {
+              "avg": 1.3,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0.05,
+              "n": 180
+            }
+          }
+        },
+        {
+          "id": "noiseLive_fogOnly",
+          "edgeMaxFfAvg": 0,
+          "centerMaxFf": 0,
+          "regions": {
+            "top": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "bottom": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "left": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "right": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "center": {
+              "avg": 1.3,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0.05,
+              "n": 180
+            }
+          }
+        },
+        {
+          "id": "noiseLive_bloomOnly",
+          "edgeMaxFfAvg": 0,
+          "centerMaxFf": 0,
+          "regions": {
+            "top": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "bottom": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "left": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "right": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "center": {
+              "avg": 1.3,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0.05,
+              "n": 180
+            }
+          }
+        },
+        {
+          "id": "noiseLive_renderOnly",
+          "edgeMaxFfAvg": 0,
+          "centerMaxFf": 0,
+          "regions": {
+            "top": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "bottom": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "left": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "right": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "center": {
+              "avg": 1.3,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0.04,
+              "n": 180
+            }
+          }
+        },
+        {
+          "id": "noiseLive_fogBloom_parallax",
+          "edgeMaxFfAvg": 0,
+          "centerMaxFf": 0,
+          "regions": {
+            "top": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "bottom": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "left": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "right": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "center": {
+              "avg": 1.3,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0.04,
+              "n": 180
+            }
+          }
+        },
+        {
+          "id": "noiseFrozen_fogOnly",
+          "edgeMaxFfAvg": 0,
+          "centerMaxFf": 0,
+          "regions": {
+            "top": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "bottom": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "left": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "right": {
+              "avg": 0,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0,
+              "n": 180
+            },
+            "center": {
+              "avg": 1.3,
+              "peakToPeak": 0,
+              "maxFrameDelta": 0,
+              "hfEnergy": 0.05,
+              "n": 180
+            }
+          }
+        }
+      ],
+      "liveVsFrozen": {
+        "liveEdgeFf": 0,
+        "frozenEdgeFf": 0,
+        "liveRegions": {
+          "top": {
+            "avg": 0,
+            "peakToPeak": 0,
+            "maxFrameDelta": 0,
+            "hfEnergy": 0,
+            "n": 180
+          },
+          "bottom": {
+            "avg": 0,
+            "peakToPeak": 0,
+            "maxFrameDelta": 0,
+            "hfEnergy": 0,
+            "n": 180
+          },
+          "left": {
+            "avg": 0,
+            "peakToPeak": 0,
+            "maxFrameDelta": 0,
+            "hfEnergy": 0,
+            "n": 180
+          },
+          "right": {
+            "avg": 0,
+            "peakToPeak": 0,
+            "maxFrameDelta": 0,
+            "hfEnergy": 0,
+            "n": 180
+          },
+          "center": {
+            "avg": 1.3,
+            "peakToPeak": 0,
+            "maxFrameDelta": 0,
+            "hfEnergy": 0.05,
+            "n": 180
+          }
+        },
+        "frozenRegions": {
+          "top": {
+            "avg": 0,
+            "peakToPeak": 0,
+            "maxFrameDelta": 0,
+            "hfEnergy": 0,
+            "n": 180
+          },
+          "bottom": {
+            "avg": 0,
+            "peakToPeak": 0,
+            "maxFrameDelta": 0,
+            "hfEnergy": 0,
+            "n": 180
+          },
+          "left": {
+            "avg": 0,
+            "peakToPeak": 0,
+            "maxFrameDelta": 0,
+            "hfEnergy": 0,
+            "n": 180
+          },
+          "right": {
+            "avg": 0,
+            "peakToPeak": 0,
+            "maxFrameDelta": 0,
+            "hfEnergy": 0,
+            "n": 180
+          },
+          "center": {
+            "avg": 1.3,
+            "peakToPeak": 0,
+            "maxFrameDelta": 0,
+            "hfEnergy": 0.04,
+            "n": 180
+          }
+        }
+      },
+      "fogOnlyEdgeFf": 0,
+      "bloomOnlyEdgeFf": 0,
+      "renderOnlyEdgeFf": 0
+    },
+    "d_proposedFix": "Next probe: (1) during bloom soft-return only, noise live; (2) neon flicker enabled; (3) sample at native canvas resolution without downsample. Do not claim fixed.",
+    "noFixShipped": true,
+    "priorBisectNote": "edge-strobe-bisect.mjs froze fog noise and measured settle edgePulseScore=0 — that masked noise-driven edge flicker"
+  }
+}

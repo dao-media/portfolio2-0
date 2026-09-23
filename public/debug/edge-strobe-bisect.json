@@ -1,0 +1,2715 @@
+{
+  "meta": {
+    "symptom": "edge/vignette strobe — prior fixes (step-count, composite-opacity, bloom-hold) declared via smoke/pre-bloom probes",
+    "bandPx": 14,
+    "sample": "320x200",
+    "skills": [
+      "threejs-postprocessing",
+      "threejs-debug-profiler"
+    ]
+  },
+  "baseline": {
+    "throughFade": {
+      "stats": {
+        "top": {
+          "avg": 9.96,
+          "min": 9.96,
+          "max": 9.97,
+          "peakToPeak": 0.01,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.01,
+          "n": 90
+        },
+        "bottom": {
+          "avg": 11.07,
+          "min": 11.07,
+          "max": 11.07,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 90
+        },
+        "left": {
+          "avg": 11.11,
+          "min": 11.06,
+          "max": 11.12,
+          "peakToPeak": 0.06,
+          "maxFrameDelta": 0.01,
+          "residMaxDev": 0.03,
+          "hfEnergy": 0.04,
+          "n": 90
+        },
+        "right": {
+          "avg": 11.02,
+          "min": 10.46,
+          "max": 11.11,
+          "peakToPeak": 0.65,
+          "maxFrameDelta": 0.08,
+          "residMaxDev": 0.37,
+          "hfEnergy": 0.25,
+          "n": 90
+        },
+        "center": {
+          "avg": 21.59,
+          "min": 17.92,
+          "max": 22.03,
+          "peakToPeak": 4.11,
+          "maxFrameDelta": 0.46,
+          "residMaxDev": 2.55,
+          "hfEnergy": 1.13,
+          "n": 90
+        },
+        "fogOpacity": {
+          "avg": 0.92,
+          "min": 0.07,
+          "max": 1,
+          "peakToPeak": 0.93,
+          "maxFrameDelta": 0.13,
+          "residMaxDev": 0.64,
+          "hfEnergy": 0.32,
+          "n": 90
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 90
+        },
+        "bloomIntensity": {
+          "avg": 0.9,
+          "min": 0,
+          "max": 1.2,
+          "peakToPeak": 1.2,
+          "maxFrameDelta": 0.13,
+          "residMaxDev": 0.55,
+          "hfEnergy": 0.3,
+          "n": 90
+        },
+        "bloomReturnT": {
+          "avg": 0.75,
+          "min": 0,
+          "max": 1,
+          "peakToPeak": 1,
+          "maxFrameDelta": 0.1,
+          "residMaxDev": 0.46,
+          "hfEnergy": 0.25,
+          "n": 90
+        },
+        "volFade": {
+          "avg": 0.92,
+          "min": 0.07,
+          "max": 1,
+          "peakToPeak": 0.93,
+          "maxFrameDelta": 0.13,
+          "residMaxDev": 0.64,
+          "hfEnergy": 0.32,
+          "n": 90
+        }
+      },
+      "edgePulseScore": 0.44,
+      "fogOpacityRange": [
+        0.07025000005960463,
+        1
+      ],
+      "bloomIntensityRange": [
+        0,
+        1.2
+      ]
+    },
+    "settle300": {
+      "stats": {
+        "top": {
+          "avg": 9.96,
+          "min": 9.96,
+          "max": 9.96,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        },
+        "bottom": {
+          "avg": 11.07,
+          "min": 11.07,
+          "max": 11.07,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        },
+        "left": {
+          "avg": 11.12,
+          "min": 11.12,
+          "max": 11.12,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        },
+        "right": {
+          "avg": 11.09,
+          "min": 11.09,
+          "max": 11.09,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        },
+        "center": {
+          "avg": 22.03,
+          "min": 22.03,
+          "max": 22.03,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.07,
+          "n": 300
+        },
+        "fogOpacity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        },
+        "bloomIntensity": {
+          "avg": 1.2,
+          "min": 1.2,
+          "max": 1.2,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        },
+        "bloomReturnT": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        },
+        "volFade": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        }
+      },
+      "edgePulseScore": 0,
+      "edgeVsCenter": {
+        "edgeResidMax": 0,
+        "centerResidMax": 0,
+        "edgeDominant": false
+      }
+    }
+  },
+  "bisect": {
+    "A_renderOnly": {
+      "desc": "RenderPass only (fog off, bloom off, grain off)",
+      "cfg": {
+        "fog": false,
+        "bloom": false,
+        "grain": false
+      },
+      "stats": {
+        "top": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bottom": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "left": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "right": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "center": {
+          "avg": 1.3,
+          "min": 1.29,
+          "max": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.03,
+          "n": 120
+        },
+        "fogOpacity": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bloomIntensity": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bloomReturnT": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "volFade": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        }
+      },
+      "edgePulseScore": 0,
+      "seriesHead": [
+        {
+          "i": 0,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2963329170383584,
+          "fogOpacity": 0,
+          "fogDensity": 1,
+          "bloomIntensity": 0,
+          "bloomReturnT": 1,
+          "volFade": 0
+        },
+        {
+          "i": 1,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2977468331846567,
+          "fogOpacity": 0,
+          "fogDensity": 1,
+          "bloomIntensity": 0,
+          "bloomReturnT": 1,
+          "volFade": 0
+        },
+        {
+          "i": 2,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2957225334522746,
+          "fogOpacity": 0,
+          "fogDensity": 1,
+          "bloomIntensity": 0,
+          "bloomReturnT": 1,
+          "volFade": 0
+        }
+      ],
+      "seriesTail": [
+        {
+          "i": 117,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2960915254237282,
+          "fogOpacity": 0,
+          "fogDensity": 1,
+          "bloomIntensity": 0,
+          "bloomReturnT": 1,
+          "volFade": 0
+        },
+        {
+          "i": 118,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2958363247100795,
+          "fogOpacity": 0,
+          "fogDensity": 1,
+          "bloomIntensity": 0,
+          "bloomReturnT": 1,
+          "volFade": 0
+        },
+        {
+          "i": 119,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.296257056199821,
+          "fogOpacity": 0,
+          "fogDensity": 1,
+          "bloomIntensity": 0,
+          "bloomReturnT": 1,
+          "volFade": 0
+        }
+      ]
+    },
+    "B_fogOnly": {
+      "desc": "+ VolumetricFogPass only (bloom off, grain off)",
+      "cfg": {
+        "fog": true,
+        "fogOpacity": 1,
+        "fogDensity": 1,
+        "bloom": false,
+        "grain": false
+      },
+      "stats": {
+        "top": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bottom": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "left": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "right": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "center": {
+          "avg": 1.3,
+          "min": 1.29,
+          "max": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.03,
+          "n": 120
+        },
+        "fogOpacity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bloomIntensity": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bloomReturnT": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "volFade": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        }
+      },
+      "edgePulseScore": 0,
+      "seriesHead": [
+        {
+          "i": 0,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.295826012488849,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 0,
+          "bloomReturnT": 1,
+          "volFade": 1
+        },
+        {
+          "i": 1,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.298015842997324,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 0,
+          "bloomReturnT": 1,
+          "volFade": 1
+        },
+        {
+          "i": 2,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2950086708296158,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 0,
+          "bloomReturnT": 1,
+          "volFade": 1
+        }
+      ],
+      "seriesTail": [
+        {
+          "i": 117,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2962570561998212,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 0,
+          "bloomReturnT": 1,
+          "volFade": 1
+        },
+        {
+          "i": 118,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.295888064228367,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 0,
+          "bloomReturnT": 1,
+          "volFade": 1
+        },
+        {
+          "i": 119,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.296346726137377,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 0,
+          "bloomReturnT": 1,
+          "volFade": 1
+        }
+      ]
+    },
+    "C_bloomOnly": {
+      "desc": "+ BloomEffect only (fog off, grain off)",
+      "cfg": {
+        "fog": false,
+        "bloom": true,
+        "bloomIntensity": 1.2,
+        "grain": false
+      },
+      "stats": {
+        "top": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bottom": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "left": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "right": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "center": {
+          "avg": 1.3,
+          "min": 1.29,
+          "max": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.03,
+          "n": 120
+        },
+        "fogOpacity": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bloomIntensity": {
+          "avg": 1.2,
+          "min": 1.2,
+          "max": 1.2,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bloomReturnT": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "volFade": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        }
+      },
+      "edgePulseScore": 0,
+      "seriesHead": [
+        {
+          "i": 0,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2939258162355036,
+          "fogOpacity": 0,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 0
+        },
+        {
+          "i": 1,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2971226404995542,
+          "fogOpacity": 0,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 0
+        },
+        {
+          "i": 2,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2941948260481708,
+          "fogOpacity": 0,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 0
+        }
+      ],
+      "seriesTail": [
+        {
+          "i": 117,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2959259946476351,
+          "fogOpacity": 0,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 0
+        },
+        {
+          "i": 118,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2960535950044596,
+          "fogOpacity": 0,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 0
+        },
+        {
+          "i": 119,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2959639250669037,
+          "fogOpacity": 0,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 0
+        }
+      ]
+    },
+    "D_fogBloom": {
+      "desc": "fog + bloom (grain off) — production stack minus grain",
+      "cfg": {
+        "fog": true,
+        "fogOpacity": 1,
+        "fogDensity": 1,
+        "bloom": true,
+        "bloomIntensity": 1.2,
+        "grain": false
+      },
+      "stats": {
+        "top": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bottom": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "left": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "right": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "center": {
+          "avg": 1.3,
+          "min": 1.29,
+          "max": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.04,
+          "n": 120
+        },
+        "fogOpacity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bloomIntensity": {
+          "avg": 1.2,
+          "min": 1.2,
+          "max": 1.2,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bloomReturnT": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "volFade": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        }
+      },
+      "edgePulseScore": 0,
+      "seriesHead": [
+        {
+          "i": 0,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2943224264049948,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        },
+        {
+          "i": 1,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2976192328278326,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        },
+        {
+          "i": 2,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2943844781445133,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        }
+      ],
+      "seriesTail": [
+        {
+          "i": 117,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2961432649420153,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        },
+        {
+          "i": 118,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2962708652988395,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        },
+        {
+          "i": 119,
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "center": 1.2966398572702937,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        }
+      ]
+    },
+    "E_full": {
+      "desc": "full stack fog+bloom+grainPass (grain amount 0)",
+      "cfg": {
+        "fog": true,
+        "fogOpacity": 1,
+        "fogDensity": 1,
+        "bloom": true,
+        "bloomIntensity": 1.2,
+        "grain": true,
+        "grainAmount": 0
+      },
+      "stats": {
+        "top": {
+          "avg": 9.96,
+          "min": 9.96,
+          "max": 9.96,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bottom": {
+          "avg": 11.07,
+          "min": 11.07,
+          "max": 11.07,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "left": {
+          "avg": 11.12,
+          "min": 11.12,
+          "max": 11.12,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "right": {
+          "avg": 11.09,
+          "min": 11.09,
+          "max": 11.09,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "center": {
+          "avg": 22.03,
+          "min": 22.03,
+          "max": 22.03,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.03,
+          "n": 120
+        },
+        "fogOpacity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bloomIntensity": {
+          "avg": 1.2,
+          "min": 1.2,
+          "max": 1.2,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bloomReturnT": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "volFade": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        }
+      },
+      "edgePulseScore": 0,
+      "seriesHead": [
+        {
+          "i": 0,
+          "top": 9.96134955357143,
+          "bottom": 11.072200000000423,
+          "left": 11.122296142856639,
+          "right": 11.089633785714057,
+          "center": 22.029593470115945,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        },
+        {
+          "i": 1,
+          "top": 9.96134955357143,
+          "bottom": 11.072200000000423,
+          "left": 11.122296142856639,
+          "right": 11.089633785714057,
+          "center": 22.029593470115945,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        },
+        {
+          "i": 2,
+          "top": 9.96134955357143,
+          "bottom": 11.072200000000423,
+          "left": 11.122296142856639,
+          "right": 11.089633785714057,
+          "center": 22.029593256021386,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        }
+      ],
+      "seriesTail": [
+        {
+          "i": 117,
+          "top": 9.96134955357143,
+          "bottom": 11.072200000000423,
+          "left": 11.122296142856639,
+          "right": 11.089633785714057,
+          "center": 22.0293890811775,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        },
+        {
+          "i": 118,
+          "top": 9.96134955357143,
+          "bottom": 11.072200000000423,
+          "left": 11.122296142856639,
+          "right": 11.089633785714057,
+          "center": 22.029185619982137,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        },
+        {
+          "i": 119,
+          "top": 9.96134955357143,
+          "bottom": 11.072200000000423,
+          "left": 11.122296142856639,
+          "right": 11.089633785714057,
+          "center": 22.0291097591436,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        }
+      ]
+    },
+    "F_grainForced": {
+      "desc": "full + grain amount 0.08 (does grain pass introduce edge pulse?)",
+      "cfg": {
+        "fog": true,
+        "fogOpacity": 1,
+        "fogDensity": 1,
+        "bloom": true,
+        "bloomIntensity": 1.2,
+        "grain": true,
+        "grainAmount": 0.08
+      },
+      "stats": {
+        "top": {
+          "avg": 9.96,
+          "min": 9.96,
+          "max": 9.96,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bottom": {
+          "avg": 11.07,
+          "min": 11.07,
+          "max": 11.07,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "left": {
+          "avg": 11.12,
+          "min": 11.12,
+          "max": 11.12,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "right": {
+          "avg": 11.09,
+          "min": 11.09,
+          "max": 11.09,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "center": {
+          "avg": 22.03,
+          "min": 22.03,
+          "max": 22.03,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.03,
+          "n": 120
+        },
+        "fogOpacity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bloomIntensity": {
+          "avg": 1.2,
+          "min": 1.2,
+          "max": 1.2,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "bloomReturnT": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        },
+        "volFade": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 120
+        }
+      },
+      "edgePulseScore": 0,
+      "seriesHead": [
+        {
+          "i": 0,
+          "top": 9.96134955357143,
+          "bottom": 11.072200000000423,
+          "left": 11.122296142856639,
+          "right": 11.089633785714057,
+          "center": 22.029567707404084,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        },
+        {
+          "i": 1,
+          "top": 9.96134955357143,
+          "bottom": 11.072200000000423,
+          "left": 11.122296142856639,
+          "right": 11.089633785714057,
+          "center": 22.029567707404084,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        },
+        {
+          "i": 2,
+          "top": 9.96134955357143,
+          "bottom": 11.072200000000423,
+          "left": 11.122296142856639,
+          "right": 11.089633785714057,
+          "center": 22.029185619982137,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        }
+      ],
+      "seriesTail": [
+        {
+          "i": 117,
+          "top": 9.96134955357143,
+          "bottom": 11.072200000000423,
+          "left": 11.122296142856639,
+          "right": 11.089633785714057,
+          "center": 22.029133880463853,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        },
+        {
+          "i": 118,
+          "top": 9.96134955357143,
+          "bottom": 11.072200000000423,
+          "left": 11.122296142856639,
+          "right": 11.089633785714057,
+          "center": 22.029491632470986,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        },
+        {
+          "i": 119,
+          "top": 9.96134955357143,
+          "bottom": 11.072200000000423,
+          "left": 11.122296142856639,
+          "right": 11.089633785714057,
+          "center": 22.029517395182854,
+          "fogOpacity": 1,
+          "fogDensity": 1,
+          "bloomIntensity": 1.2,
+          "bloomReturnT": 1,
+          "volFade": 1
+        }
+      ]
+    },
+    "verdict": {
+      "namedPass": "B_fogOnly",
+      "reason": "Highest pulse score among settled configs: B_fogOnly=0, C_bloomOnly=0, D_fogBloom=0, E_full=0",
+      "scores": {
+        "a": 0,
+        "b": 0,
+        "c": 0,
+        "d": 0,
+        "e": 0,
+        "f": 0
+      },
+      "threshold": 0.35
+    }
+  },
+  "within": {
+    "bloom_resScale_1": {
+      "desc": "bloom resolutionScale → 1.0 (full-res extract)",
+      "cfg": {
+        "fog": true,
+        "fogOpacity": 1,
+        "bloom": true,
+        "bloomIntensity": 1.2,
+        "bloomResolutionScale": 1,
+        "grain": false
+      },
+      "stats": {
+        "top": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bottom": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "left": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "right": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "center": {
+          "avg": 1.3,
+          "min": 1.29,
+          "max": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.03,
+          "n": 100
+        },
+        "fogOpacity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomIntensity": {
+          "avg": 1.2,
+          "min": 1.2,
+          "max": 1.2,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomReturnT": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "volFade": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        }
+      },
+      "edgePulseScore": 0
+    },
+    "bloom_resScale_0_5": {
+      "desc": "bloom resolutionScale 0.5 (authored)",
+      "cfg": {
+        "fog": true,
+        "fogOpacity": 1,
+        "bloom": true,
+        "bloomIntensity": 1.2,
+        "bloomResolutionScale": 0.5,
+        "grain": false
+      },
+      "stats": {
+        "top": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bottom": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "left": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "right": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "center": {
+          "avg": 1.3,
+          "min": 1.29,
+          "max": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.03,
+          "n": 100
+        },
+        "fogOpacity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomIntensity": {
+          "avg": 1.2,
+          "min": 1.2,
+          "max": 1.2,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomReturnT": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "volFade": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        }
+      },
+      "edgePulseScore": 0
+    },
+    "bloom_mipmap_true": {
+      "desc": "bloom mipmapBlur true (§20.9e known intermittent)",
+      "cfg": {
+        "fog": true,
+        "fogOpacity": 1,
+        "bloom": true,
+        "bloomIntensity": 1.2,
+        "mipmapBlur": true,
+        "grain": false
+      },
+      "stats": {
+        "top": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bottom": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "left": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "right": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "center": {
+          "avg": 1.3,
+          "min": 1.29,
+          "max": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.03,
+          "n": 100
+        },
+        "fogOpacity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomIntensity": {
+          "avg": 1.2,
+          "min": 1.2,
+          "max": 1.2,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomReturnT": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "volFade": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        }
+      },
+      "edgePulseScore": 0
+    },
+    "bloom_mipmap_false": {
+      "desc": "bloom mipmapBlur false (authored)",
+      "cfg": {
+        "fog": true,
+        "fogOpacity": 1,
+        "bloom": true,
+        "bloomIntensity": 1.2,
+        "mipmapBlur": false,
+        "grain": false
+      },
+      "stats": {
+        "top": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bottom": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "left": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "right": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "center": {
+          "avg": 1.3,
+          "min": 1.29,
+          "max": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.03,
+          "n": 100
+        },
+        "fogOpacity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomIntensity": {
+          "avg": 1.2,
+          "min": 1.2,
+          "max": 1.2,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomReturnT": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "volFade": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        }
+      },
+      "edgePulseScore": 0
+    },
+    "bloom_threshold_2": {
+      "desc": "bloom luminanceThreshold 2.0 (nothing extracts)",
+      "cfg": {
+        "fog": true,
+        "fogOpacity": 1,
+        "bloom": true,
+        "bloomIntensity": 1.2,
+        "luminanceThreshold": 2,
+        "grain": false
+      },
+      "stats": {
+        "top": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bottom": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "left": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "right": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "center": {
+          "avg": 1.3,
+          "min": 1.29,
+          "max": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.03,
+          "n": 100
+        },
+        "fogOpacity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomIntensity": {
+          "avg": 1.2,
+          "min": 1.2,
+          "max": 1.2,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomReturnT": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "volFade": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        }
+      },
+      "edgePulseScore": 0
+    },
+    "bloom_threshold_1": {
+      "desc": "bloom luminanceThreshold 1.0 (authored)",
+      "cfg": {
+        "fog": true,
+        "fogOpacity": 1,
+        "bloom": true,
+        "bloomIntensity": 1.2,
+        "luminanceThreshold": 1,
+        "grain": false
+      },
+      "stats": {
+        "top": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bottom": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "left": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "right": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "center": {
+          "avg": 1.3,
+          "min": 1.29,
+          "max": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.03,
+          "n": 100
+        },
+        "fogOpacity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomIntensity": {
+          "avg": 1.2,
+          "min": 1.2,
+          "max": 1.2,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomReturnT": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "volFade": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        }
+      },
+      "edgePulseScore": 0
+    },
+    "fog_halfRes_false": {
+      "desc": "fog halfRes false (full-res march RT)",
+      "cfg": {
+        "fog": true,
+        "fogOpacity": 1,
+        "fogHalfRes": false,
+        "bloom": true,
+        "bloomIntensity": 1.2,
+        "grain": false
+      },
+      "stats": {
+        "top": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bottom": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "left": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "right": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "center": {
+          "avg": 1.3,
+          "min": 1.29,
+          "max": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.03,
+          "n": 100
+        },
+        "fogOpacity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomIntensity": {
+          "avg": 1.2,
+          "min": 1.2,
+          "max": 1.2,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomReturnT": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "volFade": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        }
+      },
+      "edgePulseScore": 0
+    },
+    "fog_halfRes_true": {
+      "desc": "fog halfRes true (authored)",
+      "cfg": {
+        "fog": true,
+        "fogOpacity": 1,
+        "fogHalfRes": true,
+        "bloom": true,
+        "bloomIntensity": 1.2,
+        "grain": false
+      },
+      "stats": {
+        "top": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bottom": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "left": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "right": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "center": {
+          "avg": 1.3,
+          "min": 1.29,
+          "max": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.03,
+          "n": 100
+        },
+        "fogOpacity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomIntensity": {
+          "avg": 1.2,
+          "min": 1.2,
+          "max": 1.2,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomReturnT": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "volFade": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        }
+      },
+      "edgePulseScore": 0
+    },
+    "fog_opacity_0_bloom_on": {
+      "desc": "fog opacity 0 + bloom on (is bloom alone enough at settle?)",
+      "cfg": {
+        "fog": true,
+        "fogOpacity": 0,
+        "fogDensity": 1,
+        "bloom": true,
+        "bloomIntensity": 1.2,
+        "grain": false
+      },
+      "stats": {
+        "top": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bottom": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "left": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "right": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "center": {
+          "avg": 1.3,
+          "min": 1.29,
+          "max": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.03,
+          "n": 100
+        },
+        "fogOpacity": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomIntensity": {
+          "avg": 1.2,
+          "min": 1.2,
+          "max": 1.2,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "bloomReturnT": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        },
+        "volFade": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 100
+        }
+      },
+      "edgePulseScore": 0
+    },
+    "bloom_softReturn_ramp": {
+      "desc": "simulate bloom soft-return 0→1 over samples (does release pulse edges?)",
+      "stats": {
+        "top": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 48
+        },
+        "bottom": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 48
+        },
+        "left": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 48
+        },
+        "right": {
+          "avg": 0,
+          "min": 0,
+          "max": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 48
+        },
+        "center": {
+          "avg": 1.29,
+          "min": 1.29,
+          "max": 1.3,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.05,
+          "n": 48
+        },
+        "fogOpacity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 48
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 48
+        },
+        "bloomIntensity": {
+          "avg": 0.74,
+          "min": 0,
+          "max": 1.2,
+          "peakToPeak": 1.2,
+          "maxFrameDelta": 0.03,
+          "residMaxDev": 0.21,
+          "hfEnergy": 0.03,
+          "n": 48
+        },
+        "bloomReturnT": {
+          "avg": 0.61,
+          "min": 0,
+          "max": 1,
+          "peakToPeak": 1,
+          "maxFrameDelta": 0.03,
+          "residMaxDev": 0.17,
+          "hfEnergy": 0.03,
+          "n": 48
+        },
+        "volFade": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 48
+        }
+      },
+      "edgePulseScore": 0,
+      "note": "Monotonic bloom restore — residMaxDev after detrend is the pulse signal"
+    }
+  },
+  "correlations": {
+    "depthProbe": {
+      "cameraNear": 0.1,
+      "cameraFar": 220,
+      "fogHalfRes": true,
+      "fogEnabled": true,
+      "fogOpacity": 1,
+      "bloomResScale": 0.5,
+      "bloomMipmap": false,
+      "bloomThreshold": 1,
+      "bloomIntensity": 1.2,
+      "note": "Screen edges with no geometry → depth≈far → full ray length in fog march"
+    },
+    "settle": {
+      "edgeVsBloom": 0,
+      "edgeVsFogOpacity": 0,
+      "note": "After settle both bloom+fog should be flat — high corr only if still ramping"
+    }
+  },
+  "diagnosis": {
+    "a_exactPass": "B_fogOnly",
+    "b_exactTerm": "VolumetricFogPass composite/in-scatter at screen-edge far-depth rays",
+    "c_evidence": {
+      "baselineSettleEdgePulseScore": 0,
+      "baselineSettleStats": {
+        "top": {
+          "avg": 9.96,
+          "min": 9.96,
+          "max": 9.96,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        },
+        "bottom": {
+          "avg": 11.07,
+          "min": 11.07,
+          "max": 11.07,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        },
+        "left": {
+          "avg": 11.12,
+          "min": 11.12,
+          "max": 11.12,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        },
+        "right": {
+          "avg": 11.09,
+          "min": 11.09,
+          "max": 11.09,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        },
+        "center": {
+          "avg": 22.03,
+          "min": 22.03,
+          "max": 22.03,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0.07,
+          "n": 300
+        },
+        "fogOpacity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        },
+        "fogDensity": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        },
+        "bloomIntensity": {
+          "avg": 1.2,
+          "min": 1.2,
+          "max": 1.2,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        },
+        "bloomReturnT": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        },
+        "volFade": {
+          "avg": 1,
+          "min": 1,
+          "max": 1,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "residMaxDev": 0,
+          "hfEnergy": 0,
+          "n": 300
+        }
+      },
+      "baselineEdgeVsCenter": {
+        "edgeResidMax": 0,
+        "centerResidMax": 0,
+        "edgeDominant": false
+      },
+      "throughFadeEdgePulseScore": 0.44,
+      "bisectScores": {
+        "a": 0,
+        "b": 0,
+        "c": 0,
+        "d": 0,
+        "e": 0,
+        "f": 0
+      },
+      "withinScores": {
+        "bloom_resScale_1": 0,
+        "bloom_resScale_0_5": 0,
+        "bloom_mipmap_true": 0,
+        "bloom_mipmap_false": 0,
+        "bloom_threshold_2": 0,
+        "bloom_threshold_1": 0,
+        "fog_halfRes_false": 0,
+        "fog_halfRes_true": 0,
+        "fog_opacity_0_bloom_on": 0,
+        "bloom_softReturn_ramp": 0
+      }
+    },
+    "d_proposedFix": "Instrument per-pixel ray length at borders; stabilize far-depth path; do not only fade opacity",
+    "proofRequirement": "A fix is ONLY proven when settle300 edge residMaxDev / edgePulseScore goes flat (±~0) under THIS same instrument. test:smoke is NOT proof.",
+    "noFixShipped": true
+  }
+}

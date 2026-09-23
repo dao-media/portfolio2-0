@@ -1,0 +1,144 @@
+{
+  "cases": [
+    {
+      "deg": 180,
+      "forced": {
+        "theta": 3.141592653589793,
+        "deg": 180,
+        "stops": 4
+      },
+      "probe": {
+        "active": null,
+        "allowNeon": null,
+        "bloomThreshold": null,
+        "tubes": [
+          {
+            "i": 0,
+            "coreMax": 0.68,
+            "shellI": 1.55,
+            "lightI": 10,
+            "hasShell": true,
+            "shellRadius": 0.155
+          },
+          {
+            "i": 1,
+            "coreMax": 0,
+            "shellI": 0,
+            "lightI": 0,
+            "hasShell": true,
+            "shellRadius": 0.155
+          },
+          {
+            "i": 2,
+            "coreMax": 0,
+            "shellI": 0,
+            "lightI": 0,
+            "hasShell": true,
+            "shellRadius": 0.155
+          },
+          {
+            "i": 3,
+            "coreMax": 0,
+            "shellI": 0,
+            "lightI": 0,
+            "hasShell": true,
+            "shellRadius": 0.155
+          }
+        ],
+        "fps": null
+      },
+      "profile": {
+        "x": 886,
+        "peak": 113.9,
+        "median": 83.1,
+        "peakMed": 1.37,
+        "cv": 0.467,
+        "meanL": 73.3,
+        "top": {
+          "r": 57.4,
+          "g": 56.3,
+          "b": 56,
+          "L": 56.5
+        },
+        "bot": {
+          "r": 66.4,
+          "g": 65.4,
+          "b": 66.5,
+          "L": 65.7
+        }
+      },
+      "fps": 121,
+      "file": "public/debug/neon-shell-after-180.png"
+    },
+    {
+      "deg": 90,
+      "forced": {
+        "theta": 1.5707963267948966,
+        "deg": 90,
+        "stops": 4
+      },
+      "probe": {
+        "active": null,
+        "allowNeon": null,
+        "bloomThreshold": null,
+        "tubes": [
+          {
+            "i": 0,
+            "coreMax": 0.68,
+            "shellI": 1.55,
+            "lightI": 10,
+            "hasShell": true,
+            "shellRadius": 0.155
+          },
+          {
+            "i": 1,
+            "coreMax": 0,
+            "shellI": 0,
+            "lightI": 0,
+            "hasShell": true,
+            "shellRadius": 0.155
+          },
+          {
+            "i": 2,
+            "coreMax": 0,
+            "shellI": 0,
+            "lightI": 0,
+            "hasShell": true,
+            "shellRadius": 0.155
+          },
+          {
+            "i": 3,
+            "coreMax": 0,
+            "shellI": 0,
+            "lightI": 0,
+            "hasShell": true,
+            "shellRadius": 0.155
+          }
+        ],
+        "fps": null
+      },
+      "profile": {
+        "x": 1024,
+        "peak": 103.4,
+        "median": 66.7,
+        "peakMed": 1.55,
+        "cv": 0.554,
+        "meanL": 60.4,
+        "top": {
+          "r": 47.5,
+          "g": 46.6,
+          "b": 46.6,
+          "L": 46.8
+        },
+        "bot": {
+          "r": 45.8,
+          "g": 45.4,
+          "b": 46.4,
+          "L": 45.5
+        }
+      },
+      "fps": 115,
+      "file": "public/debug/neon-shell-after-90.png"
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+{
+  "restCapture": {
+    "rt": {
+      "width": 1280,
+      "height": 800,
+      "minFilter": 1003,
+      "magFilter": 1003,
+      "generateMipmaps": false,
+      "type": 1009,
+      "colorSpace": ""
+    },
+    "drawingBuffer": {
+      "width": 1280,
+      "height": 800
+    },
+    "sizeMatch": true,
+    "nearest": true,
+    "camera": {
+      "near": 0.1,
+      "far": 120
+    },
+    "uniforms": {
+      "near": 0.1,
+      "far": 120,
+      "softFade": 2,
+      "feather": 2.5,
+      "resolution": {
+        "x": 1280,
+        "y": 800
+      }
+    },
+    "nearFarMatch": true,
+    "depthMatToneMapped": true,
+    "rendererToneMapping": 4,
+    "samples": [
+      {
+        "nx": 0.5,
+        "ny": 0.5,
+        "rgba": [
+          2,
+          2,
+          2,
+          255
+        ],
+        "packed": 0.00784313725490196,
+        "sceneDepth": 0.9921568627450981,
+        "sceneViewZ": -11.534
+      },
+      {
+        "nx": 0.5,
+        "ny": 0.22,
+        "rgba": [
+          2,
+          2,
+          2,
+          255
+        ],
+        "packed": 0.00784313725490196,
+        "sceneDepth": 0.9921568627450981,
+        "sceneViewZ": -11.534
+      },
+      {
+        "nx": 0.5,
+        "ny": 0.72,
+        "rgba": [
+          2,
+          2,
+          2,
+          255
+        ],
+        "packed": 0.00784313725490196,
+        "sceneDepth": 0.9921568627450981,
+        "sceneViewZ": -11.534
+      },
+      {
+        "nx": 0.2,
+        "ny": 0.4,
+        "rgba": [
+          1,
+          1,
+          1,
+          255
+        ],
+        "packed": 0.00392156862745098,
+        "sceneDepth": 0.996078431372549,
+        "sceneViewZ": -21.045
+      },
+      {
+        "nx": 0.8,
+        "ny": 0.4,
+        "rgba": [
+          1,
+          1,
+          1,
+          255
+        ],
+        "packed": 0.00392156862745098,
+        "sceneDepth": 0.996078431372549,
+        "sceneViewZ": -21.045
+      }
+    ]
+  },
+  "errors": []
+}

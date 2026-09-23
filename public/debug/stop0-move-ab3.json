@@ -1,0 +1,42 @@
+[
+  {
+    "label": "bloom0",
+    "n": 140,
+    "dark": 41,
+    "darkFrac": 0.293,
+    "meanMin": 0,
+    "meanAvg": 14.7
+  },
+  {
+    "label": "grain0",
+    "n": 140,
+    "dark": 27,
+    "darkFrac": 0.193,
+    "meanMin": 0,
+    "meanAvg": 18.5
+  },
+  {
+    "label": "volPassDisabled",
+    "n": 140,
+    "dark": 44,
+    "darkFrac": 0.314,
+    "meanMin": 0,
+    "meanAvg": 15.7
+  },
+  {
+    "label": "directRendererNoComposer",
+    "n": 140,
+    "dark": 108,
+    "darkFrac": 0.771,
+    "meanMin": 6,
+    "meanAvg": 7
+  },
+  {
+    "label": "tinyParallax",
+    "n": 140,
+    "dark": 32,
+    "darkFrac": 0.229,
+    "meanMin": 0,
+    "meanAvg": 17.7
+  }
+]

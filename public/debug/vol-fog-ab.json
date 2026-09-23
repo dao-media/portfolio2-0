@@ -1,0 +1,72 @@
+[
+  {
+    "name": "baseline",
+    "maxContrast": 17.6,
+    "maxContrastY": 599
+  },
+  {
+    "name": "floorFade4",
+    "maxContrast": 10.8,
+    "maxContrastY": 599
+  },
+  {
+    "name": "fogMinY-1",
+    "maxContrast": 15.4,
+    "maxContrastY": 599
+  },
+  {
+    "name": "hazeOff",
+    "maxContrast": 15,
+    "maxContrastY": 599
+  },
+  {
+    "name": "hazeWide",
+    "maxContrast": 15.6,
+    "maxContrastY": 599
+  },
+  {
+    "name": "wrap0",
+    "maxContrast": 17.6,
+    "maxContrastY": 599
+  },
+  {
+    "name": "warp0",
+    "maxContrast": 15.1,
+    "maxContrastY": 599
+  },
+  {
+    "name": "noisePow1",
+    "maxContrast": 19.9,
+    "maxContrastY": 599
+  },
+  {
+    "name": "distFar",
+    "maxContrast": 17.5,
+    "maxContrastY": 599
+  },
+  {
+    "name": "distOff",
+    "maxContrast": 17.6,
+    "maxContrastY": 599
+  },
+  {
+    "name": "nearOff",
+    "maxContrast": 17.8,
+    "maxContrastY": 599
+  },
+  {
+    "name": "expSoft",
+    "maxContrast": 15.2,
+    "maxContrastY": 599
+  },
+  {
+    "name": "densLow",
+    "maxContrast": 13,
+    "maxContrastY": 599
+  },
+  {
+    "name": "fogOff",
+    "maxContrast": 6.5,
+    "maxContrastY": 373
+  }
+]

@@ -1,0 +1,26 @@
+{
+  "n": 242,
+  "darkN": 242,
+  "litN": 0,
+  "darkFrac": 1,
+  "darkSample": {
+    "phase": "afterRenderPass",
+    "calls": 55,
+    "tris": 212346,
+    "beauty": {
+      "mean": 0,
+      "black": 1
+    },
+    "writeW": 1280,
+    "writeH": 800,
+    "camX": 0,
+    "camY": 2.85
+  },
+  "litSample": null,
+  "callMin": 54,
+  "callMax": 55,
+  "triMin": 212344,
+  "triMax": 212346,
+  "darkAvgCalls": 54.86776859504132,
+  "litAvgCalls": null
+}

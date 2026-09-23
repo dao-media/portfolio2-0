@@ -54,10 +54,11 @@ const MATERIAL_NORMAL_SCALE = {
   cable_black: 0.65
 };
 
-/** Raise mapped roughness so grille/speaker microfacets stop crawling. */
+/** Raise mapped roughness so grille/speaker microfacets stop crawling.
+ *  Also keeps neon PointLight from minting a blown edge specular on the tower. */
 const MATERIAL_ROUGHNESS_FLOOR = {
-  pc_1: 0.42,
-  pc_2: 0.32,
+  pc_1: 0.62,
+  pc_2: 0.38,
   cable_black: 0.38
 };
 
@@ -74,6 +75,31 @@ const MATERIAL_MAP_MIP_BIAS = {
   pc_2: 0.35,
   cable_black: 0.25
 };
+
+/** Soft-cap neon PointLight energy on PC plastic (Desktop tube sits ~1 m from the
+ *  tower edge — intensity 28 otherwise mints a blown specular “neon bar” chunk).
+ *  Applied by inlining `ShaderChunk.lights_fragment_begin` — `#include` is NOT
+ *  expanded yet inside `onBeforeCompile`, so searching for `RE_Direct` there is a no-op. */
+const MATERIAL_POINT_LIGHT_MUL = {
+  pc_1: 0.16,
+  pc_2: 0.22,
+  cable_black: 0.55
+};
+
+/** Kill mirror-edge specular under the mid-tube PointLight (height ≈ chunk Y). */
+const MATERIAL_SPECULAR_INTENSITY = {
+  pc_1: 0.18,
+  pc_2: 0.32,
+  cable_black: 0.5
+};
+
+function getMaterialPointLightMul(matName) {
+  return MATERIAL_POINT_LIGHT_MUL[resolveMaterialName(matName)] ?? 0.4;
+}
+
+function getMaterialSpecularIntensity(matName) {
+  return MATERIAL_SPECULAR_INTENSITY[resolveMaterialName(matName)] ?? 1;
+}
 
 const MATERIAL_ENV_INTENSITY = {
   pc_1: 0.38,
@@ -220,6 +246,7 @@ function buildPbrMaterial(params, matName) {
   params.envMapIntensity = getMaterialEnvIntensity(matName);
   params.clearcoat = cc.clearcoat;
   params.clearcoatRoughness = cc.clearcoatRoughness;
+  params.specularIntensity = getMaterialSpecularIntensity(matName);
 
   const mat = new THREE.MeshPhysicalMaterial(params);
   mat.name = matName;
@@ -296,6 +323,7 @@ function applyPcMaterialShaders(mat, matName) {
   const floor = getMaterialRoughnessFloor(resolved);
   const nBias = getMaterialNormalMipBias(resolved);
   const mapBias = getMaterialMapMipBias(resolved);
+  const pointMul = getMaterialPointLightMul(resolved);
 
   const injectRoughnessFloor = (shader) => {
     shader.fragmentShader = shader.fragmentShader.replace(
@@ -303,6 +331,32 @@ function applyPcMaterialShaders(mat, matName) {
       `#include <roughnessmap_fragment>
 roughnessFactor = max(roughnessFactor, ${floor.toFixed(3)});`
     );
+  };
+
+  const injectPointLightMul = (shader) => {
+    // Scale every RE_Direct (point/spot/dir). Spot is 0 this pass; neon PointLights
+    // are the only hot contributors — without this the tower edge facing the tube
+    // reads as a second neon bar (§20.18b).
+    //
+    // CRITICAL: `onBeforeCompile` still has `#include <lights_fragment_begin>` —
+    // RE_Direct is not in the string yet. Inline ShaderChunk, patch, replace the include.
+    const includeTag = "#include <lights_fragment_begin>";
+    if (!shader.fragmentShader.includes(includeTag)) return;
+
+    const needle =
+      "RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );";
+    const chunk = THREE.ShaderChunk.lights_fragment_begin;
+    if (!chunk || !chunk.includes(needle)) {
+      console.warn(
+        `[pcProductionMaterials] lights_fragment_begin RE_Direct needle missing for ${resolved} — point-light mul skipped`
+      );
+      return;
+    }
+
+    const replacement = `directLight.color *= ${pointMul.toFixed(3)};
+		RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );`;
+    const patched = chunk.replaceAll(needle, replacement);
+    shader.fragmentShader = shader.fragmentShader.replace(includeTag, patched);
   };
 
   const injectMipBiases = (shader) => {
@@ -331,10 +385,11 @@ roughnessFactor = max(roughnessFactor, ${floor.toFixed(3)});`
   if (resolved === "cable_black") {
     mat.onBeforeCompile = (shader) => {
       injectRoughnessFloor(shader);
+      injectPointLightMul(shader);
       injectMipBiases(shader);
     };
     mat.customProgramCacheKey = () =>
-      `pc-spec-aa-v3-${resolved}-${floor}-${nBias}-${mapBias}`;
+      `pc-spec-aa-v6-${resolved}-${floor}-${nBias}-${mapBias}-${pointMul}`;
     return;
   }
 
@@ -342,6 +397,7 @@ roughnessFactor = max(roughnessFactor, ${floor.toFixed(3)});`
 
   mat.onBeforeCompile = (shader) => {
     injectRoughnessFloor(shader);
+    injectPointLightMul(shader);
     injectMipBiases(shader);
     shader.fragmentShader = shader.fragmentShader.replace(
       "#include <color_fragment>",
@@ -358,7 +414,7 @@ roughnessFactor = max(roughnessFactor, ${floor.toFixed(3)});`
     );
   };
   mat.customProgramCacheKey = () =>
-    `pc-plastic-spec-aa-v3-${resolved}-${floor}-${nBias}-${mapBias}`;
+    `pc-plastic-spec-aa-v6-${resolved}-${floor}-${nBias}-${mapBias}-${pointMul}`;
 }
 
 function applyMaterialRenderSettings(mat, matName) {
@@ -395,6 +451,7 @@ function polishLoadedMaterial(mat) {
   const cc = getMaterialClearcoat(matName);
   mat.clearcoat = cc.clearcoat;
   mat.clearcoatRoughness = cc.clearcoatRoughness;
+  mat.specularIntensity = getMaterialSpecularIntensity(matName);
 
   applyPcMaterialShaders(mat, matName);
 
@@ -432,11 +489,13 @@ async function applyEmissiveMaterial(mat, sourceMat) {
   if (POWER_LED_MATERIALS.has(mat.name)) {
     mat.emissive.setHex(0x000000);
     mat.emissiveIntensity = 0;
+    // Never untone-map plastics — neon PointLight speculars become a second neon bar.
+    mat.toneMapped = true;
   } else {
     mat.emissive.setHex(cfg.color);
     mat.emissiveIntensity = cfg.intensity;
+    mat.toneMapped = false;
   }
-  mat.toneMapped = false;
   mat.needsUpdate = true;
   return mat;
 }

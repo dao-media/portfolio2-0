@@ -1,0 +1,10 @@
+{
+  "diag": {
+    "hasSky": true,
+    "floorDW": false,
+    "floorT": true,
+    "hasWet": true,
+    "bubble": true
+  },
+  "errors": []
+}

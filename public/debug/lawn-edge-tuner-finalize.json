@@ -1,0 +1,29 @@
+{
+  "label": "current",
+  "ts": 1789759849270,
+  "updated": [
+    "patchScale",
+    "bladeLength",
+    "bladeDensity",
+    "tuftAmount",
+    "breezeStrength",
+    "breezeSpeed",
+    "coverageNoiseScale",
+    "edgeFalloff",
+    "stragglerDensity",
+    "shapeDistortion"
+  ],
+  "skipped": [],
+  "params": {
+    "patchScale": 1.59,
+    "bladeLength": 0.13,
+    "bladeDensity": 2,
+    "tuftAmount": 0.79,
+    "breezeStrength": 0.055,
+    "breezeSpeed": 0.85,
+    "coverageNoiseScale": 3.2,
+    "edgeFalloff": 1.05,
+    "stragglerDensity": 0.47,
+    "shapeDistortion": 0.3
+  }
+}

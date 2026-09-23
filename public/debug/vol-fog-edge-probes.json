@@ -1,0 +1,77 @@
+{
+  "gate": "GATE4-density-invariant-edge-probes",
+  "pose": {
+    "height": 2.85,
+    "lookAtY": 2.35,
+    "pitchDeg": -2.8165155242159146
+  },
+  "baselineRow315": 21,
+  "results": {
+    "baseline": {
+      "file": "vol-fog-probe-baseline.png",
+      "maxEdgeMag": 24.8,
+      "edgeY": 315,
+      "contrast": 21,
+      "row315contrast": 21,
+      "above315": 30.8,
+      "below315": 51.8
+    },
+    "probe1_heightClip": {
+      "file": "vol-fog-probe1-height-clip.png",
+      "uniforms": {
+        "endY": 20,
+        "maxY": 20
+      },
+      "maxEdgeMag": 9.27,
+      "edgeY": 663,
+      "contrast": 9.6,
+      "row315contrast": 0.7,
+      "above315": 80.1,
+      "below315": 80.8,
+      "ratio": 0.03333333333333333,
+      "moved": true,
+      "collapsed": true,
+      "kills": true
+    },
+    "probe2_inscatterCap": {
+      "file": "vol-fog-probe2-inscatter-cap.png",
+      "fillCap": 10,
+      "maxEdgeMag": 24.82,
+      "edgeY": 315,
+      "contrast": 21,
+      "row315contrast": 21,
+      "above315": 30.7,
+      "below315": 51.7,
+      "ratio": 1,
+      "moved": false,
+      "collapsed": false,
+      "kills": false
+    },
+    "probe3_bloomOff": {
+      "file": "vol-fog-probe3-bloom-off.png",
+      "bloom": {
+        "ok": true,
+        "prev": {
+          "intensity": 1.2,
+          "threshold": 1
+        },
+        "intensity": 0,
+        "bloomPassEnabled": false
+      },
+      "maxEdgeMag": 27.15,
+      "edgeY": 315,
+      "contrast": 23.2,
+      "row315contrast": 23.2,
+      "above315": 20,
+      "below315": 43.2,
+      "ratio": 1.1047619047619048,
+      "moved": false,
+      "collapsed": false,
+      "kills": false
+    }
+  },
+  "killers": [
+    1
+  ],
+  "verdict": "PROBE 1 kills the edge"
+}

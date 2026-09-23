@@ -1,0 +1,32 @@
+[
+  {
+    "tag": "h10-m10",
+    "label": "baseline",
+    "height": 1,
+    "maxLight": 10,
+    "live": {
+      "height": 1,
+      "maxLight": 10
+    }
+  },
+  {
+    "tag": "h18-m10",
+    "label": "lift only",
+    "height": 1.8,
+    "maxLight": 10,
+    "live": {
+      "height": 1.8,
+      "maxLight": 10
+    }
+  },
+  {
+    "tag": "h18-m07",
+    "label": "lift + lower peak",
+    "height": 1.8,
+    "maxLight": 7,
+    "live": {
+      "height": 1.8,
+      "maxLight": 7
+    }
+  }
+]

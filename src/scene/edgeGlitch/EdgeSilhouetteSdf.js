@@ -191,8 +191,20 @@ export class EdgeSilhouetteSdf {
     for (const root of this.roots) {
       root.traverse((obj) => {
         if (!obj.isMesh) return;
+        if (!obj.visible) return;
         const n = `${obj.name}`.toLowerCase();
-        if (n.includes("grass") || n.includes("lawn") || n.includes("ground")) return;
+        // Bust lawn + PC blockout / hidden helpers — not silhouette subjects.
+        if (
+          n.includes("grass") ||
+          n.includes("lawn") ||
+          n.includes("ground") ||
+          n.includes("blockout") ||
+          n.includes("hitproxy") ||
+          n.includes("collider") ||
+          n.includes("arch-portal")
+        ) {
+          return;
+        }
         this._meshes.push(obj);
       });
     }
@@ -221,7 +233,8 @@ export class EdgeSilhouetteSdf {
   }
 
   /**
-   * CPU sample of signed distance at UV (0–1). Expensive — verify / debug only.
+   * On-demand CPU probe of one SDF texel. Not part of the frame loop —
+   * the water-cursor rim must never call this (GPU taps only).
    * @param {number} u
    * @param {number} v
    * @returns {number}

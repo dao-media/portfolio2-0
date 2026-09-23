@@ -7,12 +7,20 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     />
     <title>Portfolio 2.0 — Stage Prototype</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,450;9..144,550&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/src/styles/main.css" />
     <link rel="stylesheet" href="/src/styles/myspace-type.css" />
     <link rel="stylesheet" href="/src/styles/myspace-page.css" />
     <link rel="stylesheet" href="/src/styles/crt-power-on.css" />
     <link rel="stylesheet" href="/src/styles/xp-boot.css" />
     <link rel="stylesheet" href="/src/styles/sidekick-sms.css" />
+    <link rel="stylesheet" href="/src/styles/duo-mail.css" />
+    <link rel="stylesheet" href="/src/styles/duo-case-study.css" />
   </head>
   <body>
     <canvas id="scene-canvas" aria-label="Cinematic 3D portfolio stage"></canvas>
@@ -21,7 +29,10 @@
       <div class="top-bar">
         <div class="wordmark"><b>Portfolio 2.0</b>&nbsp;&nbsp;Camera Choreography Prototype</div>
         <div class="fps mono" id="fps" aria-live="polite">— FPS</div>
-        <div class="readout mono" id="readout">STAGE 000.0°</div>
+        <div class="top-bar__end">
+          <div class="readout mono" id="readout">STAGE 000.0°</div>
+          <div class="hint">Scroll · Swipe · Arrow keys</div>
+        </div>
       </div>
       <div class="bottom-bar">
         <div class="caption" id="caption">
@@ -32,9 +43,6 @@
           </span>
         </div>
         <div class="dots" id="dots" role="tablist" aria-label="Vignettes"></div>
-        <div class="bottom-bar__end">
-          <div class="hint">Scroll · Swipe · Arrow keys</div>
-        </div>
       </div>
     </div>
 
@@ -50,6 +58,8 @@
     <div id="myspace-crt-host" aria-hidden="true"></div>
     <div id="sidekick-sms-host" aria-hidden="true"></div>
 
+    <button type="button" id="bh-enter" class="bh-enter" hidden>Click to enter</button>
+
     <div class="fader is-gating" id="fader">
       <div class="xp-boot-bar fader__xp-bar" aria-hidden="true">
         <span class="xp-boot-bar__block"></span>
@@ -59,6 +69,9 @@
     </div>
 
     <div id="audio-toggle-root" class="audio-fab-root"></div>
+    <div id="duo-fab-root" class="duo-fab-root" aria-live="polite"></div>
+    <div id="duo-mail-overlay" class="duo-mail-overlay" hidden></div>
+    <div id="duo-case-study-overlay" class="duo-case-study-overlay" hidden></div>
 
     <!-- CRT boot — captured to monitor texture before MySpace dashboard (see CrtPowerOnSequence.js) -->
     <div id="crt-power-on-root" class="crt-power-on" hidden aria-hidden="true">

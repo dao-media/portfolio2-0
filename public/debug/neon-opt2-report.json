@@ -1,0 +1,658 @@
+[
+  {
+    "forced": {
+      "index": 2,
+      "thetaDeg": 180,
+      "names": [
+        {
+          "i": 0,
+          "name": "Bust",
+          "thetaDeg": 0,
+          "colors": [
+            "#9dff1a",
+            "#00e5ff"
+          ]
+        },
+        {
+          "i": 1,
+          "name": "Retro Desktop",
+          "thetaDeg": 90,
+          "colors": [
+            "#00e5ff",
+            "#9dff1a"
+          ]
+        },
+        {
+          "i": 2,
+          "name": "Sidekick",
+          "thetaDeg": 180,
+          "colors": [
+            "#8c2dff",
+            "#ff2d95",
+            "#00e5ff"
+          ]
+        },
+        {
+          "i": 3,
+          "name": "Archaeology",
+          "thetaDeg": -90,
+          "colors": [
+            "#ff3d1a",
+            "#ffc14a"
+          ]
+        }
+      ],
+      "stateIndex": 2
+    },
+    "probe": {
+      "state": {
+        "index": 2,
+        "thetaDeg": 180
+      },
+      "tubes": [
+        {
+          "i": 0,
+          "name": "Bust",
+          "coreMax": 0,
+          "shellI": 0,
+          "lightI": 0
+        },
+        {
+          "i": 1,
+          "name": "Retro Desktop",
+          "coreMax": 0,
+          "shellI": 0,
+          "lightI": 0
+        },
+        {
+          "i": 2,
+          "name": "Sidekick",
+          "coreMax": 0.68,
+          "shellI": 1.55,
+          "lightI": 10
+        },
+        {
+          "i": 3,
+          "name": "Archaeology",
+          "coreMax": 0,
+          "shellI": 0,
+          "lightI": 0
+        }
+      ],
+      "bloomThreshold": null
+    },
+    "analysis": {
+      "label": "Sidekick",
+      "x": 883,
+      "peak": 225.4,
+      "median": 147.7,
+      "peakMed": 1.53,
+      "cv": 0.538,
+      "bands": [
+        {
+          "L": 20.7,
+          "chroma": 3,
+          "rgb": [
+            21.9,
+            20.4,
+            21.3
+          ]
+        },
+        {
+          "L": 177.6,
+          "chroma": 207.7,
+          "rgb": [
+            188.6,
+            169.1,
+            229.3
+          ]
+        },
+        {
+          "L": 210.7,
+          "chroma": 268.7,
+          "rgb": [
+            120.6,
+            232.9,
+            255
+          ]
+        },
+        {
+          "L": 151,
+          "chroma": 267.3,
+          "rgb": [
+            212.8,
+            122.2,
+            255
+          ]
+        },
+        {
+          "L": 108.2,
+          "chroma": 216.2,
+          "rgb": [
+            186.2,
+            78.1,
+            176.9
+          ]
+        }
+      ]
+    },
+    "fps": 40,
+    "file": "public/debug/neon-opt2-stop2.png"
+  },
+  {
+    "forced": {
+      "index": 0,
+      "thetaDeg": 0,
+      "names": [
+        {
+          "i": 0,
+          "name": "Bust",
+          "thetaDeg": 0,
+          "colors": [
+            "#9dff1a",
+            "#00e5ff"
+          ]
+        },
+        {
+          "i": 1,
+          "name": "Retro Desktop",
+          "thetaDeg": 90,
+          "colors": [
+            "#00e5ff",
+            "#9dff1a"
+          ]
+        },
+        {
+          "i": 2,
+          "name": "Sidekick",
+          "thetaDeg": 180,
+          "colors": [
+            "#8c2dff",
+            "#ff2d95",
+            "#00e5ff"
+          ]
+        },
+        {
+          "i": 3,
+          "name": "Archaeology",
+          "thetaDeg": -90,
+          "colors": [
+            "#ff3d1a",
+            "#ffc14a"
+          ]
+        }
+      ],
+      "stateIndex": 0
+    },
+    "probe": {
+      "state": {
+        "index": 0,
+        "thetaDeg": 0
+      },
+      "tubes": [
+        {
+          "i": 0,
+          "name": "Bust",
+          "coreMax": 0.68,
+          "shellI": 1.55,
+          "lightI": 10
+        },
+        {
+          "i": 1,
+          "name": "Retro Desktop",
+          "coreMax": 0,
+          "shellI": 0,
+          "lightI": 0
+        },
+        {
+          "i": 2,
+          "name": "Sidekick",
+          "coreMax": 0,
+          "shellI": 0,
+          "lightI": 0
+        },
+        {
+          "i": 3,
+          "name": "Archaeology",
+          "coreMax": 0,
+          "shellI": 0,
+          "lightI": 0
+        }
+      ],
+      "bloomThreshold": null
+    },
+    "analysis": {
+      "label": "Bust",
+      "x": 880,
+      "peak": 234.3,
+      "median": 222.1,
+      "peakMed": 1.05,
+      "cv": 0.485,
+      "bands": [
+        {
+          "L": 36.8,
+          "chroma": 38.5,
+          "rgb": [
+            45.9,
+            35.1,
+            26.7
+          ]
+        },
+        {
+          "L": 214.5,
+          "chroma": 196.4,
+          "rgb": [
+            140.1,
+            236.4,
+            216.1
+          ]
+        },
+        {
+          "L": 225.4,
+          "chroma": 231,
+          "rgb": [
+            172.6,
+            249.6,
+            141
+          ]
+        },
+        {
+          "L": 228,
+          "chroma": 235.1,
+          "rgb": [
+            170.7,
+            252.8,
+            150.7
+          ]
+        },
+        {
+          "L": 166.7,
+          "chroma": 223.7,
+          "rgb": [
+            79.5,
+            191.1,
+            182.3
+          ]
+        }
+      ]
+    },
+    "fps": 40,
+    "file": "public/debug/neon-opt2-stop0.png"
+  },
+  {
+    "forced": {
+      "index": 1,
+      "thetaDeg": 90,
+      "names": [
+        {
+          "i": 0,
+          "name": "Bust",
+          "thetaDeg": 0,
+          "colors": [
+            "#9dff1a",
+            "#00e5ff"
+          ]
+        },
+        {
+          "i": 1,
+          "name": "Retro Desktop",
+          "thetaDeg": 90,
+          "colors": [
+            "#00e5ff",
+            "#9dff1a"
+          ]
+        },
+        {
+          "i": 2,
+          "name": "Sidekick",
+          "thetaDeg": 180,
+          "colors": [
+            "#8c2dff",
+            "#ff2d95",
+            "#00e5ff"
+          ]
+        },
+        {
+          "i": 3,
+          "name": "Archaeology",
+          "thetaDeg": -90,
+          "colors": [
+            "#ff3d1a",
+            "#ffc14a"
+          ]
+        }
+      ],
+      "stateIndex": 1
+    },
+    "probe": {
+      "state": {
+        "index": 1,
+        "thetaDeg": 90
+      },
+      "tubes": [
+        {
+          "i": 0,
+          "name": "Bust",
+          "coreMax": 0,
+          "shellI": 0,
+          "lightI": 0
+        },
+        {
+          "i": 1,
+          "name": "Retro Desktop",
+          "coreMax": 0.68,
+          "shellI": 1.55,
+          "lightI": 10
+        },
+        {
+          "i": 2,
+          "name": "Sidekick",
+          "coreMax": 0,
+          "shellI": 0,
+          "lightI": 0
+        },
+        {
+          "i": 3,
+          "name": "Archaeology",
+          "coreMax": 0,
+          "shellI": 0,
+          "lightI": 0
+        }
+      ],
+      "bloomThreshold": null
+    },
+    "analysis": {
+      "label": "Retro Desktop",
+      "x": 1019,
+      "peak": 238.9,
+      "median": 217.3,
+      "peakMed": 1.1,
+      "cv": 0.564,
+      "bands": [
+        {
+          "L": 17.7,
+          "chroma": 2.6,
+          "rgb": [
+            17,
+            18,
+            16.8
+          ]
+        },
+        {
+          "L": 207,
+          "chroma": 232,
+          "rgb": [
+            127.2,
+            235.4,
+            160.8
+          ]
+        },
+        {
+          "L": 219.7,
+          "chroma": 293.9,
+          "rgb": [
+            104.7,
+            251.1,
+            248.1
+          ]
+        },
+        {
+          "L": 230.8,
+          "chroma": 217.3,
+          "rgb": [
+            164,
+            255,
+            188.5
+          ]
+        },
+        {
+          "L": 145.1,
+          "chroma": 166.5,
+          "rgb": [
+            130.6,
+            156.6,
+            73.4
+          ]
+        }
+      ]
+    },
+    "fps": 38,
+    "file": "public/debug/neon-opt2-stop1.png"
+  },
+  {
+    "forced": {
+      "index": 3,
+      "thetaDeg": 270,
+      "names": [
+        {
+          "i": 0,
+          "name": "Bust",
+          "thetaDeg": 0,
+          "colors": [
+            "#9dff1a",
+            "#00e5ff"
+          ]
+        },
+        {
+          "i": 1,
+          "name": "Retro Desktop",
+          "thetaDeg": 90,
+          "colors": [
+            "#00e5ff",
+            "#9dff1a"
+          ]
+        },
+        {
+          "i": 2,
+          "name": "Sidekick",
+          "thetaDeg": 180,
+          "colors": [
+            "#8c2dff",
+            "#ff2d95",
+            "#00e5ff"
+          ]
+        },
+        {
+          "i": 3,
+          "name": "Archaeology",
+          "thetaDeg": -90,
+          "colors": [
+            "#ff3d1a",
+            "#ffc14a"
+          ]
+        }
+      ],
+      "stateIndex": 3
+    },
+    "probe": {
+      "state": {
+        "index": 3,
+        "thetaDeg": 270
+      },
+      "tubes": [
+        {
+          "i": 0,
+          "name": "Bust",
+          "coreMax": 0,
+          "shellI": 0,
+          "lightI": 0
+        },
+        {
+          "i": 1,
+          "name": "Retro Desktop",
+          "coreMax": 0,
+          "shellI": 0,
+          "lightI": 0
+        },
+        {
+          "i": 2,
+          "name": "Sidekick",
+          "coreMax": 0,
+          "shellI": 0,
+          "lightI": 0
+        },
+        {
+          "i": 3,
+          "name": "Archaeology",
+          "coreMax": 0.68,
+          "shellI": 1.55,
+          "lightI": 10
+        }
+      ],
+      "bloomThreshold": null
+    },
+    "analysis": {
+      "label": "Archaeology",
+      "x": 882,
+      "peak": 244.3,
+      "median": 154.4,
+      "peakMed": 1.58,
+      "cv": 0.561,
+      "bands": [
+        {
+          "L": 18.3,
+          "chroma": 5.1,
+          "rgb": [
+            19.7,
+            18,
+            17.2
+          ]
+        },
+        {
+          "L": 150.3,
+          "chroma": 318.6,
+          "rgb": [
+            244.6,
+            128.9,
+            85.3
+          ]
+        },
+        {
+          "L": 156.4,
+          "chroma": 321.9,
+          "rgb": [
+            253.9,
+            133.9,
+            92.9
+          ]
+        },
+        {
+          "L": 218.3,
+          "chroma": 276.2,
+          "rgb": [
+            255,
+            217.6,
+            116.9
+          ]
+        },
+        {
+          "L": 158.1,
+          "chroma": 204.4,
+          "rgb": [
+            184.9,
+            157.7,
+            82.7
+          ]
+        }
+      ]
+    },
+    "fps": 48,
+    "file": "public/debug/neon-opt2-stop3.png"
+  },
+  {
+    "graze": true,
+    "analysis": {
+      "label": "Sidekick-graze",
+      "x": 639,
+      "peak": 210.8,
+      "median": 19.8,
+      "peakMed": 10.66,
+      "cv": 1.588,
+      "bands": [
+        {
+          "L": 16.6,
+          "chroma": 0,
+          "rgb": [
+            16.6,
+            16.6,
+            16.6
+          ]
+        },
+        {
+          "L": 15.7,
+          "chroma": 0.1,
+          "rgb": [
+            15.7,
+            15.7,
+            15.7
+          ]
+        },
+        {
+          "L": 50.7,
+          "chroma": 17.1,
+          "rgb": [
+            47,
+            51.3,
+            55.6
+          ]
+        },
+        {
+          "L": 15.5,
+          "chroma": 0.2,
+          "rgb": [
+            15.4,
+            15.5,
+            15.6
+          ]
+        },
+        {
+          "L": 16.6,
+          "chroma": 0,
+          "rgb": [
+            16.6,
+            16.7,
+            16.7
+          ]
+        }
+      ]
+    },
+    "file": "public/debug/neon-opt2-sidekick-graze.png",
+    "probe": {
+      "state": {
+        "index": 2,
+        "thetaDeg": 208
+      },
+      "tubes": [
+        {
+          "i": 0,
+          "name": "Bust",
+          "coreMax": 0,
+          "shellI": 0,
+          "lightI": 0
+        },
+        {
+          "i": 1,
+          "name": "Retro Desktop",
+          "coreMax": 0,
+          "shellI": 0,
+          "lightI": 0
+        },
+        {
+          "i": 2,
+          "name": "Sidekick",
+          "coreMax": 0.68,
+          "shellI": 1.55,
+          "lightI": 10
+        },
+        {
+          "i": 3,
+          "name": "Archaeology",
+          "coreMax": 0,
+          "shellI": 0,
+          "lightI": 0
+        }
+      ],
+      "bloomThreshold": null
+    }
+  }
+]

@@ -1,0 +1,38 @@
+{
+  "gate": "GATE4-step1-path-length-saturation",
+  "pose": {
+    "height": 2.85,
+    "lookAtY": 2.35,
+    "pitchDeg": -2.8165155242159146,
+    "density": 0.04
+  },
+  "full": {
+    "density": 0.16,
+    "file": "vol-fog-step1-density-full.png",
+    "maxEdgeMag": 24.8,
+    "edgeY": 315,
+    "above": 30.8,
+    "at": 52,
+    "below": 51.8,
+    "contrast": 21
+  },
+  "quarter": {
+    "density": 0.04,
+    "file": "vol-fog-step1-density-quarter.png",
+    "maxEdgeMag": 24.78,
+    "edgeY": 315,
+    "above": 31,
+    "at": 52.1,
+    "below": 52,
+    "contrast": 21
+  },
+  "contrastRatio": 1,
+  "verdict": "REJECTED — band survives thin fog; hypothesis wrong",
+  "alphaFormulation": {
+    "hasBeerLambertAbsorb": true,
+    "hasTransmittanceProduct": true,
+    "hasAlphaOneMinusT": true,
+    "hasLinearSumClamp": false
+  },
+  "alphaVerdict": "Beer-Lambert (absorb=1-exp(-sigma*dt); T*=(1-absorb); alpha=1-T) — NOT linear-clamp"
+}

@@ -3,16 +3,16 @@ import {
   BloomEffect,
   EffectComposer,
   EffectPass,
-  KernelSize,
-  RenderPass
+  KernelSize
 } from "postprocessing";
 import { NEON_BLOOM } from "./constants.js";
 import { FilmGrainEffect } from "./FilmGrainEffect.js";
+import { PortalAwareRenderPass } from "../vignettes/PortalAwareRenderPass.js";
 
 /**
- * One live composer: RenderPass → volumetric fog → (optional) EdgeGlitchPass →
- * bloom → (optional) film grain. Grain defaults to **0**. Grain stays last so
- * it is not bloomed. Do not add a second composer.
+ * One live composer: PortalAwareRenderPass → volumetric fog → (optional)
+ * EdgeGlitchPass → bloom → (optional) film grain. Grain defaults to **0**.
+ * Grain stays last so it is not bloomed. Do not add a second composer.
  */
 export class PostPass {
   /**
@@ -45,10 +45,17 @@ export class PostPass {
 
     this.composer = new EffectComposer(renderer, {
       frameBufferType: THREE.HalfFloatType,
-      multisampling: 0
+      multisampling: 0,
+      // Required for Archaeology Giza portal stencil window.
+      stencilBuffer: true
     });
 
-    this.renderPass = new RenderPass(this._scene ?? new THREE.Scene(), camera);
+    this.renderPass = new PortalAwareRenderPass(
+      this._scene ?? new THREE.Scene(),
+      camera
+    );
+    // Stencil must clear each frame or Equal content smears outside the opening.
+    this.renderPass.clearPass.setClearFlags(true, true, true);
     const bloomScale = NEON_BLOOM.resolutionScale ?? 0.5;
     // mipmapBlur: false — Kawase/mipmap path intermittently outputs a full-black
     // frame when the camera translates every frame (stop-0 parallax). Kernel
@@ -121,6 +128,14 @@ export class PostPass {
     }
 
     this.volumetricPass?.setSize?.(dw, dh);
+  }
+
+  /**
+   * Wire Archaeology Giza portal for the beauty stencil subpass.
+   * @param {{ renderPortalSubpass?: Function } | null} portal
+   */
+  setPortal(portal) {
+    this.renderPass?.setPortal?.(portal ?? null);
   }
 
   /**

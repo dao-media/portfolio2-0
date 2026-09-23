@@ -1,16 +1,16 @@
 import * as THREE from "three";
 import { Pass } from "postprocessing";
 import {
-  EDGE_GLITCH_ARM_OUTER,
   EDGE_GLITCH_ARM_RAMP,
-  EDGE_GLITCH_BAND_OUTER,
+  EDGE_GLITCH_GLITCH_ARM_OUTER,
   EDGE_GLITCH_INTENSITY,
-  EDGE_GLITCH_LOCAL_BASE,
-  EDGE_GLITCH_LOCAL_GROWTH,
   EDGE_GLITCH_NOISE_HZ,
   EDGE_GLITCH_OCC_BIAS,
   EDGE_GLITCH_OCC_SOFT,
   EDGE_GLITCH_RGB_SPLIT,
+  EDGE_GLITCH_SPAN_ALONG,
+  EDGE_GLITCH_SPAN_IN,
+  EDGE_GLITCH_SPAN_OUT,
   EDGE_GLITCH_TEAR_BANDS
 } from "./constants.js";
 import {
@@ -19,11 +19,11 @@ import {
 } from "./edgeGlitchMask.glsl.js";
 
 /**
- * Local silhouette tear pass (one live composer).
+ * Local silhouette tear pass (one live composer) — restored 9/15–9/16 look.
  *
- * Beauty resample + RGB split. Origin = SDF-projected edge under the cursor.
- * Occlusion: scene depth vs bust depth fades strength → 0 at rim ∩ occluder.
- * fog → this → bloom → grain. Not glitch-gl.
+ * Beauty resample + RGB split. Strength = L1 diamond at CROSS POINT.
+ * Occlusion: scene depth vs subject depth fades strength → 0 at rim ∩ occluder.
+ * fog → this → bloom → grain. Not glitch-gl. Not SubjectDissolvePass.
  */
 export class EdgeGlitchPass extends Pass {
   constructor() {
@@ -40,14 +40,16 @@ export class EdgeGlitchPass extends Pass {
       uHasSceneDepth: { value: 0 },
       uOccSoft: { value: EDGE_GLITCH_OCC_SOFT },
       uOccBias: { value: EDGE_GLITCH_OCC_BIAS },
+      uCamNear: { value: 0.1 },
+      uCamFar: { value: 40 },
       uCursorUv: { value: new THREE.Vector2(-1, -1) },
       uCursorActive: { value: 0 },
       uEnabled: { value: 0 },
-      uBandOuter: { value: EDGE_GLITCH_BAND_OUTER },
-      uArmOuter: { value: EDGE_GLITCH_ARM_OUTER },
+      uArmOuter: { value: EDGE_GLITCH_GLITCH_ARM_OUTER },
       uArmRamp: { value: EDGE_GLITCH_ARM_RAMP },
-      uLocalBase: { value: EDGE_GLITCH_LOCAL_BASE },
-      uLocalGrowth: { value: EDGE_GLITCH_LOCAL_GROWTH },
+      uSpanAlong: { value: EDGE_GLITCH_SPAN_ALONG },
+      uSpanOut: { value: EDGE_GLITCH_SPAN_OUT },
+      uSpanIn: { value: EDGE_GLITCH_SPAN_IN },
       uTearBands: { value: EDGE_GLITCH_TEAR_BANDS },
       uGlitchIntensity: { value: EDGE_GLITCH_INTENSITY },
       uRgbSplit: { value: EDGE_GLITCH_RGB_SPLIT },
@@ -77,14 +79,16 @@ export class EdgeGlitchPass extends Pass {
         uniform float uHasSceneDepth;
         uniform float uOccSoft;
         uniform float uOccBias;
+        uniform float uCamNear;
+        uniform float uCamFar;
         uniform vec2 uCursorUv;
         uniform float uCursorActive;
         uniform float uEnabled;
-        uniform float uBandOuter;
         uniform float uArmOuter;
         uniform float uArmRamp;
-        uniform float uLocalBase;
-        uniform float uLocalGrowth;
+        uniform float uSpanAlong;
+        uniform float uSpanOut;
+        uniform float uSpanIn;
         uniform float uTearBands;
         uniform float uGlitchIntensity;
         uniform float uRgbSplit;
@@ -122,29 +126,32 @@ export class EdgeGlitchPass extends Pass {
           }
 
           float dCursor = texture2D(uEdgeSdf, uCursorUv).r;
-          // Hard cut when pointer is inside the silhouette
+          // Hard cut when pointer is inside the silhouette.
           if (dCursor <= 0.0) {
             gl_FragColor = src;
             return;
           }
 
-          // Proximity: closer to edge → stronger WIDTH + INTENSITY
-          // ARM_OUTER is a HARD gate — outside it, zero effect (no far-cursor leak).
           float tArm = clamp(1.0 - dCursor / max(uArmOuter, 1e-6), 0.0, 1.0);
           float proximity = pow(tArm, max(uArmRamp, 0.01));
           if (proximity < 1e-4) {
             gl_FragColor = src;
             return;
           }
-          // Origin on the alpha edge (not the cursor in empty space)
-          vec2 edgeUv = projectToEdge(uCursorUv);
-          // Scale grows only a little with proximity
-          float localR = uLocalBase + uLocalGrowth * proximity;
 
-          float where = edgeGlitchWhere(
-            vUv, uEdgeSdf, edgeUv, uBandOuter, localR
+          vec2 crossUv = projectToEdge(uCursorUv);
+          vec2 gCross = sdfGrad(crossUv);
+          float gLen = length(gCross);
+          vec2 edgeNormal = gLen > 1e-6 ? normalize(gCross) : vec2(0.0, 1.0);
+          vec2 edgeTangent = gLen > 1e-6
+            ? normalize(vec2(-gCross.y, gCross.x))
+            : vec2(1.0, 0.0);
+
+          float whereMain = edgeGlitchWhere(
+            vUv, uEdgeSdf, crossUv, edgeTangent, edgeNormal,
+            uSpanAlong, uSpanOut, uSpanIn
           );
-          if (where < 1e-4) {
+          if (whereMain < 1e-4) {
             gl_FragColor = src;
             return;
           }
@@ -152,12 +159,16 @@ export class EdgeGlitchPass extends Pass {
           float occFade = edgeGlitchOccFade(
             uSceneDepth,
             uBustDepth,
+            uEdgeSdf,
             vUv,
-            edgeUv,
+            crossUv,
             uBustDepthTexel,
             uOccSoft,
             uOccBias,
-            uHasSceneDepth
+            uHasSceneDepth,
+            uCamNear,
+            uCamFar,
+            uSpanOut
           );
           if (occFade < 1e-4) {
             gl_FragColor = src;
@@ -177,7 +188,7 @@ export class EdgeGlitchPass extends Pass {
           float shiftX = tearOn * nAmt * (0.5 + tearWide * 1.0);
           shiftX = clamp(shiftX, -1.0, 1.0);
 
-          // WIDTH / INTENSITY: fully gated by proximity (no far-cursor floor)
+          // WIDTH / INTENSITY: fully gated by proximity (no far-cursor floor).
           float widthAmt = proximity * proximity;
           vec2 p = vUv + vec2(shiftX * widthAmt * uGlitchIntensity, 0.0);
           p = clamp(p, 0.0, 1.0);
@@ -189,7 +200,7 @@ export class EdgeGlitchPass extends Pass {
           vec4 cb = texture2D(tDiffuse, clamp(p - off, 0.0, 1.0));
           vec4 torn = vec4(cr.r, cga.g, cb.b, cga.a);
 
-          float mixW = where * proximity * occFade;
+          float mixW = whereMain * proximity * occFade;
           gl_FragColor = mix(src, torn, clamp(mixW, 0.0, 1.0));
         }
       `,

@@ -2,7 +2,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 
 /**
- * GLTFLoader with EXT_meshopt_compression. Register before loading travel pack / T-rex.
+ * GLTFLoader with EXT_meshopt_compression. Register before loading Archaeology / stele GLBs.
  * Never use gltf-transform `optimize` (it simplify()s meshes away).
  * @param {import("three").LoadingManager} [manager]
  */

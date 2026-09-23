@@ -1,0 +1,21 @@
+{
+  "analysis": {
+    "bbox": [
+      312,
+      214,
+      1023,
+      679
+    ],
+    "corner_avg_steps": 39.67,
+    "mid_avg_steps": 3,
+    "corner_over_mid": 13.22,
+    "verdict": "CURVED_UV_MASK",
+    "corners": {
+      "tl": 50,
+      "tr": 0,
+      "bl": null,
+      "br": 69
+    }
+  },
+  "note": "CURVED_UV_MASK = (b) CRT_CONTENT_PLANE rounded rect; STRAIGHT_CAPTURE_PAD = (a) DOM pad"
+}

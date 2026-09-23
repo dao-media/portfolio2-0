@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { WET_FLOOR_LAYER } from "../stage/constants.js";
 
 const _clearColor = new THREE.Color();
 
@@ -96,10 +97,11 @@ export class FogDepthCapture {
       this._hidden.push(obj);
     }
 
-    // Layer 0 only — atmosphere is post-process volumetric (no layer-2 fog meshes).
+    // Layer 0 + wet floor — atmosphere is post-process volumetric (no layer-2 fog meshes).
     // Held roots sit on holdLayer until compile; include them only for the
     // pre-show depth warm so the first live fog frame does not compile.
     camera.layers.set(0);
+    camera.layers.enable(WET_FLOOR_LAYER);
     if (includeHoldLayer) camera.layers.enable(holdLayer);
     scene.overrideMaterial = this._depthMat;
     scene.background = null;

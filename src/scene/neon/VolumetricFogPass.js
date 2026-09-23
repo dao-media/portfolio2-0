@@ -10,8 +10,9 @@
 import * as THREE from "three";
 import { Pass } from "postprocessing";
 import { FOG_DEFAULTS, clampFogParams, FOG_IN_SCATTER_FILL_CAP, FOG_IN_SCATTER_CORE_KEEP } from "../../fog/fogConfig.js";
+import { VIGNETTE_FOG_LIGHT_DISTANCE, VIGNETTE_FOG_LIGHT_DECAY } from "../stage/constants.js";
 
-export const VOLUMETRIC_FOG_MAX_LIGHTS = 4;
+export const VOLUMETRIC_FOG_MAX_LIGHTS = 6;
 
 const MARCH_VERT = /* glsl */ `
 varying vec2 vUv;
@@ -54,12 +55,17 @@ uniform float uFogDensityMultiplier;
 uniform float uDensityScale;
 uniform float uNearTubeDensityBoost;
 uniform float uNearTubeDensityRadius;
+uniform vec3 uVignetteCenter;
+uniform float uVignetteRadius;
+uniform float uVignetteFeather;
+uniform float uVignetteFog;
 uniform float uFalloffNoiseWarp;
 uniform float uFalloffCeilingJitter;
 uniform float uFogDistFadeStart;
 uniform float uFogDistFadeEnd;
 uniform float uFogNearFadeStart;
 uniform float uFogNearFadeEnd;
+uniform float uFogSoftContactRange;
 uniform float uNoiseYSlice;
 uniform float uNoiseYScroll;
 uniform float uBaseRaymarchStepCount;
@@ -69,12 +75,21 @@ uniform float uNoisePow;
 uniform float uGlobalScale;
 uniform vec2 uNoiseMovement;
 uniform float uNoiseSpeed;
+uniform float uDigitalNoiseCell;
+uniform float uDigitalNoiseAmount;
+uniform float uSubjectWrapRadius;
+uniform float uSubjectWrapBoost;
+uniform float uSubjectWrapResidual;
+uniform float uSubjectWrapMaxY;
 
-uniform vec3 uLightPos[4];
-uniform vec3 uLightColor[4];
-uniform float uLightIntensity[4];
-uniform float uLightDistance[4];
-uniform float uLightDecay[4];
+uniform vec3 uLightPos[6];
+uniform vec3 uLightColor[6];
+uniform float uLightIntensity[6];
+uniform float uLightDistance[6];
+uniform float uLightDecay[6];
+uniform vec3 uLightDir[6];
+uniform float uLightCosInner[6];
+uniform float uLightCosOuter[6];
 uniform float uAmbient;
 uniform float uInScatterFillCap;
 uniform float uInScatterCoreKeep;
@@ -162,19 +177,23 @@ float ceilingStartOffset(vec2 xz) {
   return (n * 2.0 - 1.0) * uFalloffCeilingJitter;
 }
 
-float heightFalloff(float y, float startYOffset) {
+float heightFalloff(float y, float startYOffset, float kScale) {
   float startY = uHeightFogStartY + startYOffset;
+  float k = uHeightFogExpK * max(kScale, 0.05);
 
   // Live path: exponential — asymptotes, no hard top edge (probe-1 confirmed lid).
   // k ≤ 0 keeps the legacy smoothstep lid (A/B / rollback only).
   if (uHeightFogExpK > 1e-5) {
     float h = max(y - startY, 0.0);
     float amp = 0.35 + uHeightFogFactor;
-    float dens = amp * exp(-h * uHeightFogExpK);
-    // Soft mid-PC ceiling → haze above (smoothstep + residual floor; not a hard lid).
+    float dens = amp * exp(-h * k);
+    // Soft bank top — double-smoothstep. Gate is nearly off live (hazeFloor≈0.92);
+    // a low floor + narrow range stamps a waterline across bust/tree.
     if (uHeightFogHazeRangeY > 1e-5) {
       float hazeStart = uHeightFogHazeStartY + startYOffset;
-      float gate = 1.0 - smoothstep(hazeStart, hazeStart + uHeightFogHazeRangeY, y);
+      float t = smoothstep(hazeStart, hazeStart + uHeightFogHazeRangeY, y);
+      t = t * t * (3.0 - 2.0 * t);
+      float gate = 1.0 - t;
       dens *= mix(max(uHeightFogHazeFloor, 0.0), 1.0, gate);
     }
     return dens;
@@ -207,16 +226,28 @@ float sampleDensity(vec3 worldPos, float startYOffset) {
   p.z += worldPos.y * uNoiseYSlice * 0.73;
   p.y += uNoiseYScroll * uTime * uNoiseSpeed;
   p *= uGlobalScale * 0.35;
-  float n = fbm3(p);
-  n = pow(clamp(n + uNoiseBias, 0.0, 1.0), max(uNoisePow, 0.01));
-  // Optional fill Y-warp (also weak on the lid — prefer per-pixel ceiling offset).
-  float yWarp = (n - 0.5) * uFalloffNoiseWarp;
-  float dens = n * heightFalloff(worldPos.y + yWarp, startYOffset);
-  // Bottom edge: fade into the floor instead of terminating on the depth plane.
-  if (softSlab) {
-    float fade = max(uFogFloorFadeRangeY, 1e-3);
-    dens *= smoothstep(uFogMinY, uFogMinY + fade, worldPos.y);
+  float nRaw = fbm3(p);
+  float nSoft = pow(clamp(nRaw + uNoiseBias, 0.0, 1.0), max(uNoisePow, 0.01));
+  float n = nSoft;
+  // Digital fog: density is hashed world cells (static / LED snow), not screen blocks.
+  // Soft height/vignette gates still shape the bank; scene composite stays sharp.
+  if (uDigitalNoiseCell > 1e-4 && uDigitalNoiseAmount > 1e-4) {
+    vec3 wp = worldPos;
+    wp.xz += uNoiseMovement * uTime * uNoiseSpeed * 0.2;
+    wp.y += uNoiseYScroll * uTime * uNoiseSpeed * 0.2;
+    vec3 id = floor(wp / uDigitalNoiseCell);
+    float h = hash13(id + vec3(17.0, 9.0, 3.0));
+    // Sparse bright cells — reads as digital noise, not a solid slab.
+    float dig = step(0.58, h) * smoothstep(0.58, 1.0, h);
+    // Soft FBM modulates which cells light up so the bank still has shape.
+    dig *= mix(0.55, 1.0, nSoft);
+    n = mix(nSoft, dig, clamp(uDigitalNoiseAmount, 0.0, 1.0));
   }
+  // Optional fill Y-warp (also weak on the lid — prefer per-pixel ceiling offset).
+  float yWarp = (nSoft - 0.5) * uFalloffNoiseWarp;
+  float dens = n * heightFalloff(worldPos.y + yWarp, startYOffset, 1.0);
+  // Floor fade applied AFTER vignette dens (below) — early apply was wiped by
+  // dens = puff * hEnv * vMask and reintroduced a hard bottom lid (§20.9b).
   float camDist = length(worldPos - uCameraPos);
   // Near-camera soft-in: thin fog in front of near subjects (stop-0 bust).
   if (uFogNearFadeEnd > 1e-3) {
@@ -227,16 +258,74 @@ float sampleDensity(vec3 worldPos, float startYOffset) {
   if (uFogDistFadeEnd > uFogDistFadeStart + 1e-3) {
     dens *= 1.0 - smoothstep(uFogDistFadeStart, uFogDistFadeEnd, camDist);
   }
-  // Volumetric halo — denser fog near active neon tubes (lit air around the source).
+  // Tube / subject proximity — applied AFTER vignette dens so boosts are not wiped.
+  float tubeProx = 0.0;
   if (uNearTubeDensityBoost > 1e-4 && uNearTubeDensityRadius > 1e-4) {
-    float tubeProx = 0.0;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 6; i++) {
       if (uLightIntensity[i] <= 1e-4) continue;
       float td = length(worldPos - uLightPos[i]);
       float g = exp( -(td * td) / max(2.0 * uNearTubeDensityRadius * uNearTubeDensityRadius, 1e-4) );
       tubeProx = max(tubeProx, g);
     }
+  }
+  // Active-vignette bubble — fog fills the stop, dies in the void between stops.
+  // uVignetteFog tracks neon arrive (0→1) so the volume preloads on approach.
+  if (uVignetteFog > 1e-4 && uVignetteRadius > 1e-4) {
+    float vDist = length(worldPos.xz - uVignetteCenter.xz);
+    float vMask = 1.0 - smoothstep(
+      uVignetteRadius,
+      uVignetteRadius + max(uVignetteFeather, 1e-3),
+      vDist
+    );
+    vMask *= uVignetteFog;
+    // Billow from clumped noise (noisePow + globalScale) — dense pockets, thin between.
+    // This is "scattered sections for depth" without geometry layers (no grazing lines).
+    float nClump = pow(clamp(nRaw + uNoiseBias, 0.0, 1.0), max(uNoisePow, 0.01));
+    float nBig = fbm3(p * 0.32 + 19.0);
+    float nBigClump = pow(clamp(nBig + uNoiseBias, 0.0, 1.0), max(uNoisePow, 0.01));
+    // Do NOT soften height falloff on subjects (kScale<1) — that paints a fog
+    // waterline up the bust. Keep a low open-air bank; wrap is dens multiply only.
+    float hEnv = heightFalloff(worldPos.y + yWarp * 1.35, startYOffset, 1.0);
+    float billow = 1.0 - abs(nClump * 2.0 - 1.0);
+    billow = pow(max(billow, 0.0), 2.4);
+    float bigBillow = pow(max(1.0 - abs(nBigClump * 2.0 - 1.0), 0.0), 1.9);
+    float puff = max(billow, bigBillow * 0.9);
+    puff = smoothstep(0.28, 0.82, puff);
+    // Digital cells can own the puff when trial is on (still shaped by hEnv).
+    if (uDigitalNoiseAmount > 1e-4) {
+      puff = mix(puff, n, clamp(uDigitalNoiseAmount, 0.0, 1.0));
+    }
+    dens = puff * hEnv * vMask * 0.95;
+
+    float coreXZ = 1.0 - smoothstep(
+      uSubjectWrapRadius * 0.05,
+      max(uSubjectWrapRadius, 1e-3),
+      vDist
+    );
+    if (uSubjectWrapBoost > 1e-4 && coreXZ > 1e-4) {
+      float wrapPuff = mix(0.55, 1.0, nBigClump);
+      if (uDigitalNoiseAmount > 1e-4) {
+        wrapPuff = mix(wrapPuff, n, clamp(uDigitalNoiseAmount * 0.85, 0.0, 1.0));
+      }
+      dens *= mix(1.0, 1.0 + uSubjectWrapBoost * wrapPuff, coreXZ);
+    }
+    // Height-independent whisper of haze in the stop (no Y shelf).
+    if (uSubjectWrapResidual > 1e-4 && coreXZ > 1e-4) {
+      float residual = nSoft * vMask * coreXZ * uSubjectWrapResidual;
+      dens = max(dens, residual);
+    }
+
     dens *= mix(1.0, 1.0 + uNearTubeDensityBoost, tubeProx);
+  } else {
+    dens = 0.0;
+  }
+  // Soft floor AFTER vignette dens — must not run before the replace (was wiped).
+  // Square the ramp so density stays near-zero through the grazing shelf band
+  // (world-Y ~0.5–1.0 / screen row ~599) without a second mid-frame lid.
+  if (softSlab) {
+    float fade = max(uFogFloorFadeRangeY, 1e-3);
+    float fl = smoothstep(uFogMinY, uFogMinY + fade, worldPos.y);
+    dens *= fl * fl;
   }
   return dens;
 }
@@ -249,15 +338,24 @@ float lightAtten(vec3 p, vec3 lightPos, float intensity, float lightDist, float 
   return intensity * range / (1.0 + d * d);
 }
 
+float spotCone(vec3 p, vec3 lightPos, vec3 lightDir, float cosInner, float cosOuter) {
+  // cosOuter < 0 → treat as point (full sphere)
+  if (cosOuter < 0.0) return 1.0;
+  vec3 toP = normalize(p - lightPos);
+  float cd = dot(toP, normalize(lightDir));
+  return smoothstep(cosOuter, cosInner, cd);
+}
+
 vec3 inScatter(vec3 p, float density) {
+  // Density is applied via absorb in the march — do NOT multiply L by dens here
+  // (that dens² path erased unlit vignette fill while neon-lit air still showed).
+  if (density <= 1e-5) return vec3(0.0);
   vec3 s = vec3(uAmbient);
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 6; i++) {
     float a = lightAtten(p, uLightPos[i], uLightIntensity[i], uLightDistance[i], uLightDecay[i]);
+    a *= spotCone(p, uLightPos[i], uLightDir[i], uLightCosInner[i], uLightCosOuter[i]);
     s += uLightColor[i] * a * 0.55;
   }
-  // Full in-scatter whenever density is authored — do NOT multiply by uDensityScale.
-  // Intro fade uses composite opacity instead (avoids bloom-crossing mid-ramp flash).
-  s *= max(density, 0.05);
   float peak = max(s.r, max(s.g, s.b));
   float fillCap = max(uInScatterFillCap, 1e-3);
   if (peak > fillCap) {
@@ -311,6 +409,8 @@ void main() {
   vec3 endPos = worldPos;
 
   float sceneDist = length(endPos - startPos);
+  // True opaque hit (bust / tree / floor) vs far-arc ray capped at max length.
+  bool hitOpaque = sceneDist <= uBaseMaxRayLength + 1e-3;
   if (sceneDist > uBaseMaxRayLength) {
     endPos = startPos + normalize(endPos - startPos) * uBaseMaxRayLength;
   }
@@ -354,16 +454,29 @@ void main() {
 
   vec3 accum = vec3(0.0);
   float transmittance = 1.0;
+  // Subject-plane exclusion: fog stays in FRONT of the opaque hit (and on
+  // miss rays behind/around). ClearGap + fade keep dens off the bust depth
+  // plane so the height bank cannot paint a waterline on the mesh.
+  float shell = (hitOpaque && uFogSoftContactRange > 1e-3)
+    ? uFogSoftContactRange
+    : 0.0;
+  float clearGap = shell * 0.45;
+  float fogReach = (shell > 1e-3)
+    ? max(rayLen - clearGap, stepSize)
+    : rayLen;
+  float fadeStart = max(fogReach - max(shell - clearGap, shell * 0.5), 0.0);
 
   for (int i = 0; i < 128; i++) {
-    if (float(i) >= steps || t > rayLen || transmittance < 0.02) break;
+    if (float(i) >= steps || t > fogReach || transmittance < 0.02) break;
     vec3 p = startPos + rayDir * t;
     float dens = sampleDensity(p, startYOffset);
+    if (shell > 1e-3) {
+      dens *= 1.0 - smoothstep(fadeStart, fogReach, t);
+    }
     float sigma = dens * uFogDensityMultiplier * uDensityScale;
     float absorb = 1.0 - exp(-sigma * stepSize);
     if (absorb > 1e-4) {
       vec3 lit = inScatter(p, dens);
-      lit = max(lit, vec3(0.08, 0.09, 0.1) * dens * uDensityScale);
       accum += transmittance * absorb * lit;
       transmittance *= (1.0 - absorb);
     }
@@ -387,8 +500,11 @@ uniform sampler2D tFog;
 uniform float uDepthPacked;
 uniform vec2 uTexel;
 uniform float uDepthSigma;
+uniform float uFogEdgeSoft;
+uniform float uFogEdgeDepth;
 uniform float uEnabled;
 uniform float uOutputDither;
+uniform float uOutputPixelSize;
 uniform float uTime;
 uniform float uCompositeOpacity;
 
@@ -413,6 +529,15 @@ float bayer4(vec2 frag) {
   return (float(v) + 0.5) / 16.0;
 }
 
+vec2 quantizeFogUv(vec2 uv, float pixelSize) {
+  if (pixelSize < 0.5) return uv;
+  vec2 res = vec2(
+    1.0 / max(uTexel.x, 1e-6),
+    1.0 / max(uTexel.y, 1e-6)
+  );
+  return (floor(uv * res / pixelSize) + 0.5) * pixelSize / res;
+}
+
 void main() {
   vec3 scene = texture2D(tDiffuse, vUv).rgb;
   if (uEnabled < 0.5) {
@@ -420,34 +545,74 @@ void main() {
     return;
   }
 
-  float centerDepth = readRawDepth(vUv);
   vec4 fog = vec4(0.0);
-  float wSum = 0.0;
-  for (int y = -1; y <= 1; y++) {
-    for (int x = -1; x <= 1; x++) {
-      vec2 off = vec2(float(x), float(y)) * uTexel;
-      vec2 uv = vUv + off;
-      float d = readRawDepth(uv);
-      float wDepth = exp(-abs(d - centerDepth) / max(uDepthSigma, 1e-5));
-      float wSpatial = 1.0 - 0.35 * float(abs(x) + abs(y));
-      float w = wDepth * wSpatial;
-      fog += texture2D(tFog, uv) * w;
-      wSum += w;
+  float pix = uOutputPixelSize;
+  if (pix > 0.5) {
+    // Stylized chunky fog — snap UV, skip bilateral (blur fights the look).
+    fog = texture2D(tFog, quantizeFogUv(vUv, pix));
+  } else {
+    float centerDepth = readRawDepth(vUv);
+    float wSum = 0.0;
+    // Soft bilateral (smoothstep depth weights, 5×5). Hard exp reject + soft-
+    // contact dens→0 made the bust luminance cliff. threejs-shaders: soft edges
+    // via smoothstep; AAA: keep silhouettes readable against fog (no clearGap).
+    for (int y = -2; y <= 2; y++) {
+      for (int x = -2; x <= 2; x++) {
+        vec2 off = vec2(float(x), float(y)) * uTexel;
+        vec2 uv = vUv + off;
+        float d = readRawDepth(uv);
+        float wDepth = 1.0 - smoothstep(0.0, max(uDepthSigma * 6.0, 1e-5), abs(d - centerDepth));
+        float wSpatial = 1.0 - 0.18 * float(abs(x) + abs(y));
+        float w = max(wDepth * wSpatial, 0.0);
+        fog += texture2D(tFog, uv) * w;
+        wSum += w;
+      }
+    }
+    fog /= max(wSum, 1e-4);
+
+    // Near-side bleed of background fog onto subject rims — softstep mix so the
+    // fog layer meets the bust as a transparency gradient, not a hard cut.
+    if (uFogEdgeSoft > 1e-4 && uFogEdgeDepth > 1e-6) {
+      vec4 farFog = vec4(0.0);
+      float farW = 0.0;
+      float edge = 0.0;
+      for (int y = -4; y <= 4; y++) {
+        for (int x = -4; x <= 4; x++) {
+          if (x == 0 && y == 0) continue;
+          vec2 uv = vUv + vec2(float(x), float(y)) * uTexel;
+          float d = readRawDepth(uv);
+          float farther = smoothstep(0.0, uFogEdgeDepth, centerDepth - d);
+          if (farther < 1e-4) continue;
+          float distW = 1.0 - 0.08 * float(abs(x) + abs(y));
+          float w = farther * distW;
+          farFog += texture2D(tFog, uv) * w;
+          farW += w;
+          edge = max(edge, farther * distW);
+        }
+      }
+      if (farW > 1e-4) {
+        farFog /= farW;
+        // Dissolve-style soft edge (threejs-shaders): smoothstep the mix weight.
+        float mixA = smoothstep(0.0, 1.0, edge) * uFogEdgeSoft;
+        fog = mix(fog, farFog, clamp(mixA, 0.0, 1.0));
+      }
     }
   }
-  fog /= max(wSum, 1e-4);
 
   // Screen-space output dither — breaks Mach banding on low-contrast alpha gradients.
   // Spatial-only (no uTime) — animated Bayer crawled as an edge/vignette strobe.
   // Separate from Bayer ray-start (along-ray). Grain is invisible at #070709; this is earlier.
   float dither = 0.0;
-  if (uOutputDither > 1e-6) {
+  if (uOutputDither > 1e-6 && pix < 0.5) {
     float b = bayer4(gl_FragCoord.xy);
     dither = (b - 0.5) * uOutputDither;
   }
   float a = clamp(fog.a * uCompositeOpacity + dither, 0.0, 1.0);
+  // March stores premultiplied in-scatter in .rgb and (1 - transmittance) in .a.
+  // Must be: scene * T + accum — NOT mix(scene, accum, a) which multiplies accum
+  // by alpha a second time and erases thin haze (reads as “fog gone”).
   vec3 fogRgb = fog.rgb * uCompositeOpacity;
-  vec3 outRgb = mix(scene, fogRgb, a);
+  vec3 outRgb = scene * (1.0 - a) + fogRgb;
   outRgb += dither;
   gl_FragColor = vec4(outRgb, 1.0);
 }
@@ -471,17 +636,25 @@ function emptyLights(n) {
   const intensity = [];
   const distance = [];
   const decay = [];
+  const dir = [];
+  const cosInner = [];
+  const cosOuter = [];
   for (let i = 0; i < n; i++) {
     pos.push(new THREE.Vector3());
     color.push(new THREE.Color(1, 1, 1));
     intensity.push(0);
     distance.push(8);
     decay.push(2);
+    dir.push(new THREE.Vector3(0, -1, 0));
+    cosInner.push(-1);
+    cosOuter.push(-1);
   }
-  return { pos, color, intensity, distance, decay };
+  return { pos, color, intensity, distance, decay, dir, cosInner, cosOuter };
 }
 
 const _lightWorld = new THREE.Vector3();
+const _lightTarget = new THREE.Vector3();
+const _lightDir = new THREE.Vector3();
 
 export class VolumetricFogPass extends Pass {
   /**
@@ -555,14 +728,19 @@ export class VolumetricFogPass extends Pass {
       uHeightFogHazeFloor: { value: d.heightFogHazeFloor },
       uFogDensityMultiplier: { value: d.fogDensityMultiplier },
       uDensityScale: { value: 1 },
-      uNearTubeDensityBoost: { value: 1.65 },
-      uNearTubeDensityRadius: { value: 1.35 },
+      uNearTubeDensityBoost: { value: 1.25 },
+      uNearTubeDensityRadius: { value: 2.8 },
+      uVignetteCenter: { value: new THREE.Vector3() },
+      uVignetteRadius: { value: 8.0 },
+      uVignetteFeather: { value: 2.2 },
+      uVignetteFog: { value: 0 },
       uFalloffNoiseWarp: { value: d.falloffNoiseWarp },
       uFalloffCeilingJitter: { value: d.falloffCeilingJitter },
       uFogDistFadeStart: { value: d.fogDistFadeStart },
       uFogDistFadeEnd: { value: d.fogDistFadeEnd },
       uFogNearFadeStart: { value: d.fogNearFadeStart },
       uFogNearFadeEnd: { value: d.fogNearFadeEnd },
+      uFogSoftContactRange: { value: d.fogSoftContactRange ?? 0 },
       uNoiseYSlice: { value: d.noiseYSlice },
       uNoiseYScroll: { value: d.noiseYScroll },
       uBaseRaymarchStepCount: { value: d.baseRaymarchStepCount },
@@ -572,12 +750,22 @@ export class VolumetricFogPass extends Pass {
       uGlobalScale: { value: d.globalScale },
       uNoiseMovement: { value: new THREE.Vector2(d.noiseMovementX, d.noiseMovementY) },
       uNoiseSpeed: { value: d.noiseSpeed },
+      uDigitalNoiseCell: { value: d.digitalNoiseCell ?? 0 },
+      uDigitalNoiseAmount: { value: d.digitalNoiseAmount ?? 0 },
+      uSubjectWrapRadius: { value: d.subjectWrapRadius ?? 0 },
+      uSubjectWrapBoost: { value: d.subjectWrapBoost ?? 0 },
+      uSubjectWrapResidual: { value: d.subjectWrapResidual ?? 0 },
+      uSubjectWrapMaxY: { value: d.subjectWrapMaxY ?? 3.8 },
       uLightPos: { value: lights.pos },
       uLightColor: { value: lights.color },
       uLightIntensity: { value: lights.intensity },
       uLightDistance: { value: lights.distance },
       uLightDecay: { value: lights.decay },
-      uAmbient: { value: 0.008 },
+      uLightDir: { value: lights.dir },
+      uLightCosInner: { value: lights.cosInner },
+      uLightCosOuter: { value: lights.cosOuter },
+      // Unlit fill inside the vignette bubble — neon still owns the hot core.
+      uAmbient: { value: 0.28 },
       uInScatterFillCap: { value: FOG_IN_SCATTER_FILL_CAP },
       uInScatterCoreKeep: { value: FOG_IN_SCATTER_CORE_KEEP },
       uEnabled: { value: 1 }
@@ -589,9 +777,12 @@ export class VolumetricFogPass extends Pass {
       tFog: { value: this.fogTarget.texture },
       uDepthPacked: { value: this.depthPacked ? 1 : 0 },
       uTexel: { value: new THREE.Vector2(1, 1) },
-      uDepthSigma: { value: 0.0025 },
+      uDepthSigma: { value: 0.004 },
+      uFogEdgeSoft: { value: d.fogEdgeSoft ?? 0 },
+      uFogEdgeDepth: { value: d.fogEdgeDepth ?? 0.008 },
       uEnabled: { value: 1 },
       uOutputDither: { value: d.outputDither },
+      uOutputPixelSize: { value: d.outputPixelSize ?? 0 },
       uTime: { value: 0 },
       uCompositeOpacity: { value: 1 }
     });
@@ -666,6 +857,7 @@ export class VolumetricFogPass extends Pass {
     u.uFogDistFadeEnd.value = p.fogDistFadeEnd;
     u.uFogNearFadeStart.value = p.fogNearFadeStart;
     u.uFogNearFadeEnd.value = p.fogNearFadeEnd;
+    u.uFogSoftContactRange.value = p.fogSoftContactRange ?? 0;
     u.uNoiseYSlice.value = p.noiseYSlice;
     u.uNoiseYScroll.value = p.noiseYScroll;
     u.uBaseRaymarchStepCount.value = p.baseRaymarchStepCount;
@@ -675,6 +867,19 @@ export class VolumetricFogPass extends Pass {
     u.uGlobalScale.value = p.globalScale;
     u.uNoiseSpeed.value = p.noiseSpeed;
     this.compositeMaterial.uniforms.uOutputDither.value = p.outputDither;
+    this.compositeMaterial.uniforms.uOutputPixelSize.value = p.outputPixelSize ?? 0;
+    if (this.compositeMaterial.uniforms.uFogEdgeSoft) {
+      this.compositeMaterial.uniforms.uFogEdgeSoft.value = p.fogEdgeSoft ?? 0;
+    }
+    if (this.compositeMaterial.uniforms.uFogEdgeDepth) {
+      this.compositeMaterial.uniforms.uFogEdgeDepth.value = p.fogEdgeDepth ?? 0.004;
+    }
+    u.uDigitalNoiseCell.value = p.digitalNoiseCell ?? 0;
+    u.uDigitalNoiseAmount.value = p.digitalNoiseAmount ?? 0;
+    u.uSubjectWrapRadius.value = p.subjectWrapRadius ?? 0;
+    u.uSubjectWrapBoost.value = p.subjectWrapBoost ?? 0;
+    if (u.uSubjectWrapResidual) u.uSubjectWrapResidual.value = p.subjectWrapResidual ?? 0;
+    u.uSubjectWrapMaxY.value = p.subjectWrapMaxY ?? 3.8;
     if (this._noiseFrozen) {
       u.uNoiseMovement.value.set(0, 0);
       u.uNoiseSpeed.value = 0;
@@ -703,7 +908,55 @@ export class VolumetricFogPass extends Pass {
   }
 
   /**
-   * @param {THREE.PointLight[]} lights
+   * Accent shaft: tighten near-tube volumetric density (stock defaults 1.65 / 1.35).
+   * @param {{ boost?: number, radius?: number } | null} tune
+   */
+  setNearTubeDensity(tune) {
+    const u = this.marchMaterial.uniforms;
+    if (!tune) {
+      u.uNearTubeDensityBoost.value = 1.25;
+      u.uNearTubeDensityRadius.value = 2.8;
+      return;
+    }
+    if (typeof tune.boost === "number" && Number.isFinite(tune.boost)) {
+      u.uNearTubeDensityBoost.value = tune.boost;
+    }
+    if (typeof tune.radius === "number" && Number.isFinite(tune.radius)) {
+      u.uNearTubeDensityRadius.value = tune.radius;
+    }
+  }
+
+  /**
+   * Active-stop fog volume. Density fills the vignette bubble; `level` tracks neon
+   * arrive (0→1) so fog preloads on approach and dies when leaving.
+   * @param {{
+   *   center?: THREE.Vector3 | null,
+   *   level?: number,
+   *   radius?: number,
+   *   feather?: number
+   * }} [opts]
+   */
+  setVignetteFog(opts = {}) {
+    const u = this.marchMaterial.uniforms;
+    if (!u?.uVignetteFog) return;
+    if (opts.center) {
+      u.uVignetteCenter.value.copy(opts.center);
+      u.uVignetteCenter.value.y = 0;
+    }
+    if (typeof opts.level === "number" && Number.isFinite(opts.level)) {
+      u.uVignetteFog.value = Math.max(0, Math.min(1, opts.level));
+    }
+    if (typeof opts.radius === "number" && Number.isFinite(opts.radius)) {
+      u.uVignetteRadius.value = Math.max(0.5, opts.radius);
+    }
+    if (typeof opts.feather === "number" && Number.isFinite(opts.feather)) {
+      u.uVignetteFeather.value = Math.max(0.05, opts.feather);
+    }
+  }
+
+  /**
+   * Neon PointLights + optional accent SpotLights (cone in-scatter).
+   * @param {Array<THREE.PointLight | THREE.SpotLight | null | undefined>} lights
    */
   setLights(lights) {
     const u = this.marchMaterial.uniforms;
@@ -711,18 +964,47 @@ export class VolumetricFogPass extends Pass {
       const L = lights?.[i];
       if (!L) {
         u.uLightIntensity.value[i] = 0;
+        u.uLightCosOuter.value[i] = -1;
         continue;
       }
       L.getWorldPosition(_lightWorld);
       u.uLightPos.value[i].copy(_lightWorld);
       u.uLightColor.value[i].copy(L.color);
-      u.uLightIntensity.value[i] = L.intensity;
-      u.uLightDistance.value[i] = L.distance || 8;
-      u.uLightDecay.value[i] = L.decay ?? 2;
+      // Prefer arrive-only fogIntensity so strike flicker does not strobe haze.
+      const fogI = L.userData?.fogIntensity;
+      u.uLightIntensity.value[i] =
+        typeof fogI === "number" && Number.isFinite(fogI) ? fogI : L.intensity;
+      // Point neon: mesh light stays short/steep (floor bubble); fog scatter
+      // uses longer reach + softer decay so haze across the stop picks up color.
+      if (L.isSpotLight) {
+        u.uLightDistance.value[i] = L.distance || 8;
+        u.uLightDecay.value[i] = L.decay ?? 2;
+      } else {
+        u.uLightDistance.value[i] = Math.max(L.distance || 0, VIGNETTE_FOG_LIGHT_DISTANCE);
+        u.uLightDecay.value[i] = VIGNETTE_FOG_LIGHT_DECAY;
+      }
+
+      if (L.isSpotLight) {
+        L.target.getWorldPosition(_lightTarget);
+        _lightDir.copy(_lightTarget).sub(_lightWorld);
+        if (_lightDir.lengthSq() < 1e-8) _lightDir.set(0, -1, 0);
+        else _lightDir.normalize();
+        u.uLightDir.value[i].copy(_lightDir);
+        const outer = Math.cos(L.angle);
+        const inner = Math.cos(L.angle * (1 - Math.min(1, Math.max(0, L.penumbra))));
+        u.uLightCosInner.value[i] = inner;
+        u.uLightCosOuter.value[i] = outer;
+      } else {
+        u.uLightDir.value[i].set(0, -1, 0);
+        u.uLightCosInner.value[i] = -1;
+        u.uLightCosOuter.value[i] = -1;
+      }
     }
     u.uLightIntensity.value = u.uLightIntensity.value.slice();
     u.uLightDistance.value = u.uLightDistance.value.slice();
     u.uLightDecay.value = u.uLightDecay.value.slice();
+    u.uLightCosInner.value = u.uLightCosInner.value.slice();
+    u.uLightCosOuter.value = u.uLightCosOuter.value.slice();
   }
 
   /**

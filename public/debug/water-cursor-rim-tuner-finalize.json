@@ -1,0 +1,19 @@
+{
+  "label": "current",
+  "ts": 1789581262168,
+  "updated": [
+    "blowExponent",
+    "neckPinch",
+    "recoilPushPx",
+    "slurpBand",
+    "snapThreshold"
+  ],
+  "skipped": [],
+  "params": {
+    "blowExponent": 2.8,
+    "neckPinch": 0.72,
+    "recoilPushPx": 8,
+    "slurpBand": 0.032,
+    "snapThreshold": 0.012
+  }
+}

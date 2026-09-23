@@ -1,0 +1,49 @@
+{
+  "bustHue": {
+    "gradientPhase": 0.7691319999742511,
+    "lightColorPhase": 0.0800762666646638,
+    "mapOffsetY": 0.7691319999742511,
+    "tubeSampleLinear": {
+      "r": 0.06662593864377289,
+      "g": 0.8796223968878317,
+      "b": 0.3005437944157765
+    },
+    "lightColor": {
+      "r": 0.06662593863608139,
+      "g": 0.8796223968851662,
+      "b": 0.3005437944049895
+    },
+    "maxChannelDelta": 1.0786982418409252e-11
+  },
+  "deskState": {
+    "neonGlare": 0.15400000000000003,
+    "neonSpecPower": 180,
+    "envMapIntensity": 0.0704,
+    "towerClip": 1,
+    "towerMinXZ": {
+      "x": 0.35,
+      "z": -1.05
+    },
+    "towerMaxXZ": {
+      "x": 3.15,
+      "z": 0.55
+    },
+    "poolScale": 0.48,
+    "poolOffsetX": 0.48
+  },
+  "crtMetrics": {
+    "centerLum": 0,
+    "rimSample": 0
+  },
+  "captures": {
+    "bustPath": "public/debug/verify-bust-cast-hue.png",
+    "deskRest": "public/debug/verify-desktop-tower-glow.png",
+    "crtPath": "public/debug/verify-crt-neon-glint.png"
+  },
+  "gates": {
+    "bustHueMatch": true,
+    "towerClipOn": true,
+    "neonGlintTight": true,
+    "envMapBaseOk": true
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "labDither": [
+    {
+      "outputDither": 0.02,
+      "file": "fog-lab-dither-002-canvas.png"
+    },
+    {
+      "outputDither": 0.4,
+      "file": "fog-lab-dither-04-canvas.png"
+    },
+    {
+      "outputDither": 0.6,
+      "file": "fog-lab-dither-06-canvas.png"
+    }
+  ],
+  "stage": [
+    {
+      "tag": "dither-002",
+      "outputDither": 0.02,
+      "noisePow": 3,
+      "file": "vol-fog-dither-002.png",
+      "maxC": 26.1,
+      "maxY": 311,
+      "colJump": 9.73,
+      "bandStd": 6.79,
+      "dither": 0.02,
+      "pow": 3,
+      "ray": 32,
+      "steps": 46,
+      "spacing": 0.6956521739130435,
+      "metricOk": false,
+      "columnsSuspect": true
+    },
+    {
+      "tag": "dither-04",
+      "outputDither": 0.4,
+      "noisePow": 3,
+      "file": "vol-fog-dither-04.png",
+      "maxC": 17.2,
+      "maxY": 308,
+      "colJump": 23.11,
+      "bandStd": 12.75,
+      "dither": 0.4,
+      "pow": 3,
+      "ray": 32,
+      "steps": 46,
+      "spacing": 0.6956521739130435,
+      "metricOk": false,
+      "columnsSuspect": true
+    },
+    {
+      "tag": "dither-06",
+      "outputDither": 0.6,
+      "noisePow": 3,
+      "file": "vol-fog-dither-06.png",
+      "maxC": 14,
+      "maxY": 308,
+      "colJump": 28.3,
+      "bandStd": 14.44,
+      "dither": 0.6,
+      "pow": 3,
+      "ray": 32,
+      "steps": 46,
+      "spacing": 0.6956521739130435,
+      "metricOk": false,
+      "columnsSuspect": true
+    },
+    {
+      "tag": "stop-d04-p4",
+      "outputDither": 0.4,
+      "noisePow": 4,
+      "file": "vol-fog-stop-d04-p4.png",
+      "maxC": 17.4,
+      "maxY": 308,
+      "colJump": 23.09,
+      "bandStd": 12.86,
+      "dither": 0.4,
+      "pow": 4,
+      "ray": 32,
+      "steps": 46,
+      "spacing": 0.6956521739130435,
+      "metricOk": false,
+      "columnsSuspect": true
+    }
+  ],
+  "stopLab": "fog-lab-stop-d04-p4-canvas.png"
+}

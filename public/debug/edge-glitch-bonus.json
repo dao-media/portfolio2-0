@@ -1,0 +1,79 @@
+{
+  "ok": true,
+  "fogMode": {
+    "stageFogMode": "off",
+    "fogMode": "volumetric"
+  },
+  "bustProbe": {
+    "hasSceneDepth": true,
+    "hasSceneDepthUniform": true,
+    "activeRoots": [
+      "bust"
+    ]
+  },
+  "archProbe": {
+    "hasSceneDepth": true,
+    "hasSceneDepthUniform": true,
+    "activeRoots": [
+      "neon-tube",
+      "stone-arch-root",
+      "shelving-unit-root"
+    ],
+    "dCursor": 0.015625,
+    "cursorGate": 0.7767857142857143
+  },
+  "edgeUv": {
+    "u": 0.451171875,
+    "v": 0.462890625,
+    "d": 0.01171875,
+    "bbox": {
+      "minU": 0.416015625,
+      "maxU": 0.951171875,
+      "minV": 0.001953125,
+      "maxV": 0.923828125
+    }
+  },
+  "part1": {
+    "png": "public/debug/edge-glitch-arch-no-bleed.png",
+    "bonusCount": 0
+  },
+  "part2": {
+    "png": "public/debug/edge-glitch-arch-bonus.png",
+    "bonusCount": 3,
+    "bonusIntensity": 0.75
+  },
+  "frameMs": {
+    "bonus0": {
+      "bonusCount": 0,
+      "medianMs": 32.9,
+      "meanMs": 25.79
+    },
+    "bonus2": {
+      "bonusCount": 2,
+      "medianMs": 36.6,
+      "meanMs": 30.32
+    },
+    "bonus3": {
+      "bonusCount": 3,
+      "medianMs": 37.1,
+      "meanMs": 26.51
+    },
+    "costPerBonusMs": 1.4
+  },
+  "shaderCheck": {
+    "hasOccMatch": true,
+    "hasHardGate": true,
+    "hasBonus": true,
+    "params": {
+      "armOuter": 0.07,
+      "armRamp": 1,
+      "spanAlong": 0.028,
+      "spanOut": 0.016,
+      "spanIn": 0.016,
+      "intensity": 0.2,
+      "bonusCount": 3,
+      "bonusIntensity": 0.75,
+      "bonusRhythm": 16
+    }
+  }
+}

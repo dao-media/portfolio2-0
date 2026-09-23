@@ -1,0 +1,169 @@
+{
+  "gate": "GATE4-lever3-Y-slice",
+  "triggerFromA": {
+    "a1": "clean-at-load was densityScale=0 (fog off until heavy-effects fade). Band present at fade-start.",
+    "a2": "GLOBAL — slab at Desktop 90° as well as Sidekick/Travel/Monolith; not deferred-GLB depth-triggered."
+  },
+  "lever3": {
+    "method": "cheap domain offset: p.x/z += y*noiseYSlice; p.y += noiseYScroll*time — same FBM, no extra octave",
+    "offStill": "vol-fog-lever3-off-still.png",
+    "onStill": "vol-fog-lever3-on-still.png",
+    "offMotion": [
+      "vol-fog-lever3-off-motion-00.png",
+      "vol-fog-lever3-off-motion-01.png",
+      "vol-fog-lever3-off-motion-02.png",
+      "vol-fog-lever3-off-motion-03.png",
+      "vol-fog-lever3-off-motion-04.png",
+      "vol-fog-lever3-off-motion-05.png"
+    ],
+    "onMotion": [
+      "vol-fog-lever3-on-motion-00.png",
+      "vol-fog-lever3-on-motion-01.png",
+      "vol-fog-lever3-on-motion-02.png",
+      "vol-fog-lever3-on-motion-03.png",
+      "vol-fog-lever3-on-motion-04.png",
+      "vol-fog-lever3-on-motion-05.png"
+    ],
+    "onValues": {
+      "noiseYSlice": 1.1,
+      "noiseYScroll": 0.025
+    }
+  },
+  "stepC": {
+    "withDither": "vol-fog-lever3-plus-dither-still.png",
+    "withoutDither": "vol-fog-lever3-no-dither-still.png",
+    "ditherValue": 0.003,
+    "note": "Judge whether dither still helps once Y-slice breaks the slab."
+  },
+  "cost": {
+    "fogOff": {
+      "meanFrameMs": 10.65575757575758,
+      "maxFrameMs": 74.39999999999964,
+      "n": 330,
+      "vol": {
+        "mode": "haze",
+        "enabled": false,
+        "densityScale": 0,
+        "fade": 0,
+        "depthPacked": true,
+        "halfRes": true,
+        "hasDepth": true,
+        "hasValidSize": true,
+        "fogTarget": {
+          "w": 640,
+          "h": 400
+        },
+        "near": 0.1,
+        "far": 120,
+        "steps": 16,
+        "density": 0.16,
+        "fillCap": 0.88,
+        "lightIntensities": [
+          10,
+          5,
+          0,
+          4.999999999999999
+        ],
+        "noiseFrozen": false
+      }
+    },
+    "lever3Off": {
+      "meanFrameMs": 11.727424749243623,
+      "maxFrameMs": 24.799999999999272,
+      "n": 299,
+      "vol": {
+        "mode": "volumetric",
+        "enabled": true,
+        "densityScale": 1,
+        "fade": 1,
+        "depthPacked": true,
+        "halfRes": true,
+        "hasDepth": true,
+        "hasValidSize": true,
+        "fogTarget": {
+          "w": 640,
+          "h": 400
+        },
+        "near": 0.1,
+        "far": 120,
+        "steps": 16,
+        "density": 0.16,
+        "fillCap": 0.88,
+        "lightIntensities": [
+          10,
+          5,
+          0,
+          4.999999999999999
+        ],
+        "noiseFrozen": false
+      }
+    },
+    "lever3On": {
+      "meanFrameMs": 11.504918032904136,
+      "maxFrameMs": 25.700000000000728,
+      "n": 305,
+      "vol": {
+        "mode": "volumetric",
+        "enabled": true,
+        "densityScale": 1,
+        "fade": 1,
+        "depthPacked": true,
+        "halfRes": true,
+        "hasDepth": true,
+        "hasValidSize": true,
+        "fogTarget": {
+          "w": 640,
+          "h": 400
+        },
+        "near": 0.1,
+        "far": 120,
+        "steps": 16,
+        "density": 0.16,
+        "fillCap": 0.88,
+        "lightIntensities": [
+          10,
+          5,
+          0,
+          4.999999999999999
+        ],
+        "noiseFrozen": false
+      }
+    },
+    "deltaOnVsOffMs": -0.2225067163394865,
+    "deltaOnVsFogOffMs": 0.8491604571465565,
+    "priorBBaselineMs": 1.3,
+    "note": "ANGLE relative only — compare deltaOnVsFogOff to prior B≈+1.3ms."
+  },
+  "liveUniforms": {
+    "noiseYSlice": 1.1,
+    "noiseYScroll": 0.025,
+    "outputDither": 0,
+    "falloffNoiseWarp": 0
+  },
+  "liveDebug": {
+    "mode": "volumetric",
+    "enabled": false,
+    "densityScale": 0,
+    "fade": 0,
+    "depthPacked": true,
+    "halfRes": true,
+    "hasDepth": true,
+    "hasValidSize": true,
+    "fogTarget": {
+      "w": 640,
+      "h": 400
+    },
+    "near": 0.1,
+    "far": 120,
+    "steps": 16,
+    "density": 0.16,
+    "fillCap": 0.88,
+    "lightIntensities": [
+      10,
+      5,
+      0,
+      4.999999999999999
+    ],
+    "noiseFrozen": false
+  }
+}

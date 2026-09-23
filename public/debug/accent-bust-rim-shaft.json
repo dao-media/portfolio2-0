@@ -1,0 +1,262 @@
+{
+  "ts": "2026-09-17T02:34:40.801Z",
+  "metrics": {
+    "msPerFrame": 108.19555555714501,
+    "fpsEst": 9.242523825036749,
+    "cornerLuma": 0,
+    "samples": [
+      {
+        "label": "leftSilhouette",
+        "x": 486,
+        "y": 345,
+        "rgb": [
+          40,
+          50,
+          37
+        ],
+        "luma": 0.18406039215686273
+      },
+      {
+        "label": "leftCheek",
+        "x": 537,
+        "y": 302,
+        "rgb": [
+          37,
+          53,
+          33
+        ],
+        "luma": 0.18884078431372547
+      },
+      {
+        "label": "rightKey",
+        "x": 704,
+        "y": 345,
+        "rgb": [
+          38,
+          58,
+          31
+        ],
+        "luma": 0.20313176470588235
+      },
+      {
+        "label": "void",
+        "x": 102,
+        "y": 648,
+        "rgb": [
+          0,
+          0,
+          0
+        ],
+        "luma": 0
+      }
+    ],
+    "accent": {
+      "enabled": 1,
+      "live": true,
+      "activeIndex": 0,
+      "arriveLevel": 1,
+      "workQuality": 1,
+      "reducedMotion": false,
+      "rimCount": 2,
+      "sweepOn": true,
+      "rimA": 34,
+      "rimB": 17,
+      "sweep": 1.45,
+      "shaft": 0.35,
+      "params": {
+        "enabled": 1,
+        "rimCount": 2,
+        "rimIntensity": 34,
+        "rim2Mul": 0.5,
+        "rimColorR": 0.37,
+        "rimColorG": 0.94,
+        "rimColorB": 1,
+        "rimDistance": 3.4,
+        "rimDecay": 2.6,
+        "rimAngle": 0.25,
+        "rimPenumbra": 0.72,
+        "rimBack": 0.85,
+        "rimCamBias": 0.2,
+        "rimSide": 1.55,
+        "rimHeight": 0.05,
+        "sweepIntensity": 1.45,
+        "sweepColorR": 0.62,
+        "sweepColorG": 1,
+        "sweepColorB": 0.1,
+        "sweepDistance": 2.6,
+        "sweepDecay": 2.3,
+        "sweepAngle": 0.34,
+        "sweepPenumbra": 0.55,
+        "sweepRadius": 2.35,
+        "sweepHeight": 2.05,
+        "sweepSpeed": 0.11,
+        "shaftEnabled": 1,
+        "shaftIntensity": 0.35,
+        "shaftFogBoost": 6.5,
+        "shaftColorR": 0.55,
+        "shaftColorG": 1,
+        "shaftColorB": 0.85,
+        "shaftDistance": 5.5,
+        "shaftDecay": 2.2,
+        "shaftAngle": 0.18,
+        "shaftPenumbra": 0.35,
+        "shaftBack": 0.45,
+        "shaftSide": -0.35,
+        "shaftHeight": 3.4,
+        "nearTubeDensityBoost": 2.35,
+        "nearTubeDensityRadius": 2.2
+      }
+    },
+    "probe": {
+      "subject": "bust",
+      "subjectPos": [
+        0,
+        2.154,
+        18
+      ],
+      "cam": [
+        0,
+        2.850000000192993,
+        28.1632
+      ],
+      "neon": [
+        2.2,
+        1,
+        18.85
+      ],
+      "rimA": [
+        -1.5482364290282238,
+        2.404,
+        17.15842034974891
+      ],
+      "rimAToSubject": 1.7798293030194823,
+      "rimIntensity": 34,
+      "rimDistance": 3.4,
+      "rimDecay": 2.6,
+      "pointLights": [
+        {
+          "name": "",
+          "intensity": 0.30569562841288483,
+          "distance": 1.9601400196552277,
+          "decay": 1.85,
+          "color": [
+            0.6588086114940778,
+            0.6337969698707159,
+            0.5694813199820706
+          ],
+          "pos": [
+            18.200516064526624,
+            2.4709134284330174,
+            1.8222607714935088
+          ],
+          "layers": 1
+        },
+        {
+          "name": "scrollballLedLight",
+          "intensity": 0.04,
+          "distance": 6.071200132727817,
+          "decay": 2,
+          "color": [
+            0.04666508633021928,
+            1,
+            0.14412847084818123
+          ],
+          "pos": [
+            -0.12344644790636962,
+            2.340161732716926,
+            -20.380644062323817
+          ],
+          "layers": 1
+        },
+        {
+          "name": "neon-stop-light-0",
+          "intensity": 28,
+          "distance": 2.75,
+          "decay": 3.5,
+          "color": [
+            0.19806931954941637,
+            0.9559733532482866,
+            0.07036009568874305
+          ],
+          "pos": [
+            2.2,
+            1,
+            18.85
+          ],
+          "layers": 13
+        },
+        {
+          "name": "neon-stop-light-1",
+          "intensity": 0,
+          "distance": 2.75,
+          "decay": 3.5,
+          "color": [
+            0,
+            0.7835377915215659,
+            1
+          ],
+          "pos": [
+            18.25,
+            1,
+            -3.6499999999999986
+          ],
+          "layers": 13
+        },
+        {
+          "name": "neon-stop-light-2",
+          "intensity": 0,
+          "distance": 2.75,
+          "decay": 3.5,
+          "color": [
+            0.26225065751888765,
+            0.026241221889696346,
+            1
+          ],
+          "pos": [
+            -2.199999999999998,
+            1,
+            -18.85
+          ],
+          "layers": 13
+        },
+        {
+          "name": "neon-stop-light-3",
+          "intensity": 0,
+          "distance": 2.75,
+          "decay": 3.5,
+          "color": [
+            1,
+            0.04666508633021928,
+            0.010329823026364548
+          ],
+          "pos": [
+            -18.85,
+            1,
+            2.199999999999997
+          ],
+          "layers": 13
+        },
+        {
+          "name": "accent-sweep",
+          "intensity": 1.45,
+          "distance": 2.6,
+          "decay": 2.3,
+          "color": [
+            0.62,
+            1,
+            0.1
+          ],
+          "pos": [
+            2.284367037214616,
+            2.2039999999999997,
+            18.56586835447343
+          ],
+          "layers": 5
+        }
+      ]
+    },
+    "ambient": 0.06,
+    "hemi": 0.04
+  },
+  "shotPath": "public/debug/accent-bust-rim-shaft.png"
+}

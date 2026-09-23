@@ -1,0 +1,46 @@
+{
+  "edgeUv": {
+    "u": 0.451171875,
+    "v": 0.498046875,
+    "d": 0.01171875,
+    "bbox": {
+      "minU": 0.416015625,
+      "maxU": 0.951171875,
+      "minV": 0.001953125,
+      "maxV": 0.923828125
+    },
+    "roots": [
+      "neon-tube",
+      "stone-arch-root",
+      "shelving-unit-root"
+    ],
+    "meshN": 6
+  },
+  "off_vs_on": {
+    "changed": 20742,
+    "bbox": [
+      182,
+      22,
+      1157,
+      717
+    ],
+    "spanX": 975,
+    "medianRowSpan": 253,
+    "maxRowSpan": 687,
+    "p90RowSpan": 485
+  },
+  "off_vs_bonus": {
+    "changed": 22394,
+    "bbox": [
+      182,
+      20,
+      1157,
+      717
+    ],
+    "spanX": 975,
+    "medianRowSpan": 257,
+    "maxRowSpan": 687,
+    "p90RowSpan": 485
+  },
+  "ok": false
+}

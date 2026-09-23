@@ -1,0 +1,26 @@
+[
+  {
+    "label": "mipmapBlurOff",
+    "n": 120,
+    "zeroFrames": 0,
+    "zeroFrac": 0,
+    "meanMin": 22.2,
+    "meanAvg": 23.3
+  },
+  {
+    "label": "kernelMedium",
+    "n": 120,
+    "zeroFrames": 31,
+    "zeroFrac": 0.258,
+    "meanMin": 0,
+    "meanAvg": 17.1
+  },
+  {
+    "label": "stillControlNoMove",
+    "n": 120,
+    "zeroFrames": 16,
+    "zeroFrac": 0.133,
+    "meanMin": 0,
+    "meanAvg": 20
+  }
+]

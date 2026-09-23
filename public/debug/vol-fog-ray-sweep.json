@@ -1,0 +1,101 @@
+[
+  {
+    "k": 0.12,
+    "ray": 10,
+    "tag": "lab",
+    "maxC": 11.5,
+    "maxY": 311,
+    "mid": 0.483,
+    "clean": false
+  },
+  {
+    "k": 0.12,
+    "ray": 40,
+    "tag": "lab-ray40",
+    "maxC": 6.2,
+    "maxY": 647,
+    "mid": 0.483,
+    "clean": false
+  },
+  {
+    "k": 0.3,
+    "ray": 10,
+    "tag": "k30-r10",
+    "maxC": 19.9,
+    "maxY": 311,
+    "mid": 0.303,
+    "clean": false
+  },
+  {
+    "k": 0.3,
+    "ray": 24,
+    "tag": "k30-r24",
+    "maxC": 12,
+    "maxY": 311,
+    "mid": 0.303,
+    "clean": false
+  },
+  {
+    "k": 0.3,
+    "ray": 40,
+    "tag": "k30-r40",
+    "maxC": 11.1,
+    "maxY": 311,
+    "mid": 0.303,
+    "clean": false
+  },
+  {
+    "k": 0.4,
+    "ray": 40,
+    "tag": "k40-r40",
+    "maxC": 15.1,
+    "maxY": 311,
+    "mid": 0.233,
+    "clean": false
+  },
+  {
+    "k": 0.45,
+    "ray": 40,
+    "tag": "k45-r40",
+    "maxC": 16.7,
+    "maxY": 311,
+    "mid": 0.205,
+    "clean": false
+  },
+  {
+    "k": 0.5,
+    "ray": 40,
+    "tag": "k50-r40",
+    "maxC": 18,
+    "maxY": 311,
+    "mid": 0.18,
+    "clean": false
+  },
+  {
+    "k": 0.55,
+    "ray": 40,
+    "tag": "k55-r40",
+    "maxC": 19.1,
+    "maxY": 311,
+    "mid": 0.158,
+    "clean": false
+  },
+  {
+    "k": 0.45,
+    "ray": 30,
+    "tag": "k45-r30",
+    "maxC": 16.8,
+    "maxY": 311,
+    "mid": 0.205,
+    "clean": false
+  },
+  {
+    "k": 0.4,
+    "ray": 30,
+    "tag": "k40-r30",
+    "maxC": 15.3,
+    "maxY": 311,
+    "mid": 0.233,
+    "clean": false
+  }
+]

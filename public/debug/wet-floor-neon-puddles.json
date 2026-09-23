@@ -1,0 +1,25 @@
+{
+  "ts": "2026-09-16T07:45:00.000Z",
+  "approach": "CubeCamera probe (128², every 3 frames) — planar Reflector NOT used",
+  "recommendation": "Stay on CubeCamera. Headless ANGLE matte-vs-probe delta is noisy (matte often slower due to cold path); probe absolute ~26–28 ms/frame (~36–39 FPS) with MeshStandard wet floor. Reflector would re-render the full beauty and is not justified.",
+  "defaults": {
+    "envStrength": 0.12,
+    "colorGain": 0.42,
+    "uvRepeat": 12,
+    "probeSize": 128,
+    "probeEveryN": 3,
+    "layer": "WET_FLOOR_LAYER=3",
+    "spotLayer": 0,
+    "spotIntensity": 0
+  },
+  "gates": {
+    "workQuality": "envMap off / matte when scale < 0.4",
+    "reducedMotion": "unaffected",
+    "povSpotDisc": "absent (floor layer 3, spot layer 0)"
+  },
+  "assets": {
+    "masters": "masters/concrete-6/",
+    "runtime": "public/assets/textures/concrete-wet/ (1024 jpg)"
+  },
+  "shotPath": "public/debug/wet-floor-neon-puddles.png"
+}

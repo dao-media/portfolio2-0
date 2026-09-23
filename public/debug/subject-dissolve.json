@@ -1,0 +1,77 @@
+{
+  "ok": true,
+  "approach": "Dying transmission dissolve — scan-slices shear off and fade TO BLACK; thin neon dissolve-line. No revealBoost / no pixel-corruption.",
+  "shoulderUv": {
+    "u": 0.396484375,
+    "v": 0.482421875,
+    "d": 0.01746928133070469,
+    "bbox": {
+      "minU": 0.357421875,
+      "maxU": 0.630859375,
+      "minV": 0.138671875,
+      "maxV": 0.763671875
+    }
+  },
+  "desktopUv": {
+    "u": 0.130859375,
+    "v": 0.384765625,
+    "d": 0.01953125,
+    "bbox": {
+      "minU": 0.103515625,
+      "maxU": 0.794921875,
+      "minV": 0.001953125,
+      "maxV": 0.767578125
+    }
+  },
+  "shaderCheck": {
+    "passName": "SubjectDissolvePass",
+    "hasShear": true,
+    "hasFadeToBlack": true,
+    "hasDissolveLine": true,
+    "noRevealBoost": true,
+    "noRgbSplit": true,
+    "noInject": true,
+    "params": {
+      "liquidArmOuter": 0.15,
+      "glitchArmOuter": 0.1,
+      "armRamp": 1.5,
+      "spanAlong": 0.06,
+      "spanOut": 0.03,
+      "spanIn": 0.024,
+      "shearPx": 36,
+      "fadeGain": 1.25,
+      "dropout": 0.1,
+      "syncRollPx": 4,
+      "dissolveLine": 0.4,
+      "bandCount": 44
+    }
+  },
+  "bust": {
+    "gate": 0.7016901202489477,
+    "dCursor": 0.021035799756646156,
+    "shearPx": 36,
+    "fadeGain": 1.25,
+    "dissolveLine": 0.4,
+    "tubeEnabled": true,
+    "png": "public/debug/subject-dissolve-bust.png",
+    "frameMs": {
+      "medianMs": 51.7,
+      "p90Ms": 151.9,
+      "meanMs": 79.9
+    }
+  },
+  "desktop": {
+    "gate": 0.6193119380106183,
+    "dCursor": 0.02734375186264515,
+    "activeRoots": [
+      "c356e171-6713-4145-b883-4b76cc10bce4"
+    ],
+    "png": "public/debug/subject-dissolve-desktop.png",
+    "frameMs": {
+      "medianMs": 20.1,
+      "p90Ms": 39.1,
+      "meanMs": 19.01
+    }
+  },
+  "note": "Dying transmission: scan-slices shear → fade TO BLACK; thin neon dissolve-line. No revealBoost / no pixel-corruption."
+}

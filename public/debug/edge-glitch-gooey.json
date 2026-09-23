@@ -1,0 +1,22 @@
+{
+  "ok": false,
+  "recommendation": "cut_to_glitch_only",
+  "decision": "CUT",
+  "reason": "Metaball gooey rendered as two solid neon disks (cursor blob + cross blob), not a stretched neck/merge. Budget was fine (+0.9 ms median half-res) but the look did not read as liquid pull. Liquid/bulge/rim/gooey removed; EdgeGlitchPass tears (Fork A) are FINAL.",
+  "shoulderUv": {
+    "u": 0.677734375,
+    "v": 0.482421875,
+    "d": 0.10042937099933624
+  },
+  "frameMsOff": {
+    "medianMs": 35.8,
+    "p90Ms": 60.5
+  },
+  "frameMsOn": {
+    "medianMs": 36.7,
+    "p90Ms": 60.3
+  },
+  "costMs": 0.9,
+  "png": "public/debug/edge-glitch-gooey-shoulder.png",
+  "note": "Decisive one-pass test. Ship rejected on visual read, not cost."
+}

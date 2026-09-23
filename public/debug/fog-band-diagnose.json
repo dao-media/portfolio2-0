@@ -1,0 +1,508 @@
+{
+  "hypothesis": "Flat Y=0.05 annulus at grazing projects near arc, central hole, far arc as separate horizontal bands. Haze is off so bare ring is misjudged as whole fog.",
+  "baseline": {
+    "fog": {
+      "interactionReady": true,
+      "locked": false,
+      "height": 1,
+      "maxLight": 10,
+      "defaults": {
+        "height": 1,
+        "maxLight": 10
+      },
+      "lightCount": 4,
+      "lights": [
+        {
+          "name": "Monolith",
+          "intensity": 10,
+          "color": "#9dff1a",
+          "theta": 0,
+          "y": 1,
+          "layer0": true,
+          "layer2": true
+        },
+        {
+          "name": "Retro Desktop",
+          "intensity": 5,
+          "color": "#00e5ff",
+          "theta": 1.5707963267948966,
+          "y": 1,
+          "layer0": true,
+          "layer2": true
+        },
+        {
+          "name": "Sidekick",
+          "intensity": 0,
+          "color": "#8c2dff",
+          "theta": 3.141592653589793,
+          "y": 1,
+          "layer0": true,
+          "layer2": true
+        },
+        {
+          "name": "Archaeology",
+          "intensity": 4.999999999999999,
+          "color": "#ff3d1a",
+          "theta": -1.5707963267948968,
+          "y": 1,
+          "layer0": true,
+          "layer2": true
+        }
+      ],
+      "ring": {
+        "rInner": 14,
+        "rOuter": 22,
+        "layer": 2,
+        "softFade": 2,
+        "depthCapture": true
+      },
+      "hazeVisible": 0,
+      "hazeTotal": 0,
+      "tubes": [
+        {
+          "name": "Monolith",
+          "colors": [
+            "#9dff1a",
+            "#00e5ff"
+          ],
+          "emissive": 3
+        },
+        {
+          "name": "Retro Desktop",
+          "colors": [
+            "#00e5ff",
+            "#9dff1a"
+          ],
+          "emissive": 1.92
+        },
+        {
+          "name": "Sidekick",
+          "colors": [
+            "#8c2dff",
+            "#ff2d95",
+            "#00e5ff"
+          ],
+          "emissive": 0.8400000000000001
+        },
+        {
+          "name": "Archaeology",
+          "colors": [
+            "#ff3d1a",
+            "#ffc14a"
+          ],
+          "emissive": 1.9199999999999997
+        }
+      ]
+    },
+    "capture": {
+      "rt": {
+        "width": 1280,
+        "height": 800,
+        "minFilter": 1003,
+        "magFilter": 1003,
+        "generateMipmaps": false,
+        "type": 1009,
+        "colorSpace": ""
+      },
+      "drawingBuffer": {
+        "width": 1280,
+        "height": 800
+      },
+      "sizeMatch": true,
+      "nearest": true,
+      "camera": {
+        "near": 0.1,
+        "far": 120
+      },
+      "uniforms": {
+        "near": 0.1,
+        "far": 120,
+        "softFade": 2,
+        "feather": 2.5,
+        "resolution": {
+          "x": 1280,
+          "y": 800
+        }
+      },
+      "nearFarMatch": true,
+      "depthMatToneMapped": false,
+      "rendererToneMapping": 4,
+      "samples": [
+        {
+          "nx": 0.5,
+          "ny": 0.5,
+          "rgba": [
+            2,
+            2,
+            2,
+            255
+          ],
+          "packed": 0.00784313725490196,
+          "sceneDepth": 0.9921568627450981,
+          "sceneViewZ": -11.534
+        },
+        {
+          "nx": 0.5,
+          "ny": 0.22,
+          "rgba": [
+            2,
+            2,
+            2,
+            255
+          ],
+          "packed": 0.00784313725490196,
+          "sceneDepth": 0.9921568627450981,
+          "sceneViewZ": -11.534
+        },
+        {
+          "nx": 0.5,
+          "ny": 0.72,
+          "rgba": [
+            2,
+            2,
+            2,
+            255
+          ],
+          "packed": 0.00784313725490196,
+          "sceneDepth": 0.9921568627450981,
+          "sceneViewZ": -11.534
+        },
+        {
+          "nx": 0.2,
+          "ny": 0.4,
+          "rgba": [
+            1,
+            1,
+            1,
+            255
+          ],
+          "packed": 0.00392156862745098,
+          "sceneDepth": 0.996078431372549,
+          "sceneViewZ": -21.045
+        },
+        {
+          "nx": 0.8,
+          "ny": 0.4,
+          "rgba": [
+            1,
+            1,
+            1,
+            255
+          ],
+          "packed": 0.00392156862745098,
+          "sceneDepth": 0.996078431372549,
+          "sceneViewZ": -21.045
+        }
+      ]
+    },
+    "isolate": {
+      "floorVisible": true,
+      "feather": 2.5,
+      "fogVisible": true
+    },
+    "camY": 2.85000245350631
+  },
+  "grazingProj": {
+    "tag": "grazing-feather0-nofloor",
+    "fogY": 0.05,
+    "hazeTotal": 0,
+    "hazeVisible": 0,
+    "ring": {
+      "rInner": 14,
+      "rOuter": 22,
+      "layer": 2,
+      "softFade": 2,
+      "depthCapture": true
+    },
+    "fogVisible": true,
+    "camera": {
+      "x": 0,
+      "y": 2.85,
+      "z": 28.163
+    },
+    "pts": {
+      "nearOuter": {
+        "world": [
+          0,
+          0.05,
+          22
+        ],
+        "ndc": [
+          0,
+          -1.0323
+        ],
+        "screenY": 1.0161,
+        "screenX": 0.5,
+        "behind": false
+      },
+      "nearInner": {
+        "world": [
+          0,
+          0.05,
+          14
+        ],
+        "ndc": [
+          0,
+          -0.3831
+        ],
+        "screenY": 0.6916,
+        "screenX": 0.5,
+        "behind": false
+      },
+      "hole": {
+        "world": [
+          0,
+          0.05,
+          0
+        ],
+        "ndc": [
+          0,
+          -0.1302
+        ],
+        "screenY": 0.5651,
+        "screenX": 0.5,
+        "behind": false
+      },
+      "farInner": {
+        "world": [
+          0,
+          0.05,
+          -14
+        ],
+        "ndc": [
+          0,
+          -0.0447
+        ],
+        "screenY": 0.5223,
+        "screenX": 0.5,
+        "behind": false
+      },
+      "farOuter": {
+        "world": [
+          0,
+          0.05,
+          -22
+        ],
+        "ndc": [
+          0,
+          -0.0172
+        ],
+        "screenY": 0.5086,
+        "screenX": 0.5,
+        "behind": false
+      },
+      "sideOuterL": {
+        "world": [
+          -22,
+          0.05,
+          0
+        ],
+        "ndc": [
+          -1.2672,
+          -0.1302
+        ],
+        "screenY": 0.5651,
+        "screenX": -0.1336,
+        "behind": false
+      },
+      "sideOuterR": {
+        "world": [
+          22,
+          0.05,
+          0
+        ],
+        "ndc": [
+          1.2672,
+          -0.1302
+        ],
+        "screenY": 0.5651,
+        "screenX": 1.1336,
+        "behind": false
+      }
+    },
+    "screenYOrder": [
+      {
+        "k": "farOuter",
+        "y": 0.5086,
+        "x": 0.5
+      },
+      {
+        "k": "farInner",
+        "y": 0.5223,
+        "x": 0.5
+      },
+      {
+        "k": "hole",
+        "y": 0.5651,
+        "x": 0.5
+      },
+      {
+        "k": "nearInner",
+        "y": 0.6916,
+        "x": 0.5
+      },
+      {
+        "k": "nearOuter",
+        "y": 1.0161,
+        "x": 0.5
+      }
+    ],
+    "stacksTopToBottom": true,
+    "bandSpanScreenY": 0.5075
+  },
+  "raisedProj": {
+    "tag": "topdown-40m-fov90-feather0-nofloor",
+    "fogY": 0.05,
+    "hazeTotal": 0,
+    "hazeVisible": 0,
+    "ring": {
+      "rInner": 14,
+      "rOuter": 22,
+      "layer": 2,
+      "softFade": 2,
+      "depthCapture": true
+    },
+    "fogVisible": true,
+    "camera": {
+      "x": 0,
+      "y": 40,
+      "z": 0
+    },
+    "pts": {
+      "nearOuter": {
+        "world": [
+          0,
+          0.05,
+          22
+        ],
+        "ndc": [
+          0,
+          -0.5507
+        ],
+        "screenY": 0.7753,
+        "screenX": 0.5,
+        "behind": false
+      },
+      "nearInner": {
+        "world": [
+          0,
+          0.05,
+          14
+        ],
+        "ndc": [
+          0,
+          -0.3504
+        ],
+        "screenY": 0.6752,
+        "screenX": 0.5,
+        "behind": false
+      },
+      "hole": {
+        "world": [
+          0,
+          0.05,
+          0
+        ],
+        "ndc": [
+          0,
+          0
+        ],
+        "screenY": 0.5,
+        "screenX": 0.5,
+        "behind": false
+      },
+      "farInner": {
+        "world": [
+          0,
+          0.05,
+          -14
+        ],
+        "ndc": [
+          0,
+          0.3504
+        ],
+        "screenY": 0.3248,
+        "screenX": 0.5,
+        "behind": false
+      },
+      "farOuter": {
+        "world": [
+          0,
+          0.05,
+          -22
+        ],
+        "ndc": [
+          0,
+          0.5507
+        ],
+        "screenY": 0.2247,
+        "screenX": 0.5,
+        "behind": false
+      },
+      "sideOuterL": {
+        "world": [
+          -22,
+          0.05,
+          0
+        ],
+        "ndc": [
+          -0.3442,
+          0
+        ],
+        "screenY": 0.5,
+        "screenX": 0.3279,
+        "behind": false
+      },
+      "sideOuterR": {
+        "world": [
+          22,
+          0.05,
+          0
+        ],
+        "ndc": [
+          0.3442,
+          0
+        ],
+        "screenY": 0.5,
+        "screenX": 0.6721,
+        "behind": false
+      }
+    },
+    "screenYOrder": [
+      {
+        "k": "farOuter",
+        "y": 0.2247,
+        "x": 0.5
+      },
+      {
+        "k": "farInner",
+        "y": 0.3248,
+        "x": 0.5
+      },
+      {
+        "k": "hole",
+        "y": 0.5,
+        "x": 0.5
+      },
+      {
+        "k": "nearInner",
+        "y": 0.6752,
+        "x": 0.5
+      },
+      {
+        "k": "nearOuter",
+        "y": 0.7753,
+        "x": 0.5
+      }
+    ],
+    "stacksTopToBottom": true,
+    "bandSpanScreenY": 0.5506
+  },
+  "verdict": {
+    "hazeOff": true,
+    "grazingStacksTopToBottom": true,
+    "grazingBandSpan": 0.5075,
+    "raisedBandSpan": 0.5506,
+    "raisedLooksLikeAnnulus": true
+  }
+}

@@ -4,9 +4,8 @@ import {
   NEON_FLICKER_SEC,
   NEON_FLICKER_TRAVEL_FRAC,
   NEON_FOG_LAYER,
+  WET_FLOOR_LAYER,
   NEON_GRADIENT_SCROLL,
-  NEON_LIGHT_COLOR_MAX_RATE,
-  NEON_LIGHT_COLOR_SCROLL,
   NEON_LIGHT_DECAY,
   NEON_LIGHT_DISTANCE,
   NEON_LIGHT_FALLOFF,
@@ -14,11 +13,13 @@ import {
   NEON_CORE_MAX,
   NEON_MAX_EMISSIVE,
   NEON_MAX_LIGHT,
+  NEON_SHADOW,
   vignetteAngle
 } from "../stage/constants.js";
 import { FogDepthCapture } from "./FogDepthCapture.js";
 import { FogDebugOverlay } from "./FogDebugOverlay.js";
 import { makeNeonTube } from "./makeNeonTube.js";
+import { makeNeonLantern, LANTERN_WARM, LANTERN_LIGHT, BUST_LANTERN_HEIGHT_M } from "./makeNeonLantern.js";
 import { sampleNeonMapUv } from "./neonGradientTexture.js";
 import {
   makeNeonFloorGlow,
@@ -45,16 +46,25 @@ export class NeonSystem {
    *   scene: THREE.Scene,
    *   camera: THREE.Camera,
    *   reducedMotion?: boolean,
-   *   isCoarse?: boolean
+   *   isCoarse?: boolean,
+   *   loadingManager?: import("three").LoadingManager | null
    * }} opts
    */
-  constructor({ scene, camera, reducedMotion = false, isCoarse = false }) {
+  constructor({ scene, camera, reducedMotion = false, isCoarse = false, loadingManager = null }) {
     this.scene = scene;
     this.camera = camera;
     this.reducedMotion = reducedMotion;
     this.isCoarse = isCoarse;
+    this.loadingManager = loadingManager;
     this.entries = [];
     this.stopLights = [];
+    /**
+     * Stop indices whose tube / PointLight / floor glow stay dark — another
+     * key light (e.g. Archaeology Giza portal daylight) owns the vignette.
+     * Arrive envelope + neon-lit-content still run so props can reveal.
+     * @type {Set<number>}
+     */
+    this._portalStops = new Set();
 
     /** Live tune — defaults from constants; `__stage.setNeon` mutates these. */
     this._lightHeight = NEON_LIGHT_HEIGHT;
@@ -75,7 +85,7 @@ export class NeonSystem {
     this._arriveLatchedIndex = -1;
     this._lastActiveIndex = -1;
     this._gradientPhase = 0;
-    /** Slow V phase for PointLight color (independent of tube scroll). */
+    /** @deprecated Alias of `_gradientPhase` — PointLight always tracks the live tube. */
     this._lightColorPhase = 0;
     /** DEV/probe — freeze tube + light gradient scroll. */
     this._freezeGradient = false;
@@ -115,10 +125,10 @@ export class NeonSystem {
     this._flickerT = 0;
   }
 
-  captureFogDepth(renderer, scene, camera) {
+  captureFogDepth(renderer, scene, camera, hideObjects = []) {
     if (!this.depthCapture) return;
 
-    this.depthCapture.render(renderer, scene, camera, []);
+    this.depthCapture.render(renderer, scene, camera, hideObjects);
 
     renderer.getDrawingBufferSize(_DRAW_SIZE);
     this.debugOverlay?.sync(camera, camera.near, camera.far, 2.0);
@@ -130,15 +140,25 @@ export class NeonSystem {
   }
 
   /**
-   * @param {{ def: { neonColors?: string[], name?: string, tubeLength?: number }, group: THREE.Group, tube?: THREE.Mesh }} vignette
+   * @param {{ def: { neonColors?: string[], name?: string, tubeLength?: number, neonProp?: string, neonTubeXZ?: [number, number] }, group: THREE.Group, tube?: THREE.Object3D }} vignette
    */
   attach(vignette) {
+    const isLantern = vignette.def?.neonProp === "lantern";
     const hexColors = vignette.def.neonColors?.length
       ? vignette.def.neonColors
-      : ["#00e5ff", "#ff2d95"];
+      : isLantern
+        ? ["#ffa45a", "#ffc878"]
+        : ["#00e5ff", "#ff2d95"];
     const colors = hexColors.map((h) => new THREE.Color(h));
-    const dominant = colors[0].clone();
-    const tube = makeNeonTube(vignette.def);
+    const dominant = isLantern
+      ? new THREE.Color(LANTERN_WARM.light)
+      : colors[0].clone();
+    const tube = isLantern
+      ? makeNeonLantern({
+          ...vignette.def,
+          loadingManager: this.loadingManager
+        })
+      : makeNeonTube(vignette.def);
     vignette.group.add(tube);
     this._seatTubeOnFloor(tube, vignette.group);
 
@@ -154,12 +174,34 @@ export class NeonSystem {
     vignette.group.updateMatrixWorld(true);
     tube.getWorldPosition(_TUBE_WORLD);
 
-    const light = new THREE.PointLight(dominant, 0, NEON_LIGHT_DISTANCE, NEON_LIGHT_DECAY);
+    const lanternKnobs = tube.userData?.lanternLight ?? null;
+    const light = new THREE.PointLight(
+      dominant,
+      0,
+      lanternKnobs?.distance ?? NEON_LIGHT_DISTANCE,
+      lanternKnobs?.decay ?? NEON_LIGHT_DECAY
+    );
     light.name = `neon-stop-light-${this.entries.length}`;
     light.castShadow = false;
     light.layers.enable(0);
     light.layers.enable(NEON_FOG_LAYER);
-    light.position.set(_TUBE_WORLD.x, this._lightHeight, _TUBE_WORLD.z);
+    light.layers.enable(WET_FLOOR_LAYER);
+    const lightY = isLantern
+      ? _TUBE_WORLD.y + (tube.userData.flameLocalY ?? LANTERN_LIGHT.flameFrac * BUST_LANTERN_HEIGHT_M)
+      : this._lightHeight;
+    light.position.set(_TUBE_WORLD.x, lightY, _TUBE_WORLD.z);
+    if (isLantern) {
+      light.userData.lanternWarm = true;
+      light.userData.lanternMaxLight =
+        lanternKnobs?.maxIntensity ?? LANTERN_LIGHT.maxIntensity;
+    }
+    // Shadow map prepared once; castShadow toggled per-frame for the active stop only.
+    light.shadow.mapSize.set(NEON_SHADOW.mapSize, NEON_SHADOW.mapSize);
+    light.shadow.bias = NEON_SHADOW.bias;
+    light.shadow.normalBias = NEON_SHADOW.normalBias;
+    light.shadow.radius = NEON_SHADOW.radius;
+    light.shadow.camera.near = NEON_SHADOW.near;
+    light.shadow.camera.far = light.distance || NEON_SHADOW.far;
     this.scene.add(light);
 
     const theta = Math.atan2(vignette.group.position.x, vignette.group.position.z);
@@ -170,7 +212,7 @@ export class NeonSystem {
 
   /**
    * Keep every tube's world-space bottom on Y=0 after vignette floor snaps
-   * (Desktop drops group.y; Travel lifts it). Length/XZ offset stay identical.
+   * (Desktop drops group.y; Archaeology lifts it). Length/XZ offset stay identical.
    */
   seatTubesOnFloor() {
     for (let i = 0; i < this.entries.length; i += 1) {
@@ -181,22 +223,50 @@ export class NeonSystem {
       tube.getWorldPosition(_TUBE_WORLD);
       const entry = this.stopLights[i];
       if (entry?.light) {
-        entry.light.position.set(_TUBE_WORLD.x, this._lightHeight, _TUBE_WORLD.z);
+        const ly =
+          tube.userData?.neonProp === "lantern"
+            ? _TUBE_WORLD.y + (tube.userData.flameLocalY ?? 0.85)
+            : this._lightHeight;
+        entry.light.position.set(_TUBE_WORLD.x, ly, _TUBE_WORLD.z);
       }
     }
   }
 
   /**
-   * @param {THREE.Mesh} tube
+   * @param {THREE.Object3D} tube
    * @param {THREE.Object3D} group
    */
   _seatTubeOnFloor(tube, group) {
     const length = tube.userData.tubeLength ?? 4;
-    tube.position.y = length * 0.5 - group.position.y;
+    if (tube.userData.seatOrigin === "bottom") {
+      // Lantern / foot-pivoted props: origin at the planted foot.
+      tube.position.y = 0 - group.position.y;
+    } else {
+      tube.position.y = length * 0.5 - group.position.y;
+    }
   }
 
   /** No-op — haze cards removed; kept so StageExperience call sites stay stable. */
   finishMount() {}
+
+  /**
+   * Mute tube / PointLight / floor glow for a stop (portal daylight takes over).
+   * @param {number} index
+   * @param {boolean} [enabled=true]
+   */
+  setPortalReplacesNeon(index, enabled = true) {
+    const i = Math.max(0, index | 0);
+    if (enabled) this._portalStops.add(i);
+    else this._portalStops.delete(i);
+    const entry = this.entries[i];
+    if (entry?.tube) entry.tube.visible = !enabled;
+    if (entry?.floorGlow) entry.floorGlow.visible = !enabled;
+    const light = this.stopLights[i]?.light;
+    if (light && enabled) {
+      light.intensity = 0;
+      light.userData.fogIntensity = 0;
+    }
+  }
 
   /**
    * @param {number} theta Camera orbit angle
@@ -280,10 +350,7 @@ export class NeonSystem {
 
     if (!this.reducedMotion && allowNeon && !this._freezeGradient) {
       this._gradientPhase = (this._gradientPhase + NEON_GRADIENT_SCROLL * dt) % 1;
-      // Cast-light hue drifts slower than the tube scroll — same gradient, capped rate
-      // so PC/canopy speculars do not crawl (§12 / §20.18).
-      this._lightColorPhase =
-        (this._lightColorPhase + NEON_LIGHT_COLOR_SCROLL * dt) % 1;
+      this._lightColorPhase = this._gradientPhase;
     }
 
     for (let i = 0; i < n; i += 1) {
@@ -301,23 +368,114 @@ export class NeonSystem {
           arriveLevel = 1;
         }
         level = arriveLevel;
-        if (this._flickering && i === this._flickerIndex) {
+        // Neon tube strike flicker — not for the warm lantern fire.
+        if (
+          this._flickering &&
+          i === this._flickerIndex &&
+          this.entries[i].tube?.userData?.neonProp !== "lantern"
+        ) {
           level *= neonFlickerMul(this._flickerT);
         }
       }
+      this.entries[i]._arriveLevel = arriveLevel;
+
+      const portalLit = this._portalStops.has(i);
+      // Portal stops keep content arrive, but never light the neon tube / PointLight.
+      const displayLevel = portalLit ? 0 : level;
 
       const tube = this.entries[i].tube;
-      const mat = tube?.material;
+      if (tube) tube.visible = !portalLit;
+      const isLantern = tube?.userData?.neonProp === "lantern";
+      const mat = tube?.material ?? tube?.userData?.neonCoreMat;
+
+      // —— Lantern: warm fire + soft scene fill (no neon gradient scroll) ——
+      if (isLantern) {
+        const flicker =
+          typeof tube.userData.tickLantern === "function"
+            ? tube.userData.tickLantern(
+                time,
+                displayLevel,
+                this.reducedMotion,
+                this.camera
+              )
+            : 1;
+
+        const light = this.stopLights[i].light;
+        const maxL =
+          light.userData.lanternMaxLight ??
+          LANTERN_LIGHT.maxIntensity ??
+          this._maxLight;
+        light.intensity = displayLevel * maxL * flicker;
+        // Cubemap shadows only while settled on the active stop (skip during hops).
+        light.castShadow =
+          i === activeIndex &&
+          settled &&
+          displayLevel > 0.08 &&
+          !this.reducedMotion;
+        // Reach must match the warm spill (attach-time far can lag knobs).
+        if (light.shadow?.camera) {
+          light.shadow.camera.far = Math.max(
+            light.distance || 1,
+            LANTERN_LIGHT.distance
+          );
+          light.shadow.camera.updateProjectionMatrix?.();
+        }
+        light.userData.fogIntensity = portalLit
+          ? 0
+          : arriveLevel * maxL * 0.85;
+        _LIGHT_COLOR.copy(
+          tube.userData.lanternWarm ?? this.entries[i].dominant
+        );
+        // Tiny warmth drift with flicker (not neon hue scroll).
+        if (displayLevel > 1e-3) {
+          _LIGHT_COLOR.offsetHSL(0, 0.02 * (flicker - 1), 0.03 * (flicker - 1));
+        }
+        light.color.copy(_LIGHT_COLOR);
+
+        // Keep light seated in the flame chamber.
+        tube.getWorldPosition(_TUBE_WORLD);
+        light.position.set(
+          _TUBE_WORLD.x,
+          _TUBE_WORLD.y + (tube.userData.flameLocalY ?? 0.85),
+          _TUBE_WORLD.z
+        );
+
+        const glassMats = tube.userData.neonGlassMats;
+        if (Array.isArray(glassMats)) {
+          for (const gm of glassMats) {
+            if (gm?.emissive) gm.emissive.copy(_LIGHT_COLOR);
+          }
+        }
+
+        _FOOT_COLOR.copy(_LIGHT_COLOR);
+        // Stronger floor spill so warm light reads as coming from the lantern foot.
+        setNeonFloorGlowLevel(
+          this.entries[i].floorGlow,
+          displayLevel * (1.05 + 0.35 * flicker),
+          _FOOT_COLOR
+        );
+        if (this.entries[i].floorGlow) {
+          this.entries[i].floorGlow.visible =
+            !portalLit && displayLevel > 1e-3;
+        }
+
+        this._syncContentLit(this.entries[i], arriveLevel, {
+          latched: this._arriveLatchedIndex === i
+        });
+        continue;
+      }
+
+      // —— Standard neon tube ——
       if (mat) {
         // Option 1: luminance-compensated core under bloom (no Additive shell).
         const map = mat.userData?.neonGradientMap ?? mat.map ?? mat.emissiveMap;
-        if (map && level > 1e-3 && !this.reducedMotion) {
+        if (map && displayLevel > 1e-3 && !this.reducedMotion) {
           map.offset.y = this._gradientPhase;
         }
 
         const bloomTarget = mat.userData?.neonCoreMax ?? NEON_CORE_MAX;
         if (mat.uniforms?.uLevel) {
-          mat.uniforms.uLevel.value = level;
+          mat.uniforms.uLevel.value = displayLevel;
           if (mat.uniforms.uBloomTarget) {
             mat.uniforms.uBloomTarget.value = bloomTarget;
           }
@@ -326,61 +484,44 @@ export class NeonSystem {
           }
           const bodyMat = mat.userData?.neonBodyMat;
           if (bodyMat && "envMapIntensity" in bodyMat) {
-            bodyMat.envMapIntensity = level > 1e-3 ? 0.7 : 0.35;
+            bodyMat.envMapIntensity = displayLevel > 1e-3 ? 0.7 : 0.35;
           }
         } else if (mat.isMeshBasicMaterial) {
-          const coreGlow = level * bloomTarget;
+          const coreGlow = displayLevel * bloomTarget;
           mat.color.setRGB(coreGlow, coreGlow, coreGlow);
           const bodyMat = mat.userData?.neonBodyMat;
           if (bodyMat && "envMapIntensity" in bodyMat) {
-            bodyMat.envMapIntensity = level > 1e-3 ? 0.7 : 0.35;
+            bodyMat.envMapIntensity = displayLevel > 1e-3 ? 0.7 : 0.35;
           }
         } else if ("emissiveIntensity" in mat) {
-          mat.emissiveIntensity = level * NEON_MAX_EMISSIVE;
+          mat.emissiveIntensity = displayLevel * NEON_MAX_EMISSIVE;
         }
       }
 
       const light = this.stopLights[i].light;
-      light.intensity = level * this._maxLight;
-      // Cast light tracks the tube gradient. Bust (widest hue span) samples the
-      // SAME phase as the visible tube emissive — rate-cap lagged green↔cyan.
-      // Other stops keep slow phase + rate-cap (§12 / §20.18 speaker shimmer).
-      if (level > 1e-3) {
+      light.intensity = displayLevel * this._maxLight;
+      // Only the settled active stop casts — cubemap shadows are expensive (6 faces).
+      light.castShadow =
+        i === activeIndex &&
+        settled &&
+        displayLevel > 0.08 &&
+        !this.reducedMotion;
+      // Fog / haze integrate over the volume — use arrive only (no strike flicker).
+      // Portal stops contribute no neon fog — daylight Spot owns in-scatter.
+      light.userData.fogIntensity = portalLit
+        ? 0
+        : arriveLevel * this._maxLight;
+      // Cast light MUST match the visible tube — same mid-UV sample as emissive
+      // (map.offset.y = _gradientPhase). No slow phase / rate-cap lag.
+      if (displayLevel > 1e-3) {
         const gradientMap =
           mat?.userData?.neonGradientMap ?? mat?.map ?? mat?.emissiveMap;
-        const isBust = /bust/i.test(this.entries[i].vignette?.def?.name ?? "");
         if (gradientMap) {
-          if (isBust) {
-            // Live tube path: respect map.offset.y (= _gradientPhase) at mid UV.
-            sampleNeonMapUv(gradientMap, 0.5, 0.5, _LIGHT_COLOR);
-          } else {
-            sampleNeonMapUv(gradientMap, 0.5, this._lightColorPhase, _LIGHT_COLOR, {
-              ignoreOffset: true
-            });
-          }
+          sampleNeonMapUv(gradientMap, 0.5, 0.5, _LIGHT_COLOR);
         } else {
           _LIGHT_COLOR.copy(this.entries[i].dominant);
         }
-        if (isBust) {
-          light.color.copy(_LIGHT_COLOR);
-        } else {
-          const maxStep = NEON_LIGHT_COLOR_MAX_RATE * Math.max(dt, 0);
-          light.color.r += THREE.MathUtils.clamp(
-            _LIGHT_COLOR.r - light.color.r,
-            -maxStep,
-            maxStep
-          );
-          light.color.g += THREE.MathUtils.clamp(
-            _LIGHT_COLOR.g - light.color.g,
-            -maxStep,
-            maxStep
-          );
-          light.color.b += THREE.MathUtils.clamp(
-            _LIGHT_COLOR.b - light.color.b,
-            -maxStep,
-            maxStep
-          );
-        }
+        light.color.copy(_LIGHT_COLOR);
       }
 
       // Floor pool/cone = exact tube-foot texel (CylinderGeometry side UV v=0).
@@ -391,7 +532,10 @@ export class NeonSystem {
       } else {
         _FOOT_COLOR.copy(this.entries[i].dominant);
       }
-      setNeonFloorGlowLevel(this.entries[i].floorGlow, level, _FOOT_COLOR);
+      setNeonFloorGlowLevel(this.entries[i].floorGlow, displayLevel, _FOOT_COLOR);
+      if (this.entries[i].floorGlow) {
+        this.entries[i].floorGlow.visible = !portalLit && displayLevel > 1e-3;
+      }
       if (this.entries[i].floorGlow?.userData?.desktopTowerClip) {
         syncDesktopTowerFootprintClip(
           this.entries[i].floorGlow,
@@ -406,6 +550,16 @@ export class NeonSystem {
         latched: this._arriveLatchedIndex === i
       });
     }
+  }
+
+  /**
+   * Pre-flicker arrive envelope for a stop (0→1). Fog / content use this;
+   * tube glow + PointLight.intensity still take the strike flicker.
+   * @param {number} index
+   */
+  getArriveLevel(index = 0) {
+    const i = Math.max(0, index | 0);
+    return this.entries[i]?._arriveLevel ?? 0;
   }
 
   /**
@@ -446,7 +600,12 @@ export class NeonSystem {
         child === entry.tube ||
         child === entry.floorGlow ||
         child.name === "neon-tube" ||
-        child.name === "neon-floor-glow"
+        child.name === "neon-floor-glow" ||
+        child.name === "arch-portal-root" ||
+        child.name === "arch-portal-floor-pool" ||
+        child.name === "arch-portal-opening-mask" ||
+        child.name === "arch-portal-world" ||
+        child.name === "arch-portal-screen"
       ) {
         continue;
       }
@@ -458,7 +617,7 @@ export class NeonSystem {
       // C04: latched-at-rest → content is ON from the latch alone.
       lit = true;
     } else {
-      // Travel arrive: ON threshold ABOVE OFF threshold. The old 1e-3 / 0.02
+      // Archaeology arrive: ON threshold ABOVE OFF threshold. The old 1e-3 / 0.02
       // pair turned content on at 1e-3 then immediately off until 0.02 —
       // three-frame chatter while approaching a stop.
       const wasLit = Boolean(entry._contentLit);

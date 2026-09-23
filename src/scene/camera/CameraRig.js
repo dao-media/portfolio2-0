@@ -114,6 +114,11 @@ export class CameraRig {
     this.parallax = createParallax(parallax);
     this._scrollEl = null;
     this._pointerEl = null;
+    /**
+     * Black-hole intro owns `camera` until the spiral hands off.
+     * While set, `update` must not write position or the frozen intro quat.
+     */
+    this.poseSuspended = false;
   }
 
   attachScroll(el) {
@@ -226,7 +231,7 @@ export class CameraRig {
   }
 
   update(delta) {
-    if (!this.enabled) return;
+    if (!this.enabled || this.poseSuspended) return;
 
     const s = this.state;
     const dt = Math.min(Math.max(delta, 0), 0.05);

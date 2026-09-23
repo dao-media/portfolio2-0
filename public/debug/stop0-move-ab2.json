@@ -1,0 +1,50 @@
+[
+  {
+    "label": "control",
+    "n": 160,
+    "dark": 30,
+    "darkFrac": 0.188,
+    "meanAvg": 18.5,
+    "meanMin": 0
+  },
+  {
+    "label": "skipFogDepth",
+    "n": 160,
+    "dark": 42,
+    "darkFrac": 0.263,
+    "meanAvg": 17,
+    "meanMin": 0
+  },
+  {
+    "label": "skipCrtEnv",
+    "n": 160,
+    "dark": 43,
+    "darkFrac": 0.269,
+    "meanAvg": 16.8,
+    "meanMin": 0
+  },
+  {
+    "label": "skipContactShadows",
+    "n": 160,
+    "dark": 39,
+    "darkFrac": 0.244,
+    "meanAvg": 17.5,
+    "meanMin": 0
+  },
+  {
+    "label": "noParallaxOffset",
+    "n": 160,
+    "dark": 0,
+    "darkFrac": 0,
+    "meanAvg": 22.5,
+    "meanMin": 22.5
+  },
+  {
+    "label": "updateMatrixAfterParallax",
+    "n": 160,
+    "dark": 41,
+    "darkFrac": 0.256,
+    "meanAvg": 17.1,
+    "meanMin": 0
+  }
+]

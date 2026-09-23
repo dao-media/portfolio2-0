@@ -1,0 +1,106 @@
+{
+  "ok": true,
+  "shoulderUv": {
+    "u": 0.373046875,
+    "v": 0.439453125,
+    "d": 0.03493856266140938,
+    "bbox": {
+      "minU": 0.357421875,
+      "maxU": 0.630859375,
+      "minV": 0.138671875,
+      "maxV": 0.763671875
+    }
+  },
+  "state": {
+    "fringeAmount": 0.55,
+    "scanlineAmount": 0,
+    "fringeCap": 0.42,
+    "neonHue": {
+      "r": 0.305,
+      "g": 0.991,
+      "b": 0.017
+    },
+    "scanlineOff": true,
+    "hasSeamFringe": true,
+    "hasBeautyBoost": true,
+    "hasTearBands": true,
+    "noBlockCells": true,
+    "tearAmpPx": 54,
+    "debug": {
+      "stage": 3,
+      "enabled": true,
+      "applied": true,
+      "csmCount": 0,
+      "csmRemoved": true,
+      "bandOuter": 0.028,
+      "cursorOuter": 0.028,
+      "spanAlong": 0.028,
+      "spanOut": 0.032,
+      "spanIn": 0.016,
+      "liquidArmOuter": 0.15,
+      "glitchArmOuter": 0.06,
+      "armOuter": 0.15,
+      "armRamp": 1.5,
+      "intensity": 0.2,
+      "rgbSplitPx": 14,
+      "revealBoost": 3.5,
+      "tearAmpPx": 54,
+      "fringeAmount": 0.55,
+      "tearBands": 88,
+      "sdfSize": 256,
+      "pointerLive": true,
+      "cursorUv": {
+        "x": 0.373046875,
+        "y": 0.439453125
+      },
+      "dCursor": 0.0390625,
+      "liquidGate": 0.6360345001211244,
+      "glitchGate": 0.2061390930722166,
+      "cursorGate": 0.6360345001211244,
+      "edgeProx": 0.6360345001211244,
+      "tubeEnabled": true,
+      "approach": "Beauty tear (revealBoost) + thin emissive seam fringes — dark-bust visibility without inject smear.",
+      "activeRoot": "bust",
+      "activeRoots": [
+        "bust"
+      ],
+      "occSoft": 0.004,
+      "occBias": 0.0015,
+      "hasSceneDepth": true,
+      "hasSceneDepthUniform": true,
+      "overlayVisible": false,
+      "defaults": {
+        "liquidArmOuter": 0.15,
+        "glitchArmOuter": 0.06,
+        "armRamp": 1.5,
+        "spanAlong": 0.028,
+        "spanOut": 0.032,
+        "spanIn": 0.016,
+        "intensity": 0.2,
+        "rgbSplitPx": 14,
+        "revealBoost": 3.5,
+        "tearAmpPx": 54,
+        "fringeAmount": 0.55,
+        "tearBands": 88
+      }
+    }
+  },
+  "vision": {
+    "samplePx": 36000,
+    "brightPx": 598,
+    "chromaticPx": 520,
+    "neonFlashPx": 400,
+    "blobRuns": 0,
+    "panelRows": 0,
+    "rowRunCount": 23,
+    "combPairs": 16,
+    "brightFrac": 0.0166
+  },
+  "frameMs": {
+    "medianMs": 24.7,
+    "meanMs": 33.03,
+    "p90Ms": 50.7
+  },
+  "png": "public/debug/edge-glitch-fringe-dark-shoulder.png",
+  "note": "Fork A beauty tear + thin emissive seam fringes (scanline 0). Dark-bust visible without inject smear / block cells."
+}

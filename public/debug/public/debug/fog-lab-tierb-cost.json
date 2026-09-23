@@ -1,0 +1,66 @@
+{
+  "capturedAt": "2026-09-09T23:42:30.125Z",
+  "tier": "B",
+  "recommendedSteps": 16,
+  "halfRes": true,
+  "grazingAt16": {
+    "ms": 0.4,
+    "fps": 3.6
+  },
+  "fogParams": {
+    "halfRes": true,
+    "fogMinY": -0.2,
+    "fogMaxY": 2.4,
+    "fogFadeOutRangeY": 1.2,
+    "fogFadeOutPow": 2,
+    "heightFogFactor": 0.85,
+    "heightFogStartY": 0,
+    "heightFogEndY": 2,
+    "fogDensityMultiplier": 0.16,
+    "baseRaymarchStepCount": 16,
+    "baseMaxRayLength": 40,
+    "noiseBias": 0.28,
+    "noisePow": 1.4,
+    "globalScale": 1,
+    "noiseMovementX": 0.02,
+    "noiseMovementY": 0.01
+  },
+  "stepCurveGrazingHalfRes": [
+    {
+      "steps": 8,
+      "ms": 0.6,
+      "fps": 3.4
+    },
+    {
+      "steps": 12,
+      "ms": 0.7,
+      "fps": 3
+    },
+    {
+      "steps": 16,
+      "ms": 0.3,
+      "fps": 3.2
+    },
+    {
+      "steps": 20,
+      "ms": 0.533,
+      "fps": 5.5
+    },
+    {
+      "steps": 24,
+      "ms": 0.35,
+      "fps": 3.9
+    },
+    {
+      "steps": 32,
+      "ms": 0.467,
+      "fps": 5.1
+    },
+    {
+      "steps": 48,
+      "ms": 0.367,
+      "fps": 5.5
+    }
+  ],
+  "note": "Headless FPS is throttled; frame-ms is the cost signal. Prefer interactive verify ~0.25ms @100fps."
+}

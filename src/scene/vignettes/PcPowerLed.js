@@ -8,10 +8,10 @@ const ACTIVITY_ON = { color: new THREE.Color(0xff7a18), intensity: 3.4 };
 const ACTIVITY_DIM = { color: new THREE.Color(0xff5a10), intensity: 0.45 };
 
 /** Solid green for speaker (and any other non-activity) islands on pc_1. */
-const SPEAKER_SOLID = { color: new THREE.Color(0x66ff55), intensity: 2.4 };
+const SPEAKER_SOLID = { color: new THREE.Color(0x66ff55), intensity: 4.2 };
 
 /** Monitor bezel power LED — solid green when CRT is on. */
-const MONITOR_LED_ON = { color: 0x66ff55, intensity: 2.8 };
+const MONITOR_LED_ON = { color: 0x66ff55, intensity: 3.6 };
 
 const LED_OFF = { color: 0x000000, intensity: 0 };
 
@@ -176,7 +176,10 @@ export class PcPowerLed {
     for (const mat of this.towerMaterials) {
       mat.emissive.setHex(0xffffff);
       mat.emissiveIntensity = 1;
-      mat.toneMapped = false;
+      // MUST stay toneMapped — false made neon PointLight speculars on the
+      // tower edge bypass ACES and bloom into a second “neon bar” chunk.
+      // LED punch comes from high uSolid/uActivity, not untone-mapped lighting.
+      mat.toneMapped = true;
       mat.userData.pcTowerLeds = true;
 
       const prev = mat.onBeforeCompile;
@@ -203,7 +206,9 @@ export class PcPowerLed {
               float pcActivityMask = smoothstep( 0.2, 0.45, pcLedTexel.r - max( pcLedTexel.g, pcLedTexel.b ) );
               float pcSolidMask = smoothstep( 0.2, 0.45, pcLedTexel.g - max( pcLedTexel.r, pcLedTexel.b ) );
               pcActivityMask *= step( 0.04, pcLedLum );
+              // Green island only — reject weak atlas bleed (tower-edge UV junk).
               pcSolidMask *= step( 0.04, pcLedLum );
+              pcSolidMask *= step( 0.12, pcLedTexel.g - max( pcLedTexel.r, pcLedTexel.b ) );
               totalEmissiveRadiance =
                 uActivityColor * uActivity * pcActivityMask
                 + uSolidColor * uSolid * pcSolidMask;
@@ -213,7 +218,7 @@ export class PcPowerLed {
       };
       const priorKeyFn = mat.customProgramCacheKey?.bind(mat);
       mat.customProgramCacheKey = () =>
-        `${priorKeyFn?.() ?? "pc_1"}|pc-tower-led-split-v2`;
+        `${priorKeyFn?.() ?? "pc_1"}|pc-tower-led-split-v3-tonemap`;
       mat.needsUpdate = true;
     }
   }
@@ -272,7 +277,8 @@ export class PcPowerLed {
     for (const mat of this.monitorMaterials) {
       mat.emissive.setHex(cfg.color);
       mat.emissiveIntensity = cfg.intensity;
-      mat.toneMapped = false;
+      // Keep tone-mapped — same landmine as tower pc_1 (neon specular blowout).
+      mat.toneMapped = true;
       mat.needsUpdate = true;
     }
   }

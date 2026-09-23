@@ -1,0 +1,1237 @@
+{
+  "summary": {
+    "timedOut": false,
+    "entrance": "live",
+    "sampleCount": 16,
+    "tags": [
+      "entering",
+      "entering",
+      "complete",
+      "holding",
+      "holding",
+      "holding",
+      "holding",
+      "live-start",
+      "live",
+      "live",
+      "live",
+      "live",
+      "live",
+      "live",
+      "live",
+      "live"
+    ],
+    "steppedFrames": [],
+    "boundary": [
+      {
+        "from": {
+          "tag": "holding",
+          "n": 6,
+          "entrance": "holding",
+          "entranceY": 0,
+          "dt": 0.0376,
+          "openBlend": 0,
+          "hoverT": 0,
+          "centerT": 0,
+          "root": [
+            1.412535,
+            -0.683695
+          ],
+          "pop": [
+            0.000543,
+            0.001414,
+            0.002854
+          ],
+          "modelScale": 1.378217,
+          "iso": [
+            -0.079915,
+            0,
+            0,
+            0.996802
+          ],
+          "idleIn": 0,
+          "idleY": 0,
+          "pivotY": 0,
+          "spin": [
+            0,
+            0,
+            0
+          ],
+          "dPivotY": 0,
+          "dSpin": 0,
+          "dRoot": 0,
+          "dPop": 0,
+          "dModelScale": 0,
+          "dIso": 0,
+          "dCenterT": 0
+        },
+        "to": {
+          "tag": "live-start",
+          "n": 7,
+          "entrance": "live",
+          "entranceY": 0,
+          "dt": 0.0428,
+          "openBlend": 0,
+          "hoverT": 0,
+          "centerT": 0,
+          "root": [
+            1.412535,
+            -0.683695
+          ],
+          "pop": [
+            0.000543,
+            0.001414,
+            0.002854
+          ],
+          "modelScale": 1.378217,
+          "iso": [
+            -0.079915,
+            0,
+            0,
+            0.996802
+          ],
+          "idleIn": 0,
+          "idleY": 0,
+          "pivotY": 0,
+          "spin": [
+            0,
+            0,
+            0
+          ],
+          "dPivotY": 0,
+          "dSpin": 0,
+          "dRoot": 0,
+          "dPop": 0,
+          "dModelScale": 0,
+          "dIso": 0,
+          "dCenterT": 0
+        },
+        "steps": []
+      },
+      {
+        "from": {
+          "tag": "live-start",
+          "n": 7,
+          "entrance": "live",
+          "entranceY": 0,
+          "dt": 0.0428,
+          "openBlend": 0,
+          "hoverT": 0,
+          "centerT": 0,
+          "root": [
+            1.412535,
+            -0.683695
+          ],
+          "pop": [
+            0.000543,
+            0.001414,
+            0.002854
+          ],
+          "modelScale": 1.378217,
+          "iso": [
+            -0.079915,
+            0,
+            0,
+            0.996802
+          ],
+          "idleIn": 0,
+          "idleY": 0,
+          "pivotY": 0,
+          "spin": [
+            0,
+            0,
+            0
+          ],
+          "dPivotY": 0,
+          "dSpin": 0,
+          "dRoot": 0,
+          "dPop": 0,
+          "dModelScale": 0,
+          "dIso": 0,
+          "dCenterT": 0
+        },
+        "to": {
+          "tag": "live",
+          "n": 8,
+          "entrance": "live",
+          "entranceY": 0,
+          "dt": 0.0469,
+          "openBlend": 0,
+          "hoverT": 0,
+          "centerT": 0,
+          "root": [
+            1.412535,
+            -0.683695
+          ],
+          "pop": [
+            0.000543,
+            0.001414,
+            0.002854
+          ],
+          "modelScale": 1.378217,
+          "iso": [
+            -0.079915,
+            0,
+            0,
+            0.996802
+          ],
+          "idleIn": 0.05518,
+          "idleY": -0.000024,
+          "pivotY": -0.000024,
+          "spin": [
+            0,
+            0,
+            0
+          ],
+          "dPivotY": -0.000024,
+          "dSpin": 0,
+          "dRoot": 0,
+          "dPop": 0,
+          "dModelScale": 0,
+          "dIso": 0,
+          "dCenterT": 0
+        },
+        "steps": []
+      }
+    ],
+    "closedCenter": [
+      -0.0005431861069573607,
+      -0.0014135663014970268,
+      -0.0028540372567249506
+    ],
+    "openCenter": [
+      0.00006673131392409548,
+      -0.04996668023236139,
+      -0.011114643774182476
+    ],
+    "finalPop": [
+      0.0005431861069573607,
+      0.0014135663014970268,
+      0.0028540372567249506
+    ],
+    "holdTail": [
+      {
+        "tag": "holding",
+        "n": 4,
+        "entrance": "holding",
+        "entranceY": 0,
+        "dt": 0.0321,
+        "openBlend": 0,
+        "hoverT": 0,
+        "centerT": 0,
+        "root": [
+          1.412535,
+          -0.683695
+        ],
+        "pop": [
+          0.000543,
+          0.001414,
+          0.002854
+        ],
+        "modelScale": 1.378217,
+        "iso": [
+          -0.079915,
+          0,
+          0,
+          0.996802
+        ],
+        "idleIn": 0,
+        "idleY": 0,
+        "pivotY": 0,
+        "spin": [
+          0,
+          0,
+          0
+        ],
+        "dPivotY": 0,
+        "dSpin": 0,
+        "dRoot": 0,
+        "dPop": 0,
+        "dModelScale": 0,
+        "dIso": 0,
+        "dCenterT": 0
+      },
+      {
+        "tag": "holding",
+        "n": 5,
+        "entrance": "holding",
+        "entranceY": 0,
+        "dt": 0.05,
+        "openBlend": 0,
+        "hoverT": 0,
+        "centerT": 0,
+        "root": [
+          1.412535,
+          -0.683695
+        ],
+        "pop": [
+          0.000543,
+          0.001414,
+          0.002854
+        ],
+        "modelScale": 1.378217,
+        "iso": [
+          -0.079915,
+          0,
+          0,
+          0.996802
+        ],
+        "idleIn": 0,
+        "idleY": 0,
+        "pivotY": 0,
+        "spin": [
+          0,
+          0,
+          0
+        ],
+        "dPivotY": 0,
+        "dSpin": 0,
+        "dRoot": 0,
+        "dPop": 0,
+        "dModelScale": 0,
+        "dIso": 0,
+        "dCenterT": 0
+      },
+      {
+        "tag": "holding",
+        "n": 6,
+        "entrance": "holding",
+        "entranceY": 0,
+        "dt": 0.0376,
+        "openBlend": 0,
+        "hoverT": 0,
+        "centerT": 0,
+        "root": [
+          1.412535,
+          -0.683695
+        ],
+        "pop": [
+          0.000543,
+          0.001414,
+          0.002854
+        ],
+        "modelScale": 1.378217,
+        "iso": [
+          -0.079915,
+          0,
+          0,
+          0.996802
+        ],
+        "idleIn": 0,
+        "idleY": 0,
+        "pivotY": 0,
+        "spin": [
+          0,
+          0,
+          0
+        ],
+        "dPivotY": 0,
+        "dSpin": 0,
+        "dRoot": 0,
+        "dPop": 0,
+        "dModelScale": 0,
+        "dIso": 0,
+        "dCenterT": 0
+      }
+    ],
+    "liveHead": [
+      {
+        "tag": "live-start",
+        "n": 7,
+        "entrance": "live",
+        "entranceY": 0,
+        "dt": 0.0428,
+        "openBlend": 0,
+        "hoverT": 0,
+        "centerT": 0,
+        "root": [
+          1.412535,
+          -0.683695
+        ],
+        "pop": [
+          0.000543,
+          0.001414,
+          0.002854
+        ],
+        "modelScale": 1.378217,
+        "iso": [
+          -0.079915,
+          0,
+          0,
+          0.996802
+        ],
+        "idleIn": 0,
+        "idleY": 0,
+        "pivotY": 0,
+        "spin": [
+          0,
+          0,
+          0
+        ],
+        "dPivotY": 0,
+        "dSpin": 0,
+        "dRoot": 0,
+        "dPop": 0,
+        "dModelScale": 0,
+        "dIso": 0,
+        "dCenterT": 0
+      },
+      {
+        "tag": "live",
+        "n": 8,
+        "entrance": "live",
+        "entranceY": 0,
+        "dt": 0.0469,
+        "openBlend": 0,
+        "hoverT": 0,
+        "centerT": 0,
+        "root": [
+          1.412535,
+          -0.683695
+        ],
+        "pop": [
+          0.000543,
+          0.001414,
+          0.002854
+        ],
+        "modelScale": 1.378217,
+        "iso": [
+          -0.079915,
+          0,
+          0,
+          0.996802
+        ],
+        "idleIn": 0.05518,
+        "idleY": -0.000024,
+        "pivotY": -0.000024,
+        "spin": [
+          0,
+          0,
+          0
+        ],
+        "dPivotY": -0.000024,
+        "dSpin": 0,
+        "dRoot": 0,
+        "dPop": 0,
+        "dModelScale": 0,
+        "dIso": 0,
+        "dCenterT": 0
+      },
+      {
+        "tag": "live",
+        "n": 9,
+        "entrance": "live",
+        "entranceY": 0,
+        "dt": 0.05,
+        "openBlend": 0,
+        "hoverT": 0,
+        "centerT": 0,
+        "root": [
+          1.412535,
+          -0.683695
+        ],
+        "pop": [
+          0.000543,
+          0.001414,
+          0.002854
+        ],
+        "modelScale": 1.378217,
+        "iso": [
+          -0.079915,
+          0,
+          0,
+          0.996802
+        ],
+        "idleIn": 0.114,
+        "idleY": -0.000099,
+        "pivotY": -0.000099,
+        "spin": [
+          0,
+          0,
+          0
+        ],
+        "dPivotY": -0.000075,
+        "dSpin": 0,
+        "dRoot": 0,
+        "dPop": 0,
+        "dModelScale": 0,
+        "dIso": 0,
+        "dCenterT": 0
+      },
+      {
+        "tag": "live",
+        "n": 10,
+        "entrance": "live",
+        "entranceY": 0,
+        "dt": 0.0479,
+        "openBlend": 0,
+        "hoverT": 0,
+        "centerT": 0,
+        "root": [
+          1.412535,
+          -0.683695
+        ],
+        "pop": [
+          0.000543,
+          0.001414,
+          0.002854
+        ],
+        "modelScale": 1.378217,
+        "iso": [
+          -0.079915,
+          0,
+          0,
+          0.996802
+        ],
+        "idleIn": 0.17035,
+        "idleY": -0.000232,
+        "pivotY": -0.000232,
+        "spin": [
+          0,
+          0,
+          0
+        ],
+        "dPivotY": -0.000133,
+        "dSpin": 0,
+        "dRoot": 0,
+        "dPop": 0,
+        "dModelScale": 0,
+        "dIso": 0,
+        "dCenterT": 0
+      },
+      {
+        "tag": "live",
+        "n": 11,
+        "entrance": "live",
+        "entranceY": 0,
+        "dt": 0.0448,
+        "openBlend": 0,
+        "hoverT": 0,
+        "centerT": 0,
+        "root": [
+          1.412535,
+          -0.683695
+        ],
+        "pop": [
+          0.000543,
+          0.001414,
+          0.002854
+        ],
+        "modelScale": 1.378217,
+        "iso": [
+          -0.079915,
+          0,
+          0,
+          0.996802
+        ],
+        "idleIn": 0.22306,
+        "idleY": -0.000415,
+        "pivotY": -0.000415,
+        "spin": [
+          0,
+          0,
+          0
+        ],
+        "dPivotY": -0.000183,
+        "dSpin": 0,
+        "dRoot": 0,
+        "dPop": 0,
+        "dModelScale": 0,
+        "dIso": 0,
+        "dCenterT": 0
+      },
+      {
+        "tag": "live",
+        "n": 12,
+        "entrance": "live",
+        "entranceY": 0,
+        "dt": 0.05,
+        "openBlend": 0,
+        "hoverT": 0,
+        "centerT": 0,
+        "root": [
+          1.412535,
+          -0.683695
+        ],
+        "pop": [
+          0.000543,
+          0.001414,
+          0.002854
+        ],
+        "modelScale": 1.378217,
+        "iso": [
+          -0.079915,
+          0,
+          0,
+          0.996802
+        ],
+        "idleIn": 0.28188,
+        "idleY": -0.000702,
+        "pivotY": -0.000702,
+        "spin": [
+          0,
+          0,
+          0
+        ],
+        "dPivotY": -0.000287,
+        "dSpin": 0,
+        "dRoot": 0,
+        "dPop": 0,
+        "dModelScale": 0,
+        "dIso": 0,
+        "dCenterT": 0
+      }
+    ]
+  },
+  "handoffLog": [
+    {
+      "tag": "entering",
+      "n": 0,
+      "entrance": "entering",
+      "entranceY": 0.001058,
+      "dt": 0.05,
+      "openBlend": 0,
+      "hoverT": 0,
+      "centerT": 0,
+      "root": [
+        1.412535,
+        -0.683695
+      ],
+      "pop": [
+        0.000543,
+        0.001414,
+        0.002854
+      ],
+      "modelScale": 1.378217,
+      "iso": [
+        -0.079915,
+        0,
+        0,
+        0.996802
+      ],
+      "idleIn": 0,
+      "idleY": 0,
+      "pivotY": 0.001058,
+      "spin": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "tag": "entering",
+      "n": 1,
+      "entrance": "entering",
+      "entranceY": 0,
+      "dt": 0.05,
+      "openBlend": 0,
+      "hoverT": 0,
+      "centerT": 0,
+      "root": [
+        1.412535,
+        -0.683695
+      ],
+      "pop": [
+        0.000543,
+        0.001414,
+        0.002854
+      ],
+      "modelScale": 1.378217,
+      "iso": [
+        -0.079915,
+        0,
+        0,
+        0.996802
+      ],
+      "idleIn": 0,
+      "idleY": 0,
+      "pivotY": 0,
+      "spin": [
+        0,
+        0,
+        0
+      ],
+      "dPivotY": -0.001058,
+      "dSpin": 0,
+      "dRoot": 0,
+      "dPop": 0,
+      "dModelScale": 0,
+      "dIso": 0,
+      "dCenterT": 0
+    },
+    {
+      "tag": "complete",
+      "n": 2,
+      "entrance": "holding",
+      "entranceY": 0,
+      "dt": 0.05,
+      "openBlend": 0,
+      "hoverT": 0,
+      "centerT": 0,
+      "root": [
+        1.412535,
+        -0.683695
+      ],
+      "pop": [
+        0.000543,
+        0.001414,
+        0.002854
+      ],
+      "modelScale": 1.378217,
+      "iso": [
+        -0.079915,
+        0,
+        0,
+        0.996802
+      ],
+      "idleIn": 0,
+      "idleY": 0,
+      "pivotY": 0,
+      "spin": [
+        0,
+        0,
+        0
+      ],
+      "dPivotY": 0,
+      "dSpin": 0,
+      "dRoot": 0,
+      "dPop": 0,
+      "dModelScale": 0,
+      "dIso": 0,
+      "dCenterT": 0
+    },
+    {
+      "tag": "holding",
+      "n": 3,
+      "entrance": "holding",
+      "entranceY": 0,
+      "dt": 0.05,
+      "openBlend": 0,
+      "hoverT": 0,
+      "centerT": 0,
+      "root": [
+        1.412535,
+        -0.683695
+      ],
+      "pop": [
+        0.000543,
+        0.001414,
+        0.002854
+      ],
+      "modelScale": 1.378217,
+      "iso": [
+        -0.079915,
+        0,
+        0,
+        0.996802
+      ],
+      "idleIn": 0,
+      "idleY": 0,
+      "pivotY": 0,
+      "spin": [
+        0,
+        0,
+        0
+      ],
+      "dPivotY": 0,
+      "dSpin": 0,
+      "dRoot": 0,
+      "dPop": 0,
+      "dModelScale": 0,
+      "dIso": 0,
+      "dCenterT": 0
+    },
+    {
+      "tag": "holding",
+      "n": 4,
+      "entrance": "holding",
+      "entranceY": 0,
+      "dt": 0.0321,
+      "openBlend": 0,
+      "hoverT": 0,
+      "centerT": 0,
+      "root": [
+        1.412535,
+        -0.683695
+      ],
+      "pop": [
+        0.000543,
+        0.001414,
+        0.002854
+      ],
+      "modelScale": 1.378217,
+      "iso": [
+        -0.079915,
+        0,
+        0,
+        0.996802
+      ],
+      "idleIn": 0,
+      "idleY": 0,
+      "pivotY": 0,
+      "spin": [
+        0,
+        0,
+        0
+      ],
+      "dPivotY": 0,
+      "dSpin": 0,
+      "dRoot": 0,
+      "dPop": 0,
+      "dModelScale": 0,
+      "dIso": 0,
+      "dCenterT": 0
+    },
+    {
+      "tag": "holding",
+      "n": 5,
+      "entrance": "holding",
+      "entranceY": 0,
+      "dt": 0.05,
+      "openBlend": 0,
+      "hoverT": 0,
+      "centerT": 0,
+      "root": [
+        1.412535,
+        -0.683695
+      ],
+      "pop": [
+        0.000543,
+        0.001414,
+        0.002854
+      ],
+      "modelScale": 1.378217,
+      "iso": [
+        -0.079915,
+        0,
+        0,
+        0.996802
+      ],
+      "idleIn": 0,
+      "idleY": 0,
+      "pivotY": 0,
+      "spin": [
+        0,
+        0,
+        0
+      ],
+      "dPivotY": 0,
+      "dSpin": 0,
+      "dRoot": 0,
+      "dPop": 0,
+      "dModelScale": 0,
+      "dIso": 0,
+      "dCenterT": 0
+    },
+    {
+      "tag": "holding",
+      "n": 6,
+      "entrance": "holding",
+      "entranceY": 0,
+      "dt": 0.0376,
+      "openBlend": 0,
+      "hoverT": 0,
+      "centerT": 0,
+      "root": [
+        1.412535,
+        -0.683695
+      ],
+      "pop": [
+        0.000543,
+        0.001414,
+        0.002854
+      ],
+      "modelScale": 1.378217,
+      "iso": [
+        -0.079915,
+        0,
+        0,
+        0.996802
+      ],
+      "idleIn": 0,
+      "idleY": 0,
+      "pivotY": 0,
+      "spin": [
+        0,
+        0,
+        0
+      ],
+      "dPivotY": 0,
+      "dSpin": 0,
+      "dRoot": 0,
+      "dPop": 0,
+      "dModelScale": 0,
+      "dIso": 0,
+      "dCenterT": 0
+    },
+    {
+      "tag": "live-start",
+      "n": 7,
+      "entrance": "live",
+      "entranceY": 0,
+      "dt": 0.0428,
+      "openBlend": 0,
+      "hoverT": 0,
+      "centerT": 0,
+      "root": [
+        1.412535,
+        -0.683695
+      ],
+      "pop": [
+        0.000543,
+        0.001414,
+        0.002854
+      ],
+      "modelScale": 1.378217,
+      "iso": [
+        -0.079915,
+        0,
+        0,
+        0.996802
+      ],
+      "idleIn": 0,
+      "idleY": 0,
+      "pivotY": 0,
+      "spin": [
+        0,
+        0,
+        0
+      ],
+      "dPivotY": 0,
+      "dSpin": 0,
+      "dRoot": 0,
+      "dPop": 0,
+      "dModelScale": 0,
+      "dIso": 0,
+      "dCenterT": 0
+    },
+    {
+      "tag": "live",
+      "n": 8,
+      "entrance": "live",
+      "entranceY": 0,
+      "dt": 0.0469,
+      "openBlend": 0,
+      "hoverT": 0,
+      "centerT": 0,
+      "root": [
+        1.412535,
+        -0.683695
+      ],
+      "pop": [
+        0.000543,
+        0.001414,
+        0.002854
+      ],
+      "modelScale": 1.378217,
+      "iso": [
+        -0.079915,
+        0,
+        0,
+        0.996802
+      ],
+      "idleIn": 0.05518,
+      "idleY": -0.000024,
+      "pivotY": -0.000024,
+      "spin": [
+        0,
+        0,
+        0
+      ],
+      "dPivotY": -0.000024,
+      "dSpin": 0,
+      "dRoot": 0,
+      "dPop": 0,
+      "dModelScale": 0,
+      "dIso": 0,
+      "dCenterT": 0
+    },
+    {
+      "tag": "live",
+      "n": 9,
+      "entrance": "live",
+      "entranceY": 0,
+      "dt": 0.05,
+      "openBlend": 0,
+      "hoverT": 0,
+      "centerT": 0,
+      "root": [
+        1.412535,
+        -0.683695
+      ],
+      "pop": [
+        0.000543,
+        0.001414,
+        0.002854
+      ],
+      "modelScale": 1.378217,
+      "iso": [
+        -0.079915,
+        0,
+        0,
+        0.996802
+      ],
+      "idleIn": 0.114,
+      "idleY": -0.000099,
+      "pivotY": -0.000099,
+      "spin": [
+        0,
+        0,
+        0
+      ],
+      "dPivotY": -0.000075,
+      "dSpin": 0,
+      "dRoot": 0,
+      "dPop": 0,
+      "dModelScale": 0,
+      "dIso": 0,
+      "dCenterT": 0
+    },
+    {
+      "tag": "live",
+      "n": 10,
+      "entrance": "live",
+      "entranceY": 0,
+      "dt": 0.0479,
+      "openBlend": 0,
+      "hoverT": 0,
+      "centerT": 0,
+      "root": [
+        1.412535,
+        -0.683695
+      ],
+      "pop": [
+        0.000543,
+        0.001414,
+        0.002854
+      ],
+      "modelScale": 1.378217,
+      "iso": [
+        -0.079915,
+        0,
+        0,
+        0.996802
+      ],
+      "idleIn": 0.17035,
+      "idleY": -0.000232,
+      "pivotY": -0.000232,
+      "spin": [
+        0,
+        0,
+        0
+      ],
+      "dPivotY": -0.000133,
+      "dSpin": 0,
+      "dRoot": 0,
+      "dPop": 0,
+      "dModelScale": 0,
+      "dIso": 0,
+      "dCenterT": 0
+    },
+    {
+      "tag": "live",
+      "n": 11,
+      "entrance": "live",
+      "entranceY": 0,
+      "dt": 0.0448,
+      "openBlend": 0,
+      "hoverT": 0,
+      "centerT": 0,
+      "root": [
+        1.412535,
+        -0.683695
+      ],
+      "pop": [
+        0.000543,
+        0.001414,
+        0.002854
+      ],
+      "modelScale": 1.378217,
+      "iso": [
+        -0.079915,
+        0,
+        0,
+        0.996802
+      ],
+      "idleIn": 0.22306,
+      "idleY": -0.000415,
+      "pivotY": -0.000415,
+      "spin": [
+        0,
+        0,
+        0
+      ],
+      "dPivotY": -0.000183,
+      "dSpin": 0,
+      "dRoot": 0,
+      "dPop": 0,
+      "dModelScale": 0,
+      "dIso": 0,
+      "dCenterT": 0
+    },
+    {
+      "tag": "live",
+      "n": 12,
+      "entrance": "live",
+      "entranceY": 0,
+      "dt": 0.05,
+      "openBlend": 0,
+      "hoverT": 0,
+      "centerT": 0,
+      "root": [
+        1.412535,
+        -0.683695
+      ],
+      "pop": [
+        0.000543,
+        0.001414,
+        0.002854
+      ],
+      "modelScale": 1.378217,
+      "iso": [
+        -0.079915,
+        0,
+        0,
+        0.996802
+      ],
+      "idleIn": 0.28188,
+      "idleY": -0.000702,
+      "pivotY": -0.000702,
+      "spin": [
+        0,
+        0,
+        0
+      ],
+      "dPivotY": -0.000287,
+      "dSpin": 0,
+      "dRoot": 0,
+      "dPop": 0,
+      "dModelScale": 0,
+      "dIso": 0,
+      "dCenterT": 0
+    },
+    {
+      "tag": "live",
+      "n": 13,
+      "entrance": "live",
+      "entranceY": 0,
+      "dt": 0.0371,
+      "openBlend": 0,
+      "hoverT": 0,
+      "centerT": 0,
+      "root": [
+        1.412535,
+        -0.683695
+      ],
+      "pop": [
+        0.000543,
+        0.001414,
+        0.002854
+      ],
+      "modelScale": 1.378217,
+      "iso": [
+        -0.079915,
+        0,
+        0,
+        0.996802
+      ],
+      "idleIn": 0.32553,
+      "idleY": -0.000958,
+      "pivotY": -0.000958,
+      "spin": [
+        0,
+        0,
+        0
+      ],
+      "dPivotY": -0.000256,
+      "dSpin": 0,
+      "dRoot": 0,
+      "dPop": 0,
+      "dModelScale": 0,
+      "dIso": 0,
+      "dCenterT": 0
+    },
+    {
+      "tag": "live",
+      "n": 14,
+      "entrance": "live",
+      "entranceY": 0,
+      "dt": 0.05,
+      "openBlend": 0,
+      "hoverT": 0,
+      "centerT": 0,
+      "root": [
+        1.412535,
+        -0.683695
+      ],
+      "pop": [
+        0.000543,
+        0.001414,
+        0.002854
+      ],
+      "modelScale": 1.378217,
+      "iso": [
+        -0.079915,
+        0,
+        0,
+        0.996802
+      ],
+      "idleIn": 0.38435,
+      "idleY": -0.001385,
+      "pivotY": -0.001385,
+      "spin": [
+        0,
+        0,
+        0
+      ],
+      "dPivotY": -0.000427,
+      "dSpin": 0,
+      "dRoot": 0,
+      "dPop": 0,
+      "dModelScale": 0,
+      "dIso": 0,
+      "dCenterT": 0
+    },
+    {
+      "tag": "live",
+      "n": 15,
+      "entrance": "live",
+      "entranceY": 0,
+      "dt": 0.05,
+      "openBlend": 0,
+      "hoverT": 0,
+      "centerT": 0,
+      "root": [
+        1.412535,
+        -0.683695
+      ],
+      "pop": [
+        0.000543,
+        0.001414,
+        0.002854
+      ],
+      "modelScale": 1.378217,
+      "iso": [
+        -0.079915,
+        0,
+        0,
+        0.996802
+      ],
+      "idleIn": 0.44318,
+      "idleY": -0.001889,
+      "pivotY": -0.001889,
+      "spin": [
+        0.000065,
+        0.002132,
+        0.000085
+      ],
+      "dPivotY": -0.000504,
+      "dSpin": 0.002135,
+      "dRoot": 0,
+      "dPop": 0,
+      "dModelScale": 0,
+      "dIso": 0,
+      "dCenterT": 0
+    }
+  ]
+}

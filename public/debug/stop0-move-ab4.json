@@ -1,0 +1,23 @@
+[
+  {
+    "label": "removeVolPassFromComposer",
+    "n": 130,
+    "dark": 29,
+    "darkFrac": 0.223,
+    "meanMin": 0
+  },
+  {
+    "label": "renderPassOnly",
+    "n": 130,
+    "dark": 107,
+    "darkFrac": 0.823,
+    "meanMin": 6
+  },
+  {
+    "label": "fixMatrixWorldOrder",
+    "n": 130,
+    "dark": 40,
+    "darkFrac": 0.308,
+    "meanMin": 0
+  }
+]

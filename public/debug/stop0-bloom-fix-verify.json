@@ -1,0 +1,26 @@
+[
+  {
+    "label": "still",
+    "n": 16,
+    "zeroFrames": 0,
+    "zeroFrac": 0,
+    "meanMin": 30,
+    "meanAvg": 30,
+    "contentVisible": true,
+    "contentLit": true,
+    "mipmapBlur": null,
+    "intensity": 1.2
+  },
+  {
+    "label": "move",
+    "n": 150,
+    "zeroFrames": 0,
+    "zeroFrac": 0,
+    "meanMin": 20,
+    "meanAvg": 21.3,
+    "contentVisible": true,
+    "contentLit": true,
+    "mipmapBlur": null,
+    "intensity": 1.2
+  }
+]

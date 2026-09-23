@@ -56,6 +56,16 @@ function isFloorExcludedMesh(obj) {
   if (obj.name.includes("glow") || obj.name.includes("neon") || obj.name.includes("contact-shadow")) {
     return true;
   }
+  // Apple dirt-coin is intentionally buried under the apron. Including those
+  // verts in the snap lifts the whole Bust group by the sink amount and the
+  // Meshy grass-coin pops back above the floor.
+  let p = obj;
+  while (p) {
+    if (p.name === "apple-tree-pivot" || p.name === "apple-tree") return true;
+    p = p.parent;
+  }
+  // Lawn dirt plate sits under the apron on purpose — same snap trap.
+  if (obj.name === "Grass_ground") return true;
   const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
   return materials.some(
     (mat) => mat?.name?.includes("cable") || mat?.name?.includes("neon")

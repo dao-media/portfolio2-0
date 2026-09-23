@@ -1,0 +1,46 @@
+{
+  "gate": "GATE4-banding-abc",
+  "glHits": 0,
+  "audit": {
+    "fogMode": "volumetric",
+    "vol": {
+      "mode": "volumetric",
+      "enabled": true,
+      "densityScale": 1,
+      "fade": 1,
+      "depthPacked": true,
+      "halfRes": true,
+      "hasDepth": true,
+      "hasValidSize": true,
+      "fogTarget": {
+        "w": 640,
+        "h": 400
+      },
+      "near": 0.1,
+      "far": 120,
+      "steps": 16,
+      "density": 0.16,
+      "fillCap": 0.88,
+      "lightIntensities": [
+        10,
+        5,
+        0,
+        4.999999999999999
+      ],
+      "noiseFrozen": false
+    },
+    "fogTargetType": 1016,
+    "isHalfFloat": true,
+    "composerType": 1016,
+    "composerIsHalfFloat": true,
+    "hasBayerFn": true,
+    "usesJitter": true,
+    "jitterWired": true,
+    "tStart": true,
+    "fogTarget": {
+      "w": 640,
+      "h": 400
+    }
+  },
+  "conclusion": "c-HEIGHT-FALLOFF: HalfFloat + Bayer present; remaining grazing band is density/height profile look (shape falloff/in-scatter — do not reopen depth)"
+}

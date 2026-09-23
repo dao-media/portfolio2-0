@@ -1,0 +1,158 @@
+{
+  "gate": "GATE4-step4-cost-matrix",
+  "path": "ANGLE/software Playwright — RELATIVE regression only",
+  "notAbsolute": "Do not treat these ms/fps as mid-GPU absolute. Manual integrated-GPU / low-power check required before merge.",
+  "cases": [
+    {
+      "id": "A",
+      "label": "fog off, full quality",
+      "setup": {
+        "mode": "volumetric",
+        "enabled": false,
+        "densityScale": 0,
+        "fade": 0,
+        "depthPacked": true,
+        "halfRes": true,
+        "hasDepth": true,
+        "hasValidSize": true,
+        "fogTarget": {
+          "w": 640,
+          "h": 400
+        },
+        "near": 0.1,
+        "far": 220,
+        "steps": 64,
+        "density": 0.35,
+        "fillCap": 0.88,
+        "lightIntensities": [
+          10,
+          0,
+          0,
+          0
+        ],
+        "noiseFrozen": false
+      },
+      "meanFrameMs": 11.43544217685453,
+      "maxFrameMs": 33.20000000000073,
+      "worstSlowMs": 0,
+      "slowMax": 0
+    },
+    {
+      "id": "B",
+      "label": "fog on, 16 steps, halfRes, full quality",
+      "setup": {
+        "mode": "volumetric",
+        "enabled": true,
+        "densityScale": 1,
+        "fade": 1,
+        "depthPacked": true,
+        "halfRes": true,
+        "hasDepth": true,
+        "hasValidSize": true,
+        "fogTarget": {
+          "w": 640,
+          "h": 400
+        },
+        "near": 0.1,
+        "far": 220,
+        "steps": 16,
+        "density": 0.35,
+        "fillCap": 0.88,
+        "lightIntensities": [
+          10,
+          0,
+          0,
+          0
+        ],
+        "noiseFrozen": false
+      },
+      "meanFrameMs": 8.514177215177801,
+      "maxFrameMs": 17.400000000001455,
+      "worstSlowMs": 0,
+      "slowMax": 0
+    },
+    {
+      "id": "C",
+      "label": "fog on, setWorkQuality(0.6), steps ~12",
+      "setup": {
+        "mode": "volumetric",
+        "enabled": true,
+        "densityScale": 1,
+        "fade": 1,
+        "depthPacked": true,
+        "halfRes": true,
+        "hasDepth": true,
+        "hasValidSize": true,
+        "fogTarget": {
+          "w": 384,
+          "h": 240
+        },
+        "near": 0.1,
+        "far": 220,
+        "steps": 12,
+        "density": 0.35,
+        "fillCap": 0.88,
+        "lightIntensities": [
+          10,
+          0,
+          0,
+          0
+        ],
+        "noiseFrozen": false
+      },
+      "meanFrameMs": 8.332210108983386,
+      "maxFrameMs": 10.099999999998545,
+      "worstSlowMs": 0,
+      "slowMax": 0
+    },
+    {
+      "id": "D",
+      "label": "fog on, coarse (8 steps, halfRes) @ work 0.6",
+      "setup": {
+        "mode": "volumetric",
+        "enabled": true,
+        "densityScale": 1,
+        "fade": 1,
+        "depthPacked": true,
+        "halfRes": true,
+        "hasDepth": true,
+        "hasValidSize": true,
+        "fogTarget": {
+          "w": 384,
+          "h": 240
+        },
+        "near": 0.1,
+        "far": 220,
+        "steps": 8,
+        "density": 0.35,
+        "fillCap": 0.88,
+        "lightIntensities": [
+          10,
+          0,
+          0,
+          0
+        ],
+        "noiseFrozen": false
+      },
+      "meanFrameMs": 8.329618623080734,
+      "maxFrameMs": 9.400000000008731,
+      "worstSlowMs": 0,
+      "slowMax": 0
+    }
+  ],
+  "deltasVsA": {
+    "B_minus_A_meanMs": -2.9212649616767283,
+    "C_minus_A_meanMs": -3.1032320678711436,
+    "D_minus_A_meanMs": -3.1058235537737957,
+    "B_minus_A_worstSlowMs": 0,
+    "note": "Prefer meanFrameMs deltas. worstSlowMs only counts frames ≥48 ms (frameBudget)."
+  },
+  "regressionHints": {
+    "sub1fpsReopen": false,
+    "note": "Compare B−A mean to prior baselines; ANGLE understates fill/ALU vs real silicon."
+  },
+  "manualHardwareCheck": {
+    "status": "PENDING_USER",
+    "instruction": "On real integrated GPU (or Chrome low-power / battery emulation), load / with fog B settings and record steady rest fps + worst frame ms. Report that absolute number separately from ANGLE deltas."
+  }
+}

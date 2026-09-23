@@ -1,7 +1,7 @@
 /**
  * Shared LoadingManager + min boot duration.
  * Interaction stays locked until the *gating* set (PC maps + Desktop GLB)
- * plus min boot clear. Deferred GLBs (Sidekick, Travel/T-rex) must not
+ * plus min boot clear. Deferred GLBs (Sidekick, Archaeology/stele) must not
  * share this manager — a late onLoad would otherwise re-enter finalize.
  *
  * Fog atlas bake removed — volumetric fog needs no ring/haze atlas.

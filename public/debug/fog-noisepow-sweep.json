@@ -1,0 +1,78 @@
+{
+  "step": 1,
+  "knob": "noisePow",
+  "note": "pow(noise,p) — higher p = clumpy peaks / crushed lows. Stop for Dane review.",
+  "lab": [
+    {
+      "noisePow": 1.4,
+      "file": "fog-lab-noisepow-14.png",
+      "canvas": "fog-lab-noisepow-14-canvas.png"
+    },
+    {
+      "noisePow": 2,
+      "file": "fog-lab-noisepow-2.png",
+      "canvas": "fog-lab-noisepow-2-canvas.png"
+    },
+    {
+      "noisePow": 3,
+      "file": "fog-lab-noisepow-3.png",
+      "canvas": "fog-lab-noisepow-3-canvas.png"
+    },
+    {
+      "noisePow": 4,
+      "file": "fog-lab-noisepow-4.png",
+      "canvas": "fog-lab-noisepow-4-canvas.png"
+    }
+  ],
+  "stage": [
+    {
+      "noisePow": 1.4,
+      "file": "vol-fog-noisepow-14-stage.png",
+      "maxC": 4.3,
+      "maxY": 311,
+      "bandStd": 2.96,
+      "bandMean": 44,
+      "ray": 32,
+      "steps": 46,
+      "spacing": 0.6956521739130435,
+      "clean": true
+    },
+    {
+      "noisePow": 2,
+      "file": "vol-fog-noisepow-2-stage.png",
+      "maxC": 5.5,
+      "maxY": 311,
+      "bandStd": 3.11,
+      "bandMean": 41.6,
+      "ray": 32,
+      "steps": 46,
+      "spacing": 0.6956521739130435,
+      "clean": true
+    },
+    {
+      "noisePow": 3,
+      "file": "vol-fog-noisepow-3-stage.png",
+      "maxC": 7.5,
+      "maxY": 311,
+      "bandStd": 3.33,
+      "bandMean": 38.6,
+      "ray": 32,
+      "steps": 46,
+      "spacing": 0.6956521739130435,
+      "clean": false
+    },
+    {
+      "noisePow": 4,
+      "file": "vol-fog-noisepow-4-stage.png",
+      "maxC": 9.4,
+      "maxY": 311,
+      "bandStd": 3.52,
+      "bandMean": 36.7,
+      "ray": 32,
+      "steps": 46,
+      "spacing": 0.6956521739130435,
+      "clean": false
+    }
+  ],
+  "guardrail": "32/46 ≈ 0.70 m/step held"
+}

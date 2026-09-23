@@ -1,0 +1,85 @@
+{
+  "confirmWas": "CURVED_UV_MASK (corner/mid 13.2) — fixed by widening plane / cutting corner R",
+  "bust": {
+    "path": "public/debug/verify-bust-tube-grass.png",
+    "poolOpacity": 0.48,
+    "poolMax": 0.48,
+    "neonIntensity": 28,
+    "contentInset": null
+  },
+  "desktop": {
+    "crtPlane": {
+      "mode": "blender-bezel-content-quad",
+      "spec": {
+        "width": 0.26135199052382324,
+        "height": 0.20799103180153664,
+        "aspect": 1.2565541324551108,
+        "centerU": -0.0000054631608769895035,
+        "centerV": -9.089274185178353e-7,
+        "depth": 0.0015,
+        "cornerRadius": 0.002,
+        "canvasWidth": 1024,
+        "canvasHeight": 813
+      },
+      "name": "crt-content-quad",
+      "aspect": 1.2565541324551108,
+      "canvasWidth": 1024,
+      "canvasHeight": 813,
+      "width": 0.26135199052382324,
+      "height": 0.20799103180153664,
+      "usable": true,
+      "phosphor": {
+        "hasUv": true,
+        "usable": true,
+        "name": "pc-Mesh_2",
+        "vertCount": 197,
+        "bounds": {
+          "uMin": 0.007218000013381243,
+          "uMax": 0.9927819967269897,
+          "vMin": 0.008797000162303448,
+          "vMax": 0.9912059903144836
+        },
+        "width": 0.23335198698844892,
+        "height": 0.17955771255443034,
+        "aspect": 1.299593226426916,
+        "canvasWidth": 1024,
+        "canvasHeight": 788,
+        "avgNormal": {
+          "x": -0.000030946364599457794,
+          "y": 0.02130524051194255,
+          "z": 0.9997730171239125
+        },
+        "uvAtTop": [
+          0.5,
+          0.008797000162303448
+        ],
+        "uvAtBottom": [
+          0.5,
+          0.9912059903144836
+        ]
+      }
+    },
+    "emissive": 0.72,
+    "neonGlare": 0.6325,
+    "neonIntensityUniform": 28,
+    "neonLightIntensity": 28,
+    "poolScale": 0.52,
+    "poolOffsetX": 0.42,
+    "poolOpacity": 0.48
+  },
+  "crtClip": {
+    "corner_over_mid": 2.82,
+    "edges": {
+      "t": 16.6,
+      "b": 7.1,
+      "l": 56.5,
+      "r": 64
+    },
+    "less_curved_than_before": true
+  },
+  "captures": {
+    "bustPath": "public/debug/verify-bust-tube-grass.png",
+    "deskRest": "public/debug/verify-desktop-rest.png",
+    "crtPath": "public/debug/verify-crt-edges.png"
+  }
+}

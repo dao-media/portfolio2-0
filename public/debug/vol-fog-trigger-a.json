@@ -1,0 +1,228 @@
+{
+  "gate": "GATE4-mach-trigger-A",
+  "preHeavy": {
+    "heavy": false,
+    "heavyAfter": 0,
+    "now": 5684.099999964237,
+    "vol": {
+      "mode": "volumetric",
+      "enabled": false,
+      "densityScale": 0,
+      "fade": 0,
+      "depthPacked": true,
+      "halfRes": true,
+      "hasDepth": true,
+      "hasValidSize": true,
+      "fogTarget": {
+        "w": 640,
+        "h": 400
+      },
+      "near": 0.1,
+      "far": 120,
+      "steps": 16,
+      "density": 0.16,
+      "fillCap": 0.88,
+      "lightIntensities": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "noiseFrozen": false
+    },
+    "sidekickReady": false,
+    "archaeologyShelf": false,
+    "travelRex": false,
+    "desktopPc": false
+  },
+  "atFadeStart": {
+    "vol": {
+      "mode": "volumetric",
+      "enabled": true,
+      "densityScale": 0.42400000005960464,
+      "fade": 0.42400000005960464,
+      "depthPacked": true,
+      "halfRes": true,
+      "hasDepth": true,
+      "hasValidSize": true,
+      "fogTarget": {
+        "w": 640,
+        "h": 400
+      },
+      "near": 0.1,
+      "far": 120,
+      "steps": 16,
+      "density": 0.16,
+      "fillCap": 0.88,
+      "lightIntensities": [
+        10,
+        5,
+        0,
+        4.999999999999999
+      ],
+      "noiseFrozen": false
+    },
+    "sidekickReady": true,
+    "archaeologyShelf": true,
+    "travelRex": true
+  },
+  "atFadeDone": {
+    "vol": {
+      "mode": "volumetric",
+      "enabled": true,
+      "densityScale": 1,
+      "fade": 1,
+      "depthPacked": true,
+      "halfRes": true,
+      "hasDepth": true,
+      "hasValidSize": true,
+      "fogTarget": {
+        "w": 640,
+        "h": 400
+      },
+      "near": 0.1,
+      "far": 120,
+      "steps": 16,
+      "density": 0.16,
+      "fillCap": 0.88,
+      "lightIntensities": [
+        10,
+        5,
+        0,
+        4.999999999999999
+      ],
+      "noiseFrozen": false
+    },
+    "sidekickReady": true,
+    "archaeologyShelf": true,
+    "travelRex": true
+  },
+  "afterSidekick": {
+    "vol": {
+      "mode": "volumetric",
+      "enabled": true,
+      "densityScale": 1,
+      "fade": 1,
+      "depthPacked": true,
+      "halfRes": true,
+      "hasDepth": true,
+      "hasValidSize": true,
+      "fogTarget": {
+        "w": 640,
+        "h": 400
+      },
+      "near": 0.1,
+      "far": 120,
+      "steps": 16,
+      "density": 0.16,
+      "fillCap": 0.88,
+      "lightIntensities": [
+        10,
+        5,
+        0,
+        4.999999999999999
+      ],
+      "noiseFrozen": false
+    },
+    "sidekickReady": true,
+    "archaeologyShelf": true,
+    "travelRex": true
+  },
+  "atDesktop": {
+    "current": 1,
+    "deg": 89.9998649108174,
+    "vol": {
+      "mode": "volumetric",
+      "enabled": true,
+      "densityScale": 1,
+      "fade": 1,
+      "depthPacked": true,
+      "halfRes": true,
+      "hasDepth": true,
+      "hasValidSize": true,
+      "fogTarget": {
+        "w": 640,
+        "h": 400
+      },
+      "near": 0.1,
+      "far": 120,
+      "steps": 16,
+      "density": 0.16,
+      "fillCap": 0.88,
+      "lightIntensities": [
+        5.000011257431881,
+        9.999999999983103,
+        4.999988742568117,
+        1.6897294553801953e-11
+      ],
+      "noiseFrozen": false
+    }
+  },
+  "atSidekick": {
+    "current": 2,
+    "deg": 179.99984531273878,
+    "vol": {
+      "mode": "volumetric",
+      "enabled": true,
+      "densityScale": 1,
+      "fade": 1,
+      "depthPacked": true,
+      "halfRes": true,
+      "hasDepth": true,
+      "hasValidSize": true,
+      "fogTarget": {
+        "w": 640,
+        "h": 400
+      },
+      "near": 0.1,
+      "far": 120,
+      "steps": 16,
+      "density": 0.16,
+      "fillCap": 0.88,
+      "lightIntensities": [
+        2.2155680626538754e-11,
+        5.000012890605101,
+        9.999999999977845,
+        4.999987109394897
+      ],
+      "noiseFrozen": false
+    },
+    "sidekickReady": true
+  },
+  "atTravel": {
+    "current": 3,
+    "deg": 269.9999478563475,
+    "vol": {
+      "mode": "volumetric",
+      "enabled": true,
+      "densityScale": 1,
+      "fade": 1,
+      "depthPacked": true,
+      "halfRes": true,
+      "hasDepth": true,
+      "hasValidSize": true,
+      "fogTarget": {
+        "w": 640,
+        "h": 400
+      },
+      "near": 0.1,
+      "far": 120,
+      "steps": 16,
+      "density": 0.16,
+      "fillCap": 0.88,
+      "lightIntensities": [
+        4.999995654695626,
+        2.517555526409803e-12,
+        5.000004345304373,
+        9.999999999997483
+      ],
+      "noiseFrozen": false
+    },
+    "archaeologyShelf": true,
+    "travelRex": true
+  },
+  "judge": {
+    "a1": "Compare vol-fog-trigger-a1-fade-start.png vs fade-done.png. If slab is already at fade-start/done before Sidekick/Travel commit, 'clean at load' was density≈0 (fog not drawing yet).",
+    "a2": "Compare a2-desktop vs a2-sidekick vs a2-travel vs monolith after-sidekick. Uniform slab at Desktop → global; only near deferred props → depth-triggered."
+  }
+}

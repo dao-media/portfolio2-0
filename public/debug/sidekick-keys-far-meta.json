@@ -1,0 +1,9 @@
+{
+  "isOpen": true,
+  "isZoomed": false,
+  "ktVisible": true,
+  "ktMat": "sidekick_keypad_opaque",
+  "ktHasMap": false,
+  "ktType": "MeshPhysicalMaterial",
+  "ktDepthTest": false
+}

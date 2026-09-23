@@ -374,7 +374,7 @@ export class WaterCursorRimTuner {
 const WATER_CURSOR_RIM_TUNER_CSS = `
 #water-cursor-rim-tuner-toggle {
   position: fixed;
-  bottom: 152px;
+  top: 148px;
   right: 16px;
   z-index: 9000;
   width: 34px;

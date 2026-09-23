@@ -1,0 +1,11 @@
+{
+  "focus": 0,
+  "isOpen": false,
+  "isZoomed": false,
+  "KeyboardText": {
+    "visible": false,
+    "mat": "sidekick_keypad_opaque",
+    "hasMap": false,
+    "type": "MeshPhysicalMaterial"
+  }
+}

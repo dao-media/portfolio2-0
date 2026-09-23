@@ -345,8 +345,9 @@ const report = {
     edgeProxOn: (nearDebug?.cursorGate ?? 0) > 0.5 && (nearDebug?.dCursor ?? -1) > 0,
     edgeMoreFringeThanFar: nearScore.fringeScore > farScore.fringeScore * 1.05,
     noLocalRadius: farDebug?.localRadius == null,
-    localBase: Math.abs((farDebug?.localBase ?? 0) - 0.032) < 1e-6,
-    localGrowth: Math.abs((farDebug?.localGrowth ?? 0) - 0.042) < 1e-6,
+    spanAlong: Math.abs((farDebug?.spanAlong ?? 0) - 0.028) < 1e-6,
+    spanOut: Math.abs((farDebug?.spanOut ?? 0) - 0.016) < 1e-6,
+    spanIn: Math.abs((farDebug?.spanIn ?? 0) - 0.016) < 1e-6,
     tearBands: (farDebug?.tearBands ?? 0) >= 64,
     intensityHero: (farDebug?.intensity ?? 0) >= 0.14
   }

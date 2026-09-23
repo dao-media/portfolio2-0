@@ -1,0 +1,42 @@
+[
+  {
+    "label": "RP+Bloom",
+    "n": 120,
+    "zeroFrames": 33,
+    "zeroFrac": 0.275,
+    "meanMin": 0,
+    "meanAvg": 17.4
+  },
+  {
+    "label": "RP+Grain",
+    "n": 120,
+    "zeroFrames": 0,
+    "zeroFrac": 0,
+    "meanMin": 20,
+    "meanAvg": 22
+  },
+  {
+    "label": "RP+Bloom+Grain",
+    "n": 120,
+    "zeroFrames": 25,
+    "zeroFrac": 0.208,
+    "meanMin": 0,
+    "meanAvg": 18.1
+  },
+  {
+    "label": "RP only",
+    "n": 120,
+    "zeroFrames": 0,
+    "zeroFrac": 0,
+    "meanMin": 6,
+    "meanAvg": 7.5
+  },
+  {
+    "label": "RP+Vol",
+    "n": 120,
+    "zeroFrames": 120,
+    "zeroFrac": 1,
+    "meanMin": 0,
+    "meanAvg": 0
+  }
+]

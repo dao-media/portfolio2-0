@@ -1,0 +1,67 @@
+{
+  "info": {
+    "errors": 0,
+    "maplePos": [
+      1.35,
+      0,
+      0.4
+    ],
+    "tube": {
+      "type": "MeshBasicMaterial",
+      "r": 3,
+      "isBasic": true
+    },
+    "mats": [
+      {
+        "mesh": "VP_Japanese_Maple_v1_1",
+        "t": 0,
+        "metal": 0,
+        "env": 0.28
+      },
+      {
+        "mesh": "VP_Japanese_Maple_v1_2",
+        "t": 0,
+        "metal": 0,
+        "env": 0.28
+      },
+      {
+        "mesh": "VP_Japanese_Maple_v1_3",
+        "t": 0,
+        "metal": 0,
+        "env": 0.28
+      },
+      {
+        "mesh": "VP_Japanese_Maple_v1_4",
+        "t": 0,
+        "metal": 0,
+        "env": 0.28
+      },
+      {
+        "mesh": "VP_Japanese_Maple_v1_5",
+        "t": 0,
+        "metal": 0,
+        "env": 0.28
+      },
+      {
+        "mesh": "VP_pot_earth_round_small",
+        "t": 0,
+        "metal": 0,
+        "env": 0.2
+      },
+      {
+        "mesh": "VP_pot_inside_plastic_pot_small",
+        "t": 0,
+        "metal": 0,
+        "env": 0.28
+      },
+      {
+        "mesh": "VP_pot_metal_brushed",
+        "t": 0,
+        "metal": 0.72,
+        "env": 0.55
+      }
+    ],
+    "neonLit": true
+  },
+  "errors": []
+}

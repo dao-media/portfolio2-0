@@ -1,0 +1,70 @@
+{
+  "capturedAt": "2026-09-09T23:42:30.125Z",
+  "tier": "B",
+  "pass": "src/fog-lab/LabVolumetricFogPass.js",
+  "recommendedSteps": 16,
+  "halfRes": true,
+  "interactiveGrazingAt16": {
+    "ms": 0.24,
+    "fps": 100,
+    "source": "Cursor browser HUD at grazing + halfRes + 16 steps"
+  },
+  "baselineNoFogMs": 0.19,
+  "fogParams": {
+    "halfRes": true,
+    "fogMinY": -0.2,
+    "fogMaxY": 2.4,
+    "fogFadeOutRangeY": 1.2,
+    "fogFadeOutPow": 2,
+    "heightFogFactor": 0.85,
+    "heightFogStartY": 0,
+    "heightFogEndY": 2,
+    "fogDensityMultiplier": 0.16,
+    "baseRaymarchStepCount": 16,
+    "baseMaxRayLength": 40,
+    "noiseBias": 0.28,
+    "noisePow": 1.4,
+    "globalScale": 1,
+    "noiseMovementX": 0.02,
+    "noiseMovementY": 0.01
+  },
+  "stepCurveGrazingHalfResInteractive": [
+    { "steps": 8, "ms": 0.31, "fps": 100 },
+    { "steps": 12, "ms": 0.24, "fps": 100 },
+    { "steps": 16, "ms": 0.29, "fps": 100 },
+    { "steps": 20, "ms": 0.23, "fps": 100 },
+    { "steps": 24, "ms": 0.22, "fps": 100 },
+    { "steps": 32, "ms": 0.27, "fps": 100 },
+    { "steps": 48, "ms": 0.29, "fps": 90 }
+  ],
+  "screenshots": [
+    "public/debug/fog-lab-tierb-grazing.png",
+    "public/debug/fog-lab-tierb-overhead.png",
+    "public/debug/fog-lab-tierb-ring.png"
+  ],
+  "quality": {
+    "grazingBands": "PASS @ 16 (also acceptable @ 8 with Bayer — recommend 16 for noise structure)",
+    "softTopEdge": "PASS",
+    "neonTint": "PASS — cyan/magenta PointLight in-scatter",
+    "depthClamp": "PASS — fog stops on stand-in props",
+    "overheadNote": "Top-down path through the Y slab is short; pools read faint vs grazing. Expected — not a band failure."
+  },
+  "stageUniformSetProposed": {
+    "halfRes": true,
+    "baseRaymarchStepCount": { "full": 16, "workDownshift": "8–12 via setWorkQuality / ?work" },
+    "fogMinY": -0.2,
+    "fogMaxY": 2.4,
+    "fogFadeOutRangeY": 1.2,
+    "fogFadeOutPow": 2.0,
+    "heightFogFactor": 0.85,
+    "heightFogStartY": 0.0,
+    "heightFogEndY": 2.0,
+    "fogDensityMultiplier": 0.16,
+    "baseMaxRayLength": 40,
+    "noiseBias": 0.28,
+    "noisePow": 1.4,
+    "globalScale": 1.0,
+    "noiseMovement": [0.02, 0.01],
+    "lights": "4× neon PointLight pos/color/intensity/distance/decay as uniforms (lab proved on 2)"
+  }
+}

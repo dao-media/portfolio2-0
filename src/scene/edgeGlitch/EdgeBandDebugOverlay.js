@@ -2,9 +2,9 @@ import * as THREE from "three";
 import {
   EDGE_GLITCH_ARM_OUTER,
   EDGE_GLITCH_ARM_RAMP,
-  EDGE_GLITCH_BAND_OUTER,
-  EDGE_GLITCH_LOCAL_BASE,
-  EDGE_GLITCH_LOCAL_GROWTH
+  EDGE_GLITCH_SPAN_ALONG,
+  EDGE_GLITCH_SPAN_IN,
+  EDGE_GLITCH_SPAN_OUT
 } from "./constants.js";
 import { EDGE_GLITCH_MASK_GLSL } from "./edgeGlitchMask.glsl.js";
 
@@ -19,11 +19,11 @@ void main() {
 const FRAG = /* glsl */ `
 precision highp float;
 uniform sampler2D uEdgeSdf;
-uniform float uBandOuter;
 uniform float uArmOuter;
 uniform float uArmRamp;
-uniform float uLocalBase;
-uniform float uLocalGrowth;
+uniform float uSpanAlong;
+uniform float uSpanOut;
+uniform float uSpanIn;
 uniform vec2 uCursorUv;
 uniform float uCursorActive;
 uniform float uEnabled;
@@ -54,9 +54,17 @@ void main() {
   float tArm = clamp(1.0 - dCursor / max(uArmOuter, 1e-6), 0.0, 1.0);
   float proximity = pow(tArm, max(uArmRamp, 0.01));
   if (proximity < 1e-4) discard;
-  vec2 edgeUv = projectToEdge(uCursorUv);
-  float localR = uLocalBase + uLocalGrowth * proximity;
-  float where = edgeGlitchWhere(vUv, uEdgeSdf, edgeUv, uBandOuter, localR);
+  vec2 crossUv = projectToEdge(uCursorUv);
+  vec2 gCross = sdfGrad(crossUv);
+  float gLen = length(gCross);
+  vec2 edgeNormal = gLen > 1e-6 ? normalize(gCross) : vec2(0.0, 1.0);
+  vec2 edgeTangent = gLen > 1e-6
+    ? normalize(vec2(-gCross.y, gCross.x))
+    : vec2(1.0, 0.0);
+  float where = edgeGlitchWhere(
+    vUv, uEdgeSdf, crossUv, edgeTangent, edgeNormal,
+    uSpanAlong, uSpanOut, uSpanIn
+  );
   if (where < 1e-3) discard;
 
   vec3 farC = vec3(0.05, 0.15, 0.55);
@@ -69,15 +77,15 @@ void main() {
 }
 `;
 
-/** Fullscreen debug — local rim × soft falloff from edge origin. */
+/** Fullscreen debug — L1 diamond strength at CROSS POINT. */
 export function createEdgeBandDebugOverlay(sdfTexture, opts = {}) {
   const uniforms = {
     uEdgeSdf: { value: sdfTexture },
-    uBandOuter: { value: opts.bandOuter ?? EDGE_GLITCH_BAND_OUTER },
     uArmOuter: { value: opts.armOuter ?? EDGE_GLITCH_ARM_OUTER },
     uArmRamp: { value: opts.armRamp ?? EDGE_GLITCH_ARM_RAMP },
-    uLocalBase: { value: opts.localBase ?? EDGE_GLITCH_LOCAL_BASE },
-    uLocalGrowth: { value: opts.localGrowth ?? EDGE_GLITCH_LOCAL_GROWTH },
+    uSpanAlong: { value: opts.spanAlong ?? EDGE_GLITCH_SPAN_ALONG },
+    uSpanOut: { value: opts.spanOut ?? EDGE_GLITCH_SPAN_OUT },
+    uSpanIn: { value: opts.spanIn ?? EDGE_GLITCH_SPAN_IN },
     uCursorUv: { value: new THREE.Vector2(-1, -1) },
     uCursorActive: { value: 0 },
     uEnabled: { value: 1 }

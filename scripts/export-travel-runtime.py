@@ -1,5 +1,5 @@
 """
-Export derived travel-pack + T-rex GLBs for the stage.
+Export derived legacy travel-pack + T-rex (Archaeology stop uses shelf/finds now) GLBs for the stage.
 
 Reads source OBJs/PNGs and writes only to public/assets/models/**/runtime/.
 Never overwrites masters.
@@ -338,8 +338,8 @@ def build_pack():
 
     closed_path, tmp_c = prep_obj(
         PACK_CLOSED_SRC,
-        "Travel pack.obj",
-        "Travel pack.mtl",
+        "Legacy travel pack.obj",
+        "Legacy travel pack.mtl",
         "Travel_Backpack_Standing_01_002.mtl",
     )
     import_obj(closed_path)

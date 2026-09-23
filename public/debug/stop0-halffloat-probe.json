@@ -1,0 +1,20 @@
+{
+  "n": 160,
+  "badN": 160,
+  "goodN": 0,
+  "badSample": {
+    "mean": 0,
+    "nan": 0,
+    "inf": 0,
+    "neg": 0,
+    "zero": 576,
+    "camX": -0.095,
+    "camY": 2.883,
+    "outW": 1280
+  },
+  "goodSample": null,
+  "maxNan": 0,
+  "maxZeroFrac": 1,
+  "meanMin": 0,
+  "meanMax": 0
+}

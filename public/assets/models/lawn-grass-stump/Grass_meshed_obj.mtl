@@ -1,0 +1,198 @@
+# 3ds Max Wavefront OBJ Exporter v0.97b - (c)2007 guruware
+# File Created: 09.09.2018 15:20:22
+
+newmtl Grass_ground
+	Ns 71.4286
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 0.5880 0.5880 0.5880
+	Kd 0.4118 0.4118 0.4118
+	Ks 0.0000 0.0000 0.0000
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Ground_grass.jpg
+	map_Kd Ground_grass.jpg
+	map_bump Ground_grass_bump.jpg
+	bump Ground_grass_bump.jpg
+
+newmtl Grass_blades_003
+	Ns 55.7143
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 0.5880 0.5880 0.5880
+	Kd 0.5294 0.5294 0.5294
+	Ks 0.7267 0.7267 0.7267
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Grass_blades_03.jpg
+	map_Kd Grass_blades_03.jpg
+	map_d Grass_blades_03_mask.jpg
+
+newmtl Grass_blades_002
+	Ns 55.7143
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 0.5880 0.5880 0.5880
+	Kd 0.5294 0.5294 0.5294
+	Ks 0.7267 0.7267 0.7267
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Grass_blades_02.jpg
+	map_Kd Grass_blades_02.jpg
+	map_d Grass_blades_02_mask.jpg
+
+newmtl Grass_blades_001
+	Ns 55.7143
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 0.5880 0.5880 0.5880
+	Kd 0.5294 0.5294 0.5294
+	Ks 0.7267 0.7267 0.7267
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Grass_blades_01.jpg
+	map_Kd Grass_blades_01.jpg
+	map_d Grass_blades_01_mask.jpg
+
+newmtl Plant_01
+	Ns 55.7143
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 0.5880 0.5880 0.5880
+	Kd 0.5294 0.5294 0.5294
+	Ks 0.7267 0.7267 0.7267
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Plant_01.jpg
+	map_Kd Plant_01.jpg
+	map_d Plant_01_mask.jpg
+
+newmtl Grass_blades_004
+	Ns 55.7143
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 0.5880 0.5880 0.5880
+	Kd 0.5294 0.5294 0.5294
+	Ks 0.7267 0.7267 0.7267
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Grass_blades_04.jpg
+	map_Kd Grass_blades_04.jpg
+	map_d Grass_blades_04_mask.jpg
+
+newmtl Plant_02
+	Ns 55.7143
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 0.5880 0.5880 0.5880
+	Kd 0.5294 0.5294 0.5294
+	Ks 0.7267 0.7267 0.7267
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Plant_02.jpg
+	map_Kd Plant_02.jpg
+	map_d Plant_02_mask.jpg
+
+newmtl Grass_blades_005
+	Ns 55.7143
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 0.5880 0.5880 0.5880
+	Kd 0.5294 0.5294 0.5294
+	Ks 0.7267 0.7267 0.7267
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Grass_blades_05.jpg
+	map_Kd Grass_blades_05.jpg
+	map_d Grass_blades_05_mask.jpg
+
+newmtl Clover_01
+	Ns 55.7143
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 0.5880 0.5880 0.5880
+	Kd 0.5294 0.5294 0.5294
+	Ks 0.7267 0.7267 0.7267
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Clover_01.jpg
+	map_Kd Clover_01.jpg
+	map_d Clover_01_mask.jpg
+
+newmtl Plant_03
+	Ns 55.7143
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 0.5880 0.5880 0.5880
+	Kd 0.5294 0.5294 0.5294
+	Ks 0.7267 0.7267 0.7267
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Clover_03.jpg
+	map_Kd Clover_03.jpg
+	map_d Clover_03_mask.jpg
+
+newmtl Dandelion_01
+	Ns 43.5714
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 0.5880 0.5880 0.5880
+	Kd 0.5294 0.5294 0.5294
+	Ks 0.2648 0.2648 0.2648
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Dandelion_01.png
+	map_Kd Dandelion_01.png
+	map_d Dandelion_01_mask.jpg
+
+newmtl Dandelion_02
+	Ns 43.5714
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 0.5880 0.5880 0.5880
+	Kd 0.5294 0.5294 0.5294
+	Ks 0.2648 0.2648 0.2648
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Dandelion_02.png
+	map_Kd Dandelion_02.png
+	map_d Dandelion_02_mask.jpg
+
+newmtl Dandelion_03
+	Ns 43.5714
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 0.5880 0.5880 0.5880
+	Kd 0.5294 0.5294 0.5294
+	Ks 0.2648 0.2648 0.2648
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Dandelion_03.png
+	map_Kd Dandelion_03.png
+	map_d Dandelion_03_mask.jpg

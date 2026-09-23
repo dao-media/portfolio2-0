@@ -1,0 +1,226 @@
+{
+  "headOnFile": "public/debug/neon-opt2-sidekick-180-after.png",
+  "headOn": {
+    "label": "Sidekick-180-after",
+    "x": 884,
+    "n": 452,
+    "peak": 197,
+    "median": 148.6,
+    "peakMed": 1.33,
+    "cv": 0.134,
+    "bands": [
+      {
+        "L": 185,
+        "chroma": 250.1,
+        "rgb": [
+          110.3,
+          202,
+          235.4
+        ]
+      },
+      {
+        "L": 160.5,
+        "chroma": 255,
+        "rgb": [
+          119.3,
+          164.1,
+          246.2
+        ]
+      },
+      {
+        "L": 133.9,
+        "chroma": 284.6,
+        "rgb": [
+          174.3,
+          110,
+          252.2
+        ]
+      },
+      {
+        "L": 141.5,
+        "chroma": 304.6,
+        "rgb": [
+          250.2,
+          101.5,
+          217.9
+        ]
+      },
+      {
+        "L": 165,
+        "chroma": 224.1,
+        "rgb": [
+          218.6,
+          143.1,
+          223.2
+        ]
+      }
+    ]
+  },
+  "headOnProbe": [
+    {
+      "i": 0,
+      "name": "Bust",
+      "coreMax": 0,
+      "shellI": 0
+    },
+    {
+      "i": 1,
+      "name": "Retro Desktop",
+      "coreMax": 0,
+      "shellI": 0
+    },
+    {
+      "i": 2,
+      "name": "Sidekick",
+      "coreMax": 0.68,
+      "shellI": 0.92
+    },
+    {
+      "i": 3,
+      "name": "Archaeology",
+      "coreMax": 0,
+      "shellI": 0
+    }
+  ],
+  "headOnFps": null,
+  "grazeFile": "public/debug/neon-opt2-sidekick-graze-after.png",
+  "graze": {
+    "label": "Sidekick-graze-12",
+    "x": 442,
+    "n": 455,
+    "peak": 199.3,
+    "median": 150.5,
+    "peakMed": 1.32,
+    "cv": 0.185,
+    "bands": [
+      {
+        "L": 144,
+        "chroma": 256.9,
+        "rgb": [
+          221.2,
+          112.1,
+          232.8
+        ]
+      },
+      {
+        "L": 157,
+        "chroma": 243.2,
+        "rgb": [
+          246.6,
+          126.1,
+          199.7
+        ]
+      },
+      {
+        "L": 189.9,
+        "chroma": 228.9,
+        "rgb": [
+          141.5,
+          198.1,
+          250.1
+        ]
+      },
+      {
+        "L": 167.7,
+        "chroma": 300.1,
+        "rgb": [
+          95.6,
+          181.2,
+          245.6
+        ]
+      },
+      {
+        "L": 113.6,
+        "chroma": 279.4,
+        "rgb": [
+          131.7,
+          96.2,
+          233.4
+        ]
+      }
+    ]
+  },
+  "grazeProbe": [
+    {
+      "i": 0,
+      "name": "Bust",
+      "coreMax": 0,
+      "shellI": 0
+    },
+    {
+      "i": 1,
+      "name": "Retro Desktop",
+      "coreMax": 0,
+      "shellI": 0
+    },
+    {
+      "i": 2,
+      "name": "Sidekick",
+      "coreMax": 0.68,
+      "shellI": 0.92
+    },
+    {
+      "i": 3,
+      "name": "Archaeology",
+      "coreMax": 0,
+      "shellI": 0
+    }
+  ],
+  "bustFile": "public/debug/neon-opt2-bust-after.png",
+  "bust": {
+    "label": "Bust-after",
+    "x": 885,
+    "n": 474,
+    "peak": 238.4,
+    "median": 214.2,
+    "peakMed": 1.11,
+    "cv": 0.134,
+    "bands": [
+      {
+        "L": 186.7,
+        "chroma": 229,
+        "rgb": [
+          130.8,
+          206.5,
+          155.4
+        ]
+      },
+      {
+        "L": 220.7,
+        "chroma": 236.7,
+        "rgb": [
+          153,
+          249.4,
+          135.4
+        ]
+      },
+      {
+        "L": 221.4,
+        "chroma": 265.8,
+        "rgb": [
+          155.9,
+          251.2,
+          118.7
+        ]
+      },
+      {
+        "L": 209.2,
+        "chroma": 268.7,
+        "rgb": [
+          108.2,
+          242.6,
+          175.9
+        ]
+      },
+      {
+        "L": 192.9,
+        "chroma": 299.9,
+        "rgb": [
+          79.2,
+          223.8,
+          222.4
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,173 @@
+{
+  "edgeUv": {
+    "u": 0.400390625,
+    "v": 0.353515625,
+    "d": 0.011048543266952038
+  },
+  "edgeUv2": {
+    "u": 0.576171875,
+    "v": 0.505859375,
+    "d": 0.011048543266952038
+  },
+  "insideUv": {
+    "u": 0.494140625,
+    "v": 0.408203125,
+    "d": -0.08203125
+  },
+  "bustMaterial": {
+    "type": "MeshStandardMaterial",
+    "csmWrapped": false,
+    "csmCount": 0
+  },
+  "frameMs": {
+    "medianMs": 29.899999976158142,
+    "p95Ms": 61.199999928474426,
+    "meanMs": 25.836666665474574
+  },
+  "far": {
+    "meanSplit": 1.684,
+    "fringePixels": 9,
+    "fringeScore": 0.000203,
+    "debug": {
+      "stage": 3,
+      "enabled": true,
+      "applied": true,
+      "csmCount": 0,
+      "csmRemoved": true,
+      "bandOuter": 0.028,
+      "cursorOuter": 0.052,
+      "localBase": 0.052,
+      "localGrowth": 0.022,
+      "armOuter": 0.12,
+      "tearBands": 88,
+      "intensity": 0.16,
+      "sdfSize": 256,
+      "pointerLive": true,
+      "cursorUv": {
+        "x": 0.04000000059604647,
+        "y": 0.9399999989403618
+      },
+      "dCursor": 0.5111817717552185,
+      "cursorGate": 0,
+      "edgeProx": 0,
+      "tubeEnabled": true,
+      "approach": "Local rim from edge-origin. Proximity boosts tear width + intensity more than local scale. Beauty resample + RGB split.",
+      "overlayVisible": false
+    }
+  },
+  "mid": {
+    "meanSplit": 2.724,
+    "fringePixels": 381,
+    "fringeScore": 0.008581,
+    "debug": {
+      "stage": 3,
+      "enabled": true,
+      "applied": true,
+      "csmCount": 0,
+      "csmRemoved": true,
+      "bandOuter": 0.028,
+      "cursorOuter": 0.052,
+      "localBase": 0.052,
+      "localGrowth": 0.022,
+      "armOuter": 0.12,
+      "tearBands": 88,
+      "intensity": 0.16,
+      "sdfSize": 256,
+      "pointerLive": true,
+      "cursorUv": {
+        "x": 0.494140625,
+        "y": 0.408203125
+      },
+      "dCursor": -0.07421875,
+      "cursorGate": 0,
+      "edgeProx": 0,
+      "tubeEnabled": true,
+      "approach": "Local rim from edge-origin. Proximity boosts tear width + intensity more than local scale. Beauty resample + RGB split.",
+      "overlayVisible": false
+    }
+  },
+  "near": {
+    "meanSplit": 5.178,
+    "fringePixels": 645,
+    "fringeScore": 0.014528,
+    "debug": {
+      "stage": 3,
+      "enabled": true,
+      "applied": true,
+      "csmCount": 0,
+      "csmRemoved": true,
+      "bandOuter": 0.028,
+      "cursorOuter": 0.052,
+      "localBase": 0.052,
+      "localGrowth": 0.022,
+      "armOuter": 0.12,
+      "tearBands": 88,
+      "intensity": 0.16,
+      "sdfSize": 256,
+      "pointerLive": true,
+      "cursorUv": {
+        "x": 0.400390625,
+        "y": 0.353515625
+      },
+      "dCursor": 0.015625,
+      "cursorGate": 0.9535525286639177,
+      "edgeProx": 0.9535525286639177,
+      "tubeEnabled": true,
+      "approach": "Local rim from edge-origin. Proximity boosts tear width + intensity more than local scale. Beauty resample + RGB split.",
+      "overlayVisible": false
+    }
+  },
+  "trace": {
+    "meanSplit": 49.695,
+    "fringePixels": 14556,
+    "fringeScore": 0.327853,
+    "debug": {
+      "stage": 3,
+      "enabled": true,
+      "applied": true,
+      "csmCount": 0,
+      "csmRemoved": true,
+      "bandOuter": 0.028,
+      "cursorOuter": 0.052,
+      "localBase": 0.052,
+      "localGrowth": 0.022,
+      "armOuter": 0.12,
+      "tearBands": 88,
+      "intensity": 0.16,
+      "sdfSize": 256,
+      "pointerLive": true,
+      "cursorUv": {
+        "x": 0.576171875,
+        "y": 0.505859375
+      },
+      "dCursor": 0.01953125,
+      "cursorGate": 0.9291504974718446,
+      "edgeProx": 0.9291504974718446,
+      "tubeEnabled": true,
+      "approach": "Local rim from edge-origin. Proximity boosts tear width + intensity more than local scale. Beauty resample + RGB split.",
+      "overlayVisible": false
+    }
+  },
+  "shots": {
+    "far": "public/debug/edge-glitch-s3-far.png",
+    "inside": "public/debug/edge-glitch-s3-inside.png",
+    "edge": "public/debug/edge-glitch-s3-edge.png",
+    "edge2": "public/debug/edge-glitch-s3-edge2.png"
+  },
+  "gates": {
+    "stage3": true,
+    "glitchOn": true,
+    "csmRemoved": true,
+    "sharedPass": true,
+    "composerBeforeBloom": true,
+    "farProxOff": true,
+    "insideHardCut": true,
+    "edgeProxOn": true,
+    "edgeMoreFringeThanFar": true,
+    "noLocalRadius": true,
+    "localBase": true,
+    "smallScaleGrowth": true,
+    "tearBands": true,
+    "intensityHero": true
+  }
+}

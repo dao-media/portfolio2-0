@@ -1,0 +1,162 @@
+[
+  {
+    "name": "VP_Japanese_Maple_v1_1",
+    "path": "Scene/Group/Group/Group/neon-lit-content/japanese-maple/VP_Japanese_Maple_v1/VP_Japanese_Maple_v1_1",
+    "visible": true,
+    "matCount": 1,
+    "mats": [
+      {
+        "name": "VP_Jap_Maple_bark_1",
+        "type": "MeshPhysicalMaterial",
+        "color": "ffffff",
+        "map": true,
+        "vertexColors": false
+      }
+    ],
+    "groups": [],
+    "hasColorAttr": false,
+    "posCount": 80,
+    "indexCount": 360,
+    "tris": 120
+  },
+  {
+    "name": "VP_Japanese_Maple_v1_2",
+    "path": "Scene/Group/Group/Group/neon-lit-content/japanese-maple/VP_Japanese_Maple_v1/VP_Japanese_Maple_v1_2",
+    "visible": true,
+    "matCount": 1,
+    "mats": [
+      {
+        "name": "VP_Jap_Maple_bark_2",
+        "type": "MeshPhysicalMaterial",
+        "color": "ffffff",
+        "map": true,
+        "vertexColors": false
+      }
+    ],
+    "groups": [],
+    "hasColorAttr": false,
+    "posCount": 6080,
+    "indexCount": 23421,
+    "tris": 7807
+  },
+  {
+    "name": "VP_Japanese_Maple_v1_3",
+    "path": "Scene/Group/Group/Group/neon-lit-content/japanese-maple/VP_Japanese_Maple_v1/VP_Japanese_Maple_v1_3",
+    "visible": true,
+    "matCount": 1,
+    "mats": [
+      {
+        "name": "VP_jap_maple_leaf_2",
+        "type": "MeshPhysicalMaterial",
+        "color": "ffffff",
+        "map": true,
+        "vertexColors": false
+      }
+    ],
+    "groups": [],
+    "hasColorAttr": false,
+    "posCount": 5489,
+    "indexCount": 13524,
+    "tris": 4508
+  },
+  {
+    "name": "VP_Japanese_Maple_v1_4",
+    "path": "Scene/Group/Group/Group/neon-lit-content/japanese-maple/VP_Japanese_Maple_v1/VP_Japanese_Maple_v1_4",
+    "visible": true,
+    "matCount": 1,
+    "mats": [
+      {
+        "name": "VP_jap_maple_leaf_3",
+        "type": "MeshPhysicalMaterial",
+        "color": "ffffff",
+        "map": true,
+        "vertexColors": false
+      }
+    ],
+    "groups": [],
+    "hasColorAttr": false,
+    "posCount": 10753,
+    "indexCount": 25476,
+    "tris": 8492
+  },
+  {
+    "name": "VP_Japanese_Maple_v1_5",
+    "path": "Scene/Group/Group/Group/neon-lit-content/japanese-maple/VP_Japanese_Maple_v1/VP_Japanese_Maple_v1_5",
+    "visible": true,
+    "matCount": 1,
+    "mats": [
+      {
+        "name": "VP_jap_maple_leaf_1",
+        "type": "MeshPhysicalMaterial",
+        "color": "ffffff",
+        "map": true,
+        "vertexColors": false
+      }
+    ],
+    "groups": [],
+    "hasColorAttr": false,
+    "posCount": 9823,
+    "indexCount": 24000,
+    "tris": 8000
+  },
+  {
+    "name": "VP_pot_earth_round_small",
+    "path": "Scene/Group/Group/Group/neon-lit-content/japanese-maple/VP_pot_earth_round_small",
+    "visible": true,
+    "matCount": 1,
+    "mats": [
+      {
+        "name": "VP_pot_v3_earth",
+        "type": "MeshPhysicalMaterial",
+        "color": "503830",
+        "map": false,
+        "vertexColors": false
+      }
+    ],
+    "groups": [],
+    "hasColorAttr": false,
+    "posCount": 612,
+    "indexCount": 3525,
+    "tris": 1175
+  },
+  {
+    "name": "VP_pot_inside_plastic_pot_small",
+    "path": "Scene/Group/Group/Group/neon-lit-content/japanese-maple/VP_pot_inside_plastic_pot_small",
+    "visible": true,
+    "matCount": 1,
+    "mats": [
+      {
+        "name": "VP_pot_v3_inside",
+        "type": "MeshPhysicalMaterial",
+        "color": "4f2e1c",
+        "map": false,
+        "vertexColors": false
+      }
+    ],
+    "groups": [],
+    "hasColorAttr": false,
+    "posCount": 6050,
+    "indexCount": 34500,
+    "tris": 11500
+  },
+  {
+    "name": "VP_pot_metal_brushed",
+    "path": "Scene/Group/Group/Group/neon-lit-content/japanese-maple/VP_pot_metal_brushed",
+    "visible": true,
+    "matCount": 1,
+    "mats": [
+      {
+        "name": "VP_metal_brushed",
+        "type": "MeshPhysicalMaterial",
+        "color": "616165",
+        "map": false,
+        "vertexColors": false
+      }
+    ],
+    "groups": [],
+    "hasColorAttr": false,
+    "posCount": 4676,
+    "indexCount": 26160,
+    "tris": 8720
+  }
+]

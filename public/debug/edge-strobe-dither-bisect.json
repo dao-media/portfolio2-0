@@ -1,0 +1,412 @@
+{
+  "meta": {
+    "symptom": "edge/vignette strobe",
+    "instrument": "fixed-pixel + strip temporal MAE (not regional mean)",
+    "whyPriorMissed": "Regional mean cancels Bayer crawl; setNoiseFrozen zeros composite uTime"
+  },
+  "results": [
+    {
+      "name": "ditherON_timeLive",
+      "pixelStats": {
+        "edgeTop": {
+          "avg": 9,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "edgeBottom": {
+          "avg": 7.072,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "edgeLeft": {
+          "avg": 12.072,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "edgeRight": {
+          "avg": 8.374,
+          "peakToPeak": 0.715,
+          "maxFrameDelta": 0.715,
+          "meanFrameDelta": 0.305,
+          "n": 90
+        },
+        "vigTop": {
+          "avg": 9,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "vigBottom": {
+          "avg": 7.072,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "vigLeft": {
+          "avg": 8.326,
+          "peakToPeak": 0.715,
+          "maxFrameDelta": 0.715,
+          "meanFrameDelta": 0.177,
+          "n": 90
+        },
+        "vigRight": {
+          "avg": 11.118,
+          "peakToPeak": 1,
+          "maxFrameDelta": 1,
+          "meanFrameDelta": 0.31,
+          "n": 90
+        },
+        "center": {
+          "avg": 208.771,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        }
+      },
+      "edgePixelMaxFf": 1,
+      "stripMaeAvg": 0.025,
+      "stripMaeMax": 0.069,
+      "uTimeDelta": 118.901,
+      "uOutputDither": 0.02,
+      "sample": {
+        "sw": 640,
+        "sh": 360,
+        "frames": 90
+      }
+    },
+    {
+      "name": "ditherOFF_timeLive",
+      "pixelStats": {
+        "edgeTop": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "edgeBottom": {
+          "avg": 7.144,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "edgeLeft": {
+          "avg": 6.072,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "edgeRight": {
+          "avg": 6.248,
+          "peakToPeak": 0.715,
+          "maxFrameDelta": 0.715,
+          "meanFrameDelta": 0.161,
+          "n": 90
+        },
+        "vigTop": {
+          "avg": 0,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "vigBottom": {
+          "avg": 7.073,
+          "peakToPeak": 0.072,
+          "maxFrameDelta": 0.072,
+          "meanFrameDelta": 0.001,
+          "n": 90
+        },
+        "vigLeft": {
+          "avg": 6.248,
+          "peakToPeak": 0.715,
+          "maxFrameDelta": 0.715,
+          "meanFrameDelta": 0.113,
+          "n": 90
+        },
+        "vigRight": {
+          "avg": 4.055,
+          "peakToPeak": 1,
+          "maxFrameDelta": 1,
+          "meanFrameDelta": 0.392,
+          "n": 90
+        },
+        "center": {
+          "avg": 208.771,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        }
+      },
+      "edgePixelMaxFf": 1,
+      "stripMaeAvg": 0.053,
+      "stripMaeMax": 0.142,
+      "uTimeDelta": 124.961,
+      "uOutputDither": 0,
+      "sample": {
+        "sw": 640,
+        "sh": 360,
+        "frames": 90
+      }
+    },
+    {
+      "name": "ditherON_timePinned",
+      "pixelStats": {
+        "edgeTop": {
+          "avg": 9,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "edgeBottom": {
+          "avg": 7.072,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "edgeLeft": {
+          "avg": 12.072,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "edgeRight": {
+          "avg": 8.072,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "vigTop": {
+          "avg": 9,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "vigBottom": {
+          "avg": 7.072,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "vigLeft": {
+          "avg": 8.787,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "vigRight": {
+          "avg": 10.787,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "center": {
+          "avg": 208.771,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        }
+      },
+      "edgePixelMaxFf": 0,
+      "stripMaeAvg": 0.001,
+      "stripMaeMax": 0.055,
+      "uTimeDelta": 0,
+      "uOutputDither": 0.02,
+      "sample": {
+        "sw": 640,
+        "sh": 360,
+        "frames": 90
+      }
+    },
+    {
+      "name": "ditherON_fogDisabled",
+      "pixelStats": {
+        "edgeTop": {
+          "avg": 9,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "edgeBottom": {
+          "avg": 7.072,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "edgeLeft": {
+          "avg": 12.072,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "edgeRight": {
+          "avg": 8.366,
+          "peakToPeak": 0.715,
+          "maxFrameDelta": 0.715,
+          "meanFrameDelta": 0.281,
+          "n": 90
+        },
+        "vigTop": {
+          "avg": 9,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "vigBottom": {
+          "avg": 7.072,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "vigLeft": {
+          "avg": 8.358,
+          "peakToPeak": 0.715,
+          "maxFrameDelta": 0.715,
+          "meanFrameDelta": 0.209,
+          "n": 90
+        },
+        "vigRight": {
+          "avg": 11.127,
+          "peakToPeak": 1,
+          "maxFrameDelta": 1,
+          "meanFrameDelta": 0.29,
+          "n": 90
+        },
+        "center": {
+          "avg": 208.771,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        }
+      },
+      "edgePixelMaxFf": 1,
+      "stripMaeAvg": 0.025,
+      "stripMaeMax": 0.072,
+      "uTimeDelta": 122.776,
+      "uOutputDither": 0.02,
+      "sample": {
+        "sw": 640,
+        "sh": 360,
+        "frames": 90
+      }
+    },
+    {
+      "name": "ditherON_bloomOnly_fogOff",
+      "pixelStats": {
+        "edgeTop": {
+          "avg": 9,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "edgeBottom": {
+          "avg": 7.072,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "edgeLeft": {
+          "avg": 12.072,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "edgeRight": {
+          "avg": 8.072,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "vigTop": {
+          "avg": 9,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "vigBottom": {
+          "avg": 7.072,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "vigLeft": {
+          "avg": 8.072,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "vigRight": {
+          "avg": 11,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        },
+        "center": {
+          "avg": 208.771,
+          "peakToPeak": 0,
+          "maxFrameDelta": 0,
+          "meanFrameDelta": 0,
+          "n": 90
+        }
+      },
+      "edgePixelMaxFf": 0,
+      "stripMaeAvg": 0.001,
+      "stripMaeMax": 0.049,
+      "uTimeDelta": 124.284,
+      "uOutputDither": 0.02,
+      "sample": {
+        "sw": 640,
+        "sh": 360,
+        "frames": 90
+      }
+    }
+  ],
+  "verdict": {
+    "a_pass": "VolumetricFogPass (composite)",
+    "b_term": "composite uTime phase of Bayer output dither (amp may stay on)",
+    "c_evidence": {
+      "ditherON_edgePixelMaxFf": 1,
+      "ditherOFF_edgePixelMaxFf": 1,
+      "ditherON_stripMaeAvg": 0.025,
+      "ditherOFF_stripMaeAvg": 0.053,
+      "ditherON_timePinned_edgePixelMaxFf": 0,
+      "ditherON_fogDisabled_edgePixelMaxFf": 1
+    },
+    "d_proposedFix_NOT_APPLIED": "Pin/remove uTime from Bayer sample. Re-prove with this script."
+  }
+}

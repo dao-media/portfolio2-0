@@ -1,0 +1,49 @@
+{
+  "ok": true,
+  "shoulderUv": {
+    "u": 0.400390625,
+    "v": 0.478515625,
+    "d": 0.012352647259831429,
+    "bbox": {
+      "minU": 0.365234375,
+      "maxU": 0.623046875,
+      "minV": 0.146484375,
+      "maxV": 0.755859375
+    }
+  },
+  "debug": {
+    "revealBoost": 3.5,
+    "rgbSplitPx": 14,
+    "tearAmpPx": 42,
+    "dCursor": 0.016105882823467255,
+    "cursorGate": 0.8433451575402366
+  },
+  "shaderCheck": {
+    "hasRevealBoost": true,
+    "noInject": true,
+    "hasRgbSplitPx": true,
+    "hasTearAmpPx": true,
+    "params": {
+      "liquidArmOuter": 0.15,
+      "glitchArmOuter": 0.06,
+      "armRamp": 1.5,
+      "spanAlong": 0.028,
+      "spanOut": 0.032,
+      "spanIn": 0.016,
+      "intensity": 0.2,
+      "rgbSplitPx": 14,
+      "revealBoost": 3.5,
+      "tearAmpPx": 42,
+      "bonusCount": 0
+    }
+  },
+  "frameMs": {
+    "bonus0": {
+      "bonusCount": 0,
+      "medianMs": 16.4,
+      "meanMs": 25.48
+    }
+  },
+  "png": "public/debug/edge-glitch-reveal-shoulder.png",
+  "note": "Fork A: diamond shows hyper-exposed chromatic tear of real beauty — not additive smear."
+}

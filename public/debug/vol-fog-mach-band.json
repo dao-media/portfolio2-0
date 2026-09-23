@@ -1,0 +1,46 @@
+{
+  "gate": "GATE4-mach-band-step0-lever1-2",
+  "step0": {
+    "still": "vol-fog-mach-step0-still.png",
+    "motionFrames": [
+      "vol-fog-mach-step0-motion-00.png",
+      "vol-fog-mach-step0-motion-01.png",
+      "vol-fog-mach-step0-motion-02.png",
+      "vol-fog-mach-step0-motion-03.png",
+      "vol-fog-mach-step0-motion-04.png",
+      "vol-fog-mach-step0-motion-05.png",
+      "vol-fog-mach-step0-motion-06.png",
+      "vol-fog-mach-step0-motion-07.png"
+    ],
+    "note": "Compare still vs motion sequence: if the horizontal slab vanishes or softens in motion, it may be still-only Mach banding."
+  },
+  "densityBaseline": {
+    "alreadyNoiseTimesFalloff": true,
+    "hasYWarp": true,
+    "hasOutputDither": true,
+    "noiseScrollsXZOnly": true
+  },
+  "lever1": {
+    "knob": "outputDither",
+    "off": "vol-fog-mach-lever1-off.png",
+    "on": "vol-fog-mach-lever1-on.png",
+    "onValue": 0.004,
+    "what": "Screen-space Bayer dither on fog alpha + final RGB (pixel+time). Not ray-start jitter."
+  },
+  "lever2": {
+    "knob": "falloffNoiseWarp",
+    "off": "vol-fog-mach-lever2-off.png",
+    "on": "vol-fog-mach-lever2-on.png",
+    "onValue": 0.45,
+    "what": "Baseline already density=noise*heightFalloff(y). Lever 2 warps y by (n-0.5)*warp so iso-surfaces aren't flat horizontals.",
+    "note": "A/B with dither OFF so lever is isolated."
+  },
+  "notDone": [
+    "lever3-3d-y-noise-scroll",
+    "lever4-more-steps"
+  ],
+  "fogConfigAfterScript": {
+    "outputDither": 0,
+    "falloffNoiseWarp": 0
+  }
+}

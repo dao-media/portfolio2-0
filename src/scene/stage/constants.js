@@ -40,8 +40,8 @@ export const STAGE_LABEL_RADIUS = STAGE_RADIUS * (11.8 / 9);
 /** Fixed world point the POV spotlight always hits — vignettes rotate through this pool. */
 export const SPOT_TARGET = LOOK.clone();
 
-export const AMBIENT_INTENSITY = 0.06;
-export const HEMI_INTENSITY = 0.04;
+export const AMBIENT_INTENSITY = 0.12;
+export const HEMI_INTENSITY = 0.08;
 /** Unused fill slot — keep **0** (ambient/hemi are the soft fill). */
 export const FILL_INTENSITY = 0;
 export const EXPOSURE = 1.18;
@@ -54,12 +54,13 @@ export const STAGE_ENV_INTENSITY = 0;
 /** 10 ft above the viewer's head — spotlight origin. */
 export const SPOT_HEIGHT_FT = 10;
 export const SPOT_HEIGHT_M = SPOT_HEIGHT_FT * 0.3048;
-/** POV key light — **0** this pass; ambient/hemi carry soft fill. */
-export const SPOT_INTENSITY = 0;
-export const SPOT_ANGLE = Math.PI / 5.2;
-export const SPOT_PENUMBRA = 0.52;
+/** POV key light — soft focused key (was **0**; full key was **118**). */
+export const SPOT_INTENSITY = 18;
+/** Cone half-angle — tighter than prior **π/5.2** (~35°) so the pool stays on-subject. */
+export const SPOT_ANGLE = Math.PI / 9;
+export const SPOT_PENUMBRA = 0.45;
 export const SPOT_DISTANCE = 52;
-export const SPOT_DECAY = 1.35;
+export const SPOT_DECAY = 1.45;
 
 /**
  * DEV work raster. 1 = full DPR cap. 0.6 draws objects at 60% buffer size.
@@ -82,7 +83,7 @@ export const SPOT_SHADOW = {
  * Spot pad tracks the POV light; neon pad tracks the active tube PointLight.
  */
 export const CONTACT_SHADOW_Y = 0.008;
-export const CONTACT_SHADOW_SPOT_OPACITY = 0;
+export const CONTACT_SHADOW_SPOT_OPACITY = 0.1;
 export const CONTACT_SHADOW_NEON_OPACITY = 0.18;
 export const CONTACT_SHADOW_SPOT_SCALE = 1.4;
 export const CONTACT_SHADOW_NEON_SCALE = 1.2;
@@ -102,6 +103,19 @@ export const SPOT_MASK = {
 export const NEON_FOG_LAYER = 2;
 
 /**
+ * Wet MeshStandard arena floor — shares layers with neon PointLights, **not** the
+ * POV SpotLight (layer 0 only). Prevents the §10/§20 round-disc landmine.
+ */
+export const WET_FLOOR_LAYER = 3;
+
+/**
+ * Reserved for a future portal-only draw layer (FogDepth / edge-glitch stay
+ * clear of Egypt). Clip-corridor portal currently uses layer 0 + clippingPlanes.
+ * Layer 4 is EDGE_GLITCH_MASK_LAYER.
+ */
+export const ARCH_PORTAL_LAYER = 5;
+
+/**
  * Tube CORE bloom target luminance after per-hue compensation (Option 1).
  * Must clear `NEON_BLOOM.luminanceThreshold` (~1.0) for every hue so bloom
  * supplies the glow — Additive shell mesh removed (dark “light vacuum”).
@@ -119,9 +133,57 @@ export const NEON_MAX_EMISSIVE = 3.0;
 /** Physical PointLight — hot core; short distance = steep falloff to black. */
 export const NEON_MAX_LIGHT = 28.0;
 export const NEON_LIGHT_HEIGHT = 1.0;
-/** Was 14 — pulled in so the pool collapses to black (single-source contrast). */
-export const NEON_LIGHT_DISTANCE = 6.5;
-export const NEON_LIGHT_DECAY = 2.6;
+/** Tight vignette bubble — beyond this the apron dies to black. */
+export const NEON_LIGHT_DISTANCE = 2.75;
+export const NEON_LIGHT_DECAY = 3.5;
+/**
+ * PointLight shadow map (active stop only). Needed for lawn blade contact —
+ * POV spot alone is too weak / wrong angle next to the neon key.
+ */
+export const NEON_SHADOW = Object.freeze({
+  mapSize: 1024,
+  bias: -0.0008,
+  normalBias: 0.035,
+  radius: 1.8,
+  near: 0.06,
+  far: NEON_LIGHT_DISTANCE
+});
+/**
+ * Volumetric fog fills this radius around the active stop (larger than the light
+ * pool so air reads hazy throughout the vignette in the resting POV). Feather
+ * softens the void edge. Level tracks neon arrive — fog preloads on approach.
+ */
+export const VIGNETTE_FOG_RADIUS = 8.0;
+export const VIGNETTE_FOG_FEATHER = 2.2;
+/**
+ * Atmosphere path. `"volumetric"` = VolumetricFogPass. `"video"` = VideoTexture
+ * trial. `"off"` = neither. Also gated by {@link STAGE_FOG_ENABLED} — when that
+ * flag is false, fog systems are not constructed (flip true to restore).
+ */
+export const STAGE_FOG_MODE = /** @type {"video" | "volumetric" | "off"} */ (
+  "off"
+);
+/**
+ * Master fog switch. `false` = do not construct VolumetricFogPass / VideoFogSystem;
+ * composer has no fog pass; fog tick bodies early-return. All fog *files* stay on
+ * disk — set `true` (+ `STAGE_FOG_MODE`) to restore. Bloom return after intro is
+ * independent of this flag (see `_tickIntroBloomReturn`).
+ */
+export const STAGE_FOG_ENABLED = false;
+
+/**
+ * Inactive vignette content sits on this layer so beauty / neon shadow cameras
+ * (layer 0) skip traversal. Neon tubes stay on {@link NEON_FOG_LAYER}. Hop
+ * destination + previous stop are brought back to layer 0 during travel.
+ */
+export const INACTIVE_VIGNETTE_LAYER = 6;
+/**
+ * Fog in-scatter uses a longer neon reach + softer decay than the mesh
+ * PointLight so haze across the vignette picks up tube color without widening
+ * the lit floor pool.
+ */
+export const VIGNETTE_FOG_LIGHT_DISTANCE = 6.5;
+export const VIGNETTE_FOG_LIGHT_DECAY = 1.85;
 /**
  * Legacy angular falloff (all stops lit by proximity). Live neon is focus-only —
  * see `NEON_ARRIVE_RAD` / flicker. Kept for tests / probes that still call
@@ -140,11 +202,12 @@ export const NEON_FLICKER_SEC = 0.48;
 /** Emissive-map V scroll (UV loops / second) for the looping tube gradient. */
 export const NEON_GRADIENT_SCROLL = 0.18;
 /**
- * PointLight hue phase scroll — much slower than tube emissive so cast light
- * reflects green↔cyan without crawling speculars (§12 / §20.18).
+ * @deprecated PointLight always samples the live tube mid-UV. Kept for probes.
  */
 export const NEON_LIGHT_COLOR_SCROLL = 0.028;
-/** Max RGB channel step per second toward the sampled gradient color. */
+/**
+ * @deprecated PointLight always samples the live tube mid-UV. Kept for probes.
+ */
 export const NEON_LIGHT_COLOR_MAX_RATE = 0.12;
 /**
  * Additive floor glow under each tube (anchors neon — soft pool + low cone).

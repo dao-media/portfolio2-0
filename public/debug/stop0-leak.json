@@ -1,0 +1,34 @@
+{
+  "n": 120,
+  "darkN": 37,
+  "darkAfterDepth": {
+    "override": null,
+    "autoClear": false,
+    "layers": 5,
+    "tone": 4,
+    "target": null
+  },
+  "darkBeforePost": {
+    "override": null,
+    "autoClear": false,
+    "layers": 5,
+    "tone": 4,
+    "target": null
+  },
+  "litAfterDepth": {
+    "override": null,
+    "autoClear": false,
+    "layers": 5,
+    "tone": 4,
+    "target": null
+  },
+  "litBeforePost": {
+    "override": null,
+    "autoClear": false,
+    "layers": 5,
+    "tone": 4,
+    "target": null
+  },
+  "darkOverrideLeak": 0,
+  "darkLayerBad": 0
+}

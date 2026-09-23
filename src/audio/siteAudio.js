@@ -95,6 +95,8 @@ export function playXpLinkClick() {
 
 const SIDEKICK_OPEN_URL = "/assets/sidekick/open.wav";
 const SIDEKICK_CLOSE_URL = "/assets/sidekick/close.wav";
+/** Slightly fast so the clip finishes with the swivel (was trailing at 1.0). */
+const SIDEKICK_SFX_PLAYBACK_RATE = 1.2;
 
 /** @type {HTMLAudioElement | null} */
 let sidekickOpenAudio = null;
@@ -105,6 +107,7 @@ function getSidekickOpenAudio() {
   if (!sidekickOpenAudio) {
     sidekickOpenAudio = new Audio(SIDEKICK_OPEN_URL);
     sidekickOpenAudio.preload = "auto";
+    sidekickOpenAudio.playbackRate = SIDEKICK_SFX_PLAYBACK_RATE;
     trackSiteSfx(sidekickOpenAudio);
   }
   return sidekickOpenAudio;
@@ -114,6 +117,7 @@ function getSidekickCloseAudio() {
   if (!sidekickCloseAudio) {
     sidekickCloseAudio = new Audio(SIDEKICK_CLOSE_URL);
     sidekickCloseAudio.preload = "auto";
+    sidekickCloseAudio.playbackRate = SIDEKICK_SFX_PLAYBACK_RATE;
     trackSiteSfx(sidekickCloseAudio);
   }
   return sidekickCloseAudio;
@@ -163,6 +167,7 @@ function playSidekickClip(audio, other, volume) {
   }
   trackSiteSfx(audio);
   audio.volume = volume;
+  audio.playbackRate = SIDEKICK_SFX_PLAYBACK_RATE;
   try {
     audio.pause();
   } catch {

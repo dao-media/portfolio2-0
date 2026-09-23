@@ -1,0 +1,14 @@
+{
+  "afterConfigureWouldTrigger": false,
+  "afterHideWouldTrigger": true,
+  "mountOrderNote": "_configureKeyboardLabels → hideGroupForReveal(0) → ensureSidekickKeypadMaterials — ensure runs while label opacity is 0 and alphaTest is 0.08",
+  "current": {
+    "buttonsMat": "sidekick_keypad_opaque",
+    "keyboardMat": "sidekick_keypad_opaque",
+    "sideButtonsMat": "sidekick_keypad_opaque",
+    "coverMat": "sidekick_cover_mask",
+    "keyboardIsProtectedPlastic": true,
+    "sideIsProtectedPlastic": true,
+    "buttonsSharesCover": false
+  }
+}

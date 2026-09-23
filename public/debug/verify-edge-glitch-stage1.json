@@ -1,0 +1,18 @@
+{
+  "state": {
+    "debug": {
+      "stage": 1,
+      "enabled": true,
+      "applied": true,
+      "csmCount": 1,
+      "bandOuter": 0.045,
+      "sdfSize": 256,
+      "approach": "Screen-space silhouette JFA SDF (runtime). Opaque bust has no UV alpha — offline UV SDF deferred to cutout assets. Overlay paints outside-only band; CSM on bust proves hard 0 inside (+ magenta inside-rim lock).",
+      "overlayVisible": true
+    },
+    "csmCount": 1,
+    "overlay": true,
+    "applied": true
+  },
+  "shot": "public/debug/verify-edge-glitch-stage1-bust.png"
+}

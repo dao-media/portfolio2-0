@@ -3,6 +3,9 @@ import { defineConfig } from "vite";
 import { finalizeFogConfig } from "./scripts/fog-tuner-finalize.mjs";
 import { finalizeEdgeGlitchConfig } from "./scripts/edge-glitch-tuner-finalize.mjs";
 import { finalizeWaterCursorRimConfig } from "./scripts/water-cursor-rim-tuner-finalize.mjs";
+import { finalizeLawnEdgeConfig } from "./scripts/lawn-edge-tuner-finalize.mjs";
+import { finalizeAccentConfig } from "./scripts/accent-tuner-finalize.mjs";
+import { finalizeWetFloorConfig } from "./scripts/wet-floor-tuner-finalize.mjs";
 
 /** Dev-only: FogTuner FINALIZE → PATCH src/fog/fogConfig.js schema defaults. */
 function fogFinalizePlugin() {
@@ -95,11 +98,105 @@ function waterCursorRimFinalizePlugin() {
   };
 }
 
+/** Dev-only: LawnEdgeTuner FINALIZE → PATCH lawnEdgeConfig.js. */
+function lawnEdgeFinalizePlugin() {
+  return {
+    name: "lawn-edge-tuner-finalize",
+    configureServer(server) {
+      server.middlewares.use("/__lawn_edge_finalize", async (req, res) => {
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end("POST only");
+          return;
+        }
+        try {
+          const chunks = [];
+          for await (const chunk of req) chunks.push(chunk);
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+          const params = body.params ?? body;
+          const result = finalizeLawnEdgeConfig(params, {
+            label: body.label ?? "finalize"
+          });
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: true, ...result }));
+        } catch (err) {
+          res.statusCode = 500;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: false, error: String(err?.message ?? err) }));
+        }
+      });
+    }
+  };
+}
+
+function accentFinalizePlugin() {
+  return {
+    name: "accent-tuner-finalize",
+    configureServer(server) {
+      server.middlewares.use("/__accent_finalize", async (req, res) => {
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end("POST only");
+          return;
+        }
+        try {
+          const chunks = [];
+          for await (const chunk of req) chunks.push(chunk);
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+          const params = body.params ?? body;
+          const result = finalizeAccentConfig(params, {
+            label: body.label ?? "finalize"
+          });
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: true, ...result }));
+        } catch (err) {
+          res.statusCode = 500;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: false, error: String(err?.message ?? err) }));
+        }
+      });
+    }
+  };
+}
+
+function wetFloorFinalizePlugin() {
+  return {
+    name: "wet-floor-tuner-finalize",
+    configureServer(server) {
+      server.middlewares.use("/__wet_floor_finalize", async (req, res) => {
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end("POST only");
+          return;
+        }
+        try {
+          const chunks = [];
+          for await (const chunk of req) chunks.push(chunk);
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+          const params = body.params ?? body;
+          const result = finalizeWetFloorConfig(params, {
+            label: body.label ?? "finalize"
+          });
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: true, ...result }));
+        } catch (err) {
+          res.statusCode = 500;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: false, error: String(err?.message ?? err) }));
+        }
+      });
+    }
+  };
+}
+
 export default defineConfig({
   plugins: [
     fogFinalizePlugin(),
     edgeGlitchFinalizePlugin(),
-    waterCursorRimFinalizePlugin()
+    waterCursorRimFinalizePlugin(),
+    lawnEdgeFinalizePlugin(),
+    accentFinalizePlugin(),
+    wetFloorFinalizePlugin()
   ],
   server: {
     port: 5173,

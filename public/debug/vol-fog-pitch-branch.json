@@ -1,0 +1,186 @@
+{
+  "gate": "GATE4-pitch-branch-step1",
+  "question": "If band stays locked to same SCREEN-Y while floor/horizon move → screen-space. If bandScreenY moves with pitch → world-Y / density.",
+  "pitchSpreadDeg": 14.53,
+  "bandScreenYSpreadPx": 453,
+  "heuristic": "WORLD-Y-TRACKING (band screen-Y moves with pitch)",
+  "captures": [
+    {
+      "id": "rest",
+      "heightDelta": 0,
+      "lookAtYDelta": 0,
+      "file": "vol-fog-pitch-rest.png",
+      "applied": {
+        "height": 2.85,
+        "lookAtY": 2.35,
+        "camY": 2.85,
+        "pitchDeg": -2.8165155242159146
+      },
+      "cam": {
+        "theta": 0,
+        "height": 2.85,
+        "lookAt": {
+          "x": 0,
+          "y": 2.35,
+          "z": 18
+        },
+        "camPos": {
+          "x": 0,
+          "y": 2.85,
+          "z": 28.1632
+        },
+        "pitchDeg": -2.8165155242159146,
+        "isZoomed": true
+      },
+      "band": {
+        "bandScreenY": 664,
+        "edgeMag": 14.64,
+        "height": 800,
+        "width": 1280
+      }
+    },
+    {
+      "id": "pitch-down",
+      "heightDelta": 0,
+      "lookAtYDelta": -1.2,
+      "file": "vol-fog-pitch-down.png",
+      "applied": {
+        "height": 2.85,
+        "lookAtY": 1.1500000000000001,
+        "camY": 2.85,
+        "pitchDeg": -9.495961508524227
+      },
+      "cam": {
+        "theta": 0,
+        "height": 2.85,
+        "lookAt": {
+          "x": 0,
+          "y": 1.1500000000000001,
+          "z": 18
+        },
+        "camPos": {
+          "x": 0,
+          "y": 2.85,
+          "z": 28.1632
+        },
+        "pitchDeg": -9.495961508524227,
+        "isZoomed": true
+      },
+      "band": {
+        "bandScreenY": 261,
+        "edgeMag": 13.46,
+        "height": 800,
+        "width": 1280
+      }
+    },
+    {
+      "id": "pitch-up",
+      "heightDelta": 0,
+      "lookAtYDelta": 1.2,
+      "file": "vol-fog-pitch-up.png",
+      "applied": {
+        "height": 2.85,
+        "lookAtY": 3.55,
+        "camY": 2.85,
+        "pitchDeg": 3.9400783565724447
+      },
+      "cam": {
+        "theta": 0,
+        "height": 2.85,
+        "lookAt": {
+          "x": 0,
+          "y": 3.55,
+          "z": 18
+        },
+        "camPos": {
+          "x": 0,
+          "y": 2.85,
+          "z": 28.1632
+        },
+        "pitchDeg": 3.9400783565724447,
+        "isZoomed": true
+      },
+      "band": {
+        "bandScreenY": 507,
+        "edgeMag": 13.57,
+        "height": 800,
+        "width": 1280
+      }
+    },
+    {
+      "id": "raise-cam",
+      "heightDelta": 1.4,
+      "lookAtYDelta": 0,
+      "file": "vol-fog-pitch-raise-cam.png",
+      "applied": {
+        "height": 4.25,
+        "lookAtY": 2.35,
+        "camY": 4.25,
+        "pitchDeg": -10.58915402989571
+      },
+      "cam": {
+        "theta": 0,
+        "height": 4.25,
+        "lookAt": {
+          "x": 0,
+          "y": 2.35,
+          "z": 18
+        },
+        "camPos": {
+          "x": 0,
+          "y": 4.25,
+          "z": 28.1632
+        },
+        "pitchDeg": -10.58915402989571,
+        "isZoomed": true
+      },
+      "band": {
+        "bandScreenY": 211,
+        "edgeMag": 69.87,
+        "height": 800,
+        "width": 1280
+      }
+    },
+    {
+      "id": "lower-cam",
+      "heightDelta": -0.7,
+      "lookAtYDelta": 0.3,
+      "file": "vol-fog-pitch-lower-cam.png",
+      "applied": {
+        "height": 2.1500000000000004,
+        "lookAtY": 2.65,
+        "camY": 2.1500000000000004,
+        "pitchDeg": 2.8165155242159123
+      },
+      "cam": {
+        "theta": 0,
+        "height": 2.1500000000000004,
+        "lookAt": {
+          "x": 0,
+          "y": 2.65,
+          "z": 18
+        },
+        "camPos": {
+          "x": 0,
+          "y": 2.1500000000000004,
+          "z": 28.1632
+        },
+        "pitchDeg": 2.8165155242159123,
+        "isZoomed": true
+      },
+      "band": {
+        "bandScreenY": 508,
+        "edgeMag": 19.72,
+        "height": 800,
+        "width": 1280
+      }
+    }
+  ],
+  "judgeFiles": [
+    "vol-fog-pitch-rest.png",
+    "vol-fog-pitch-down.png",
+    "vol-fog-pitch-up.png",
+    "vol-fog-pitch-raise-cam.png",
+    "vol-fog-pitch-lower-cam.png"
+  ]
+}

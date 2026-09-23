@@ -1,11 +1,29 @@
 import * as THREE from "three";
 import { createGltfLoader } from "../loaders/createGltfLoader.js";
-import { NEON_FOG_LAYER, NEON_LIGHT_HEIGHT } from "../stage/constants.js";
+import { NEON_FOG_LAYER } from "../stage/constants.js";
+import {
+  BUST_LANTERN_HEIGHT_M,
+  LANTERN_LIGHT
+} from "../neon/makeNeonLantern.js";
+import {
+  LAWN_BLADE_DENSITY,
+  LAWN_BLADE_LENGTH,
+  LAWN_BREEZE_SPEED,
+  LAWN_BREEZE_STRENGTH,
+  LAWN_COVERAGE_NOISE_SCALE,
+  LAWN_EDGE_FALLOFF,
+  LAWN_PATCH_SCALE,
+  LAWN_SHAPE_DISTORTION,
+  LAWN_STRAGGLER_DENSITY,
+  LAWN_TUFT_AMOUNT,
+  createLawnEdgeParams
+} from "./lawnEdgeConfig.js";
+import { GrassEngine } from "../../grass/GrassEngine.js";
 // Sidelined: `./bustLightParticles.js` (GPGPU light cloud) — keep for a later stop/experiment.
 
 const BUST_URL = "/assets/models/bust/runtime/bust.glb";
 const APPLE_URL = "/assets/models/apple-tree/runtime/apple-tree.glb";
-const GRASS_URL = "/assets/models/lawn-grass-stump/runtime/lawn-grass-stump.glb?v=mild5";
+/** Trial swap: Meshy fruit tree (masters/…Meshy…glb). Pin/rollback: apple-tree.prev.glb */
 
 /** Target world height (2× prior 2 m framing). */
 export const BUST_HEIGHT = 4;
@@ -13,17 +31,22 @@ export const BUST_HEIGHT = 4;
 export const BUST_YAW_DEG = 12;
 
 /** Apple canopy — between bust (origin) and neon tube `(2.2, 0.85)`. */
-export const APPLE_HEIGHT = 11.44;
+export const APPLE_HEIGHT = 10.07;
 /** @deprecated Use APPLE_HEIGHT — stop-0 tree is apple, not maple. */
 export const MAPLE_HEIGHT = APPLE_HEIGHT;
 /** Yaw — Blender Z-up “Z rotate” → Three Y (+10° CCW from above). */
-export const APPLE_YAW_DEG = 30;
+export const APPLE_YAW_DEG = -335;
 /** @deprecated Use APPLE_YAW_DEG */
 export const MAPLE_YAW_DEG = APPLE_YAW_DEG;
 /** Clear of the neon tube and the bust (canopy ~5 m wide at this height). */
 export const APPLE_POS = Object.freeze({ x: 3.17, z: -3.25 });
 /** @deprecated Use APPLE_POS */
 export const MAPLE_POS = APPLE_POS;
+/**
+ * Extra bury past the measured base-platform *top* (m). Keep tiny — just
+ * enough that the Meshy dirt disc clears the apron; large values bury roots.
+ */
+export const APPLE_BASE_SINK = 0.02;
 
 /**
  * Leaf-only neon falloff (global PointLight stays short for single-source falloff).
@@ -40,52 +63,115 @@ export const BUST_NEON_XZ = Object.freeze({ x: 2.2, z: 0.85 });
 
 /**
  * Lawn patch under bust / apple / neon (Bust stop only).
- * Export footprint ~12 m with a mildly irregular outline; runtime XZ ×0.8.
+ * Centered on the trio centroid; radius at patchScale=1 covers all three + margin.
  */
-export const GRASS_POS = Object.freeze({ x: 1.55, z: -2.37 });
+const _grassAnchors = [
+  { x: 0, z: 0 }, // bust pedestal
+  { x: BUST_NEON_XZ.x, z: BUST_NEON_XZ.z },
+  { x: APPLE_POS.x, z: APPLE_POS.z }
+];
+const _grassCx =
+  (_grassAnchors[0].x + _grassAnchors[1].x + _grassAnchors[2].x) / 3;
+const _grassCz =
+  (_grassAnchors[0].z + _grassAnchors[1].z + _grassAnchors[2].z) / 3;
+/** Extra meters past the farthest of bust / neon / tree. */
+export const GRASS_COVER_MARGIN = 1.35;
+const _grassCoverR =
+  Math.max(
+    ..._grassAnchors.map((p) => Math.hypot(p.x - _grassCx, p.z - _grassCz))
+  ) + GRASS_COVER_MARGIN;
+
+/** Patch origin — centroid of bust + neon + apple (not an arbitrary offset). */
+export const GRASS_POS = Object.freeze({
+  x: +_grassCx.toFixed(3),
+  z: +_grassCz.toFixed(3)
+});
 /** Lift above MeshBasic stage floor to avoid z-fight. */
 export const GRASS_Y = 0.006;
-/** Uniform XZ kept; Y scale — ~0.28× export ≈ 0.5 m peak blades. */
+/** Uniform Y kept for legacy docs — procedural blades author height in GrassEngine (root Y scale = 1). */
 export const GRASS_HEIGHT_SCALE = 0.28;
-/** Whole-patch footprint shrink (20% smaller). */
-export const GRASS_XZ_SCALE = 0.8;
 /**
- * Soft radial fade as fraction of the local irregular rim.
- * Keep full height farther out so the rim doesn’t go bald, then dissolve past
- * the geometric crop (END > 1) so lobes taper instead of cliff-cutting.
+ * Legacy alias — runtime patch size expands placement radius (`GRASS_RADIUS * patchScale`),
+ * not root XZ scale. Live via LawnEdgeTuner.
  */
+export const GRASS_XZ_SCALE = LAWN_PATCH_SCALE;
+/**
+ * Placement radius at patchScale = 1 — big enough to sit under bust, neon, and tree.
+ * (~4.16 m = farthest anchor + GRASS_COVER_MARGIN).
+ */
+export const GRASS_RADIUS = +_grassCoverR.toFixed(3);
+/** @deprecated Radial fade removed — noise coverage. Kept for any stale refs. */
 export const GRASS_FADE_START = 0.72;
+/** @deprecated Radial fade removed — noise coverage. */
 export const GRASS_FADE_END = 1.05;
-export const GRASS_RADIUS = 6;
+
+/**
+ * Bust / tree / tube layout in grass-local XZ.
+ * Root is unscaled (scale=1): locals = world − GRASS_POS.
+ * @param {number} [scale] unused legacy — kept for call sites; always treat as 1
+ */
+export function grassLayoutForScale(scale = 1) {
+  const s = Math.max(Number(scale) || 1, 1e-4);
+  return {
+    bustLocal: {
+      x: (0 - GRASS_POS.x) / s,
+      z: (0 - GRASS_POS.z) / s
+    },
+    treeLocal: {
+      x: (APPLE_POS.x - GRASS_POS.x) / s,
+      z: (APPLE_POS.z - GRASS_POS.z) / s
+    },
+    tubeLocal: {
+      x: (BUST_NEON_XZ.x - GRASS_POS.x) / s,
+      z: (BUST_NEON_XZ.z - GRASS_POS.z) / s
+    },
+    // Pedestal obstacle — ellipse ≈ seated foot (maxR ≈0.93 m). Lip = 1 so
+    // grass only clears the stone base (no wide flattened ring / shove zone).
+    bustHalfX: 0.98 / s,
+    bustHalfZ: 0.88 / s,
+    bustYaw: THREE.MathUtils.degToRad(BUST_YAW_DEG),
+    bustLipMin: 1,
+    bustLipJitter: 0,
+    bustClear: 1.05 / s,
+    bustClearFeather: 0.35 / s,
+    bustPeak: 1.15 / s,
+    bustOuter: 1.85 / s,
+    treeInner: 0.35 / s,
+    treeOuter: 2.1 / s,
+    /** Hard cull under lantern foot (~0.44 m half-span + margin). */
+    tubeClear: 0.55 / s,
+    /** Tuft ring outside the clear (no blades under the base). */
+    tubeInner: 0.58 / s,
+    tubeOuter: 1.2 / s
+  };
+}
+
+const _layout0 = grassLayoutForScale(1);
 
 /** Grass-local XZ of the bust / apple — divide by XZ scale so tufts track props. */
-export const GRASS_BUST_LOCAL = Object.freeze({
-  x: (0 - GRASS_POS.x) / GRASS_XZ_SCALE,
-  z: (0 - GRASS_POS.z) / GRASS_XZ_SCALE
-});
-export const GRASS_TREE_LOCAL = Object.freeze({
-  x: (APPLE_POS.x - GRASS_POS.x) / GRASS_XZ_SCALE,
-  z: (APPLE_POS.z - GRASS_POS.z) / GRASS_XZ_SCALE
-});
-/** Clear tiny footprint under the pedestal, then swell in a ring. */
-/** Clear blades under the bust pedestal (+ margin) — world meters / XZ scale. */
-export const GRASS_BUST_CLEAR_M = 1.75 / GRASS_XZ_SCALE;
-/** Soft outer margin of the clearance (blades ramp 0→1). */
-export const GRASS_BUST_CLEAR_FEATHER_M = 0.35 / GRASS_XZ_SCALE;
-export const GRASS_BUST_RING_PEAK_M = 2.15 / GRASS_XZ_SCALE;
-export const GRASS_BUST_RING_OUTER_M = 2.9 / GRASS_XZ_SCALE;
-export const GRASS_BUST_HEIGHT_BOOST = 0.85;
+export const GRASS_BUST_LOCAL = Object.freeze({ ..._layout0.bustLocal });
+export const GRASS_TREE_LOCAL = Object.freeze({ ..._layout0.treeLocal });
+/** Pedestal ellipse half-extents (world m) — grass displaces only under the base. */
+export const GRASS_BUST_HALF_X_M = _layout0.bustHalfX;
+export const GRASS_BUST_HALF_Z_M = _layout0.bustHalfZ;
+export const GRASS_BUST_YAW_RAD = _layout0.bustYaw;
+export const GRASS_BUST_LIP_MIN = _layout0.bustLipMin;
+export const GRASS_BUST_LIP_JITTER = _layout0.bustLipJitter;
+/** Legacy probes — mean pedestal radius / soft shell (displacement owns the look). */
+export const GRASS_BUST_CLEAR_M = _layout0.bustClear;
+export const GRASS_BUST_CLEAR_FEATHER_M = _layout0.bustClearFeather;
+export const GRASS_BUST_RING_PEAK_M = _layout0.bustPeak;
+export const GRASS_BUST_RING_OUTER_M = _layout0.bustOuter;
+export const GRASS_BUST_HEIGHT_BOOST = 0.95;
 /** Tall tufts clustered at the apple trunk. */
-export const GRASS_TREE_TUFT_INNER_M = 0.35 / GRASS_XZ_SCALE;
-export const GRASS_TREE_TUFT_OUTER_M = 2.1 / GRASS_XZ_SCALE;
+export const GRASS_TREE_TUFT_INNER_M = _layout0.treeInner;
+export const GRASS_TREE_TUFT_OUTER_M = _layout0.treeOuter;
 export const GRASS_TREE_TUFT_BOOST = 1.55;
-/** Tall blades right up to the neon tube foot — no clearance hole at the tube. */
-export const GRASS_TUBE_LOCAL = Object.freeze({
-  x: (BUST_NEON_XZ.x - GRASS_POS.x) / GRASS_XZ_SCALE,
-  z: (BUST_NEON_XZ.z - GRASS_POS.z) / GRASS_XZ_SCALE
-});
-export const GRASS_TUBE_TUFT_INNER_M = 0.2 / GRASS_XZ_SCALE;
-export const GRASS_TUBE_TUFT_OUTER_M = 1.15 / GRASS_XZ_SCALE;
+/** Lantern foot clearance — blades culled + ground hole (not a thin neon tube). */
+export const GRASS_TUBE_LOCAL = Object.freeze({ ..._layout0.tubeLocal });
+export const GRASS_TUBE_CLEAR_M = _layout0.tubeClear;
+export const GRASS_TUBE_TUFT_INNER_M = _layout0.tubeInner;
+export const GRASS_TUBE_TUFT_OUTER_M = _layout0.tubeOuter;
 export const GRASS_TUBE_TUFT_BOOST = 1.35;
 
 /**
@@ -351,12 +437,16 @@ IncidentLight directLight;
 export const bustVignetteMeta = {
   name: "Bust",
   tint: 0xffb37a,
-  neonColors: ["#9dff1a", "#00e5ff"],
-  desc: "Arrival stop — bust, apple tree, and lawn patch."
+  /** Warm lantern palette (not lime/cyan neon). */
+  neonColors: ["#ffa45a", "#ffc878"],
+  /** Bust stop uses the lantern GLB instead of the procedural neon cylinder. */
+  neonProp: "lantern",
+  neonTubeXZ: /** @type {[number, number]} */ ([2.2, 0.85]),
+  desc: "Arrival stop — bust, apple tree, lawn, and lantern."
 };
 
 /**
- * Arrival stop — bust + apple tree on a soft-edged lawn patch (neon tube shares the patch).
+ * Arrival stop — bust + apple tree on a soft-edged lawn patch (lantern shares the patch).
  * GLBs load on the shared boot LoadingManager (gates the XP fader).
  */
 export class BustVignette {
@@ -381,10 +471,14 @@ export class BustVignette {
     this.bustRoot = null;
     this.appleRoot = null;
     this.grassRoot = null;
+    /** @type {import("../../grass/GrassEngine.js").GrassEngine | null} */
+    this.grassEngine = null;
     /** @deprecated alias — stop-0 tree is apple */
     this.mapleRoot = null;
     this._modelLoadStarted = false;
     this._modelLoadSettled = false;
+    /** @type {Record<string, number>} */
+    this._lawnEdgeParams = createLawnEdgeParams();
 
     if (!deps.deferModelLoad) {
       this.startModelLoad();
@@ -401,17 +495,13 @@ export class BustVignette {
 
   async _loadModels() {
     const loader = createGltfLoader(this.loadingManager ?? undefined);
-    const [bustResult, appleResult, grassResult] = await Promise.allSettled([
+    const [bustResult, appleResult] = await Promise.allSettled([
       loader.loadAsync(BUST_URL),
-      loader.loadAsync(APPLE_URL),
-      loader.loadAsync(GRASS_URL)
+      loader.loadAsync(APPLE_URL)
     ]);
 
-    if (grassResult.status === "fulfilled") {
-      this._mountGrass(grassResult.value.scene);
-    } else {
-      console.warn("[BustVignette] Failed to load lawn grass.", grassResult.reason);
-    }
+    // Procedural meadow — sync, no GLB / LoadingManager item
+    this._mountGrass();
 
     if (bustResult.status === "fulfilled") {
       this._mountBust(bustResult.value.scene);
@@ -432,24 +522,50 @@ export class BustVignette {
   }
 
   /**
-   * Soft lawn under bust / apple / neon — vignettes out to the plain stage floor.
-   * @param {THREE.Object3D} scene
+   * Grassworks-class instanced meadow (finite Bust patch).
+   * Hash placement × coverage × tip wind — replaces lawn-grass-stump GLB.
    */
-  _mountGrass(scene) {
+  _mountGrass() {
     if (this.grassRoot) return;
 
-    const root = scene;
-    root.name = "lawn-grass-stump";
-    root.scale.set(GRASS_XZ_SCALE, GRASS_HEIGHT_SCALE, GRASS_XZ_SCALE);
+    const p = this._lawnEdgeParams;
+    const patchScale = p.patchScale ?? LAWN_PATCH_SCALE;
+    // Root unscaled — patch size expands placement radius; tufts in grass-local meters
+    const layout = grassLayoutForScale(1);
+    const radius = GRASS_RADIUS * patchScale;
+
+    const engine = new GrassEngine({
+      radius,
+      bladeLength: p.bladeLength ?? LAWN_BLADE_LENGTH,
+      bladeDensity: p.bladeDensity ?? LAWN_BLADE_DENSITY,
+      tuftAmount: p.tuftAmount ?? LAWN_TUFT_AMOUNT,
+      coverage: {
+        coverageNoiseScale: p.coverageNoiseScale,
+        edgeFalloff: p.edgeFalloff,
+        stragglerDensity: p.stragglerDensity,
+        shapeDistortion: p.shapeDistortion
+      },
+      layout
+    });
+
+    const root = engine.root;
+    root.scale.set(1, 1, 1);
     root.position.set(GRASS_POS.x, GRASS_Y, GRASS_POS.z);
+    // Seat against blade bottoms only — if Grass_ground is already at −0.06,
+    // reseat lifts the whole lawn and cancels the bury.
+    if (engine.ground) engine.ground.position.y = 0;
     root.updateMatrixWorld(true);
     this._reseatBottom(root);
-    // Keep a hair above the MeshBasic apron after seat (avoids under-floor flash).
     root.position.y = Math.max(root.position.y, GRASS_Y);
-    this._hardenGrassMaterials(root);
+    if (engine.ground) engine.ground.position.y = -0.06;
 
     this.group.add(root);
     this.grassRoot = root;
+    this.grassEngine = engine;
+    engine.setBreeze({
+      breezeStrength: p.breezeStrength ?? LAWN_BREEZE_STRENGTH,
+      breezeSpeed: p.breezeSpeed ?? LAWN_BREEZE_SPEED
+    });
   }
 
   /**
@@ -480,19 +596,217 @@ export class BustVignette {
     const root = scene;
     root.name = "apple-tree";
     this._scaleSeat(root, APPLE_HEIGHT);
-    root.rotation.y = THREE.MathUtils.degToRad(APPLE_YAW_DEG);
-    root.position.x = APPLE_POS.x;
-    root.position.z = APPLE_POS.z;
+    // Seat first so the foot sample is on Y=0, then pivot so yaw spins about the trunk.
+    root.position.set(0, 0, 0);
+    root.rotation.set(0, 0, 0);
     root.updateMatrixWorld(true);
     this._reseatBottom(root);
+
+    const foot = this._trunkFootLocal(root);
+    root.position.x -= foot.x;
+    root.position.z -= foot.z;
+    root.position.y -= foot.y;
+    root.updateMatrixWorld(true);
+
+    // Sink so the dirt-pad / coin TOP sits just under the apron — roots stay visible.
+    // `_basePlatformTopLocal` is pre-scale root-local Y; pivot.y is world/parent
+    // units, so multiply by root.scale.y (≈1.68 for APPLE_HEIGHT) or the coin
+    // still sticks ~deckTop*(scale-1) above the apron.
+    const deckTop = this._basePlatformTopLocal(root);
+    const scaleY = root.scale.y || 1;
+    const sink = Math.max(0, deckTop) * scaleY + APPLE_BASE_SINK;
+
+    const pivot = new THREE.Group();
+    pivot.name = "apple-tree-pivot";
+    pivot.add(root);
+    pivot.position.set(APPLE_POS.x, -sink, APPLE_POS.z);
+    pivot.rotation.y = THREE.MathUtils.degToRad(APPLE_YAW_DEG);
+    pivot.updateMatrixWorld(true);
+
     this._tagMeshes(root);
     this._smoothTreeShading(root);
-    // Parent before material harden so canopy AABB / neon are world-correct.
-    this.group.add(root);
-    this.appleRoot = root;
-    this.mapleRoot = root;
+    this.group.add(pivot);
+    this.appleRoot = pivot;
+    this.mapleRoot = pivot;
     this.group.updateMatrixWorld(true);
     this._hardenTreeMaterials(root);
+  }
+
+  /**
+   * Local-space point where the trunk meets the ground (yaw pivot).
+   * Uses the XZ centroid of the lowest band of mesh vertices so an asymmetric
+   * canopy does not pull the AABB center off the trunk.
+   * @param {THREE.Object3D} root
+   * @returns {THREE.Vector3}
+   */
+  _trunkFootLocal(root) {
+    const samples = this._collectAppleLocalVerts(root);
+    if (!samples.length) {
+      const box = new THREE.Box3().setFromObject(root);
+      const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+      return new THREE.Vector3(
+        (box.min.x + box.max.x) * 0.5,
+        box.min.y,
+        (box.min.z + box.max.z) * 0.5
+      ).applyMatrix4(inv);
+    }
+
+    let minY = Infinity;
+    for (let i = 0; i < samples.length; i++) {
+      if (samples[i].y < minY) minY = samples[i].y;
+    }
+    let maxY = -Infinity;
+    for (let i = 0; i < samples.length; i++) {
+      if (samples[i].y > maxY) maxY = samples[i].y;
+    }
+    const band = Math.max(0.04, (maxY - minY) * 0.04);
+    let sx = 0;
+    let sz = 0;
+    let n = 0;
+    for (let i = 0; i < samples.length; i++) {
+      if (samples[i].y > minY + band) continue;
+      sx += samples[i].x;
+      sz += samples[i].z;
+      n += 1;
+    }
+    if (n < 1) return new THREE.Vector3(0, minY, 0);
+    return new THREE.Vector3(sx / n, minY, sz / n);
+  }
+
+  /**
+   * Height of the dirt-pad / grass-coin TOP in pre-scale root-local Y
+   * (after foot at origin). Caller must multiply by `root.scale.y` before
+   * applying as pivot sink — local Y is not world meters once `_scaleSeat` runs.
+   * Mode alone sits mid-slab; use p97 of wide lower-band verts so the disc top
+   * (not mid-thickness) goes under the apron.
+   * @param {THREE.Object3D} root
+   * @returns {number}
+   */
+  _basePlatformTopLocal(root) {
+    const samples = this._collectAppleLocalVerts(root);
+    if (!samples.length) return this._baseDeckHeightLocal(root);
+
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < samples.length; i++) {
+      const y = samples[i].y;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    const height = Math.max(maxY - minY, 1e-4);
+    // Lower band only — dirt coin, not trunk flare / canopy.
+    const yHi = minY + height * 0.14;
+    // Keep a tiny core skip so hanging root tips on-axis don't dominate;
+    // do NOT use a large trunkR — the Meshy coin lives inside ~0.65 local.
+    const coreR = Math.max(0.12, height * 0.012);
+    /** @type {number[]} */
+    const wideYs = [];
+    for (let i = 0; i < samples.length; i++) {
+      const p = samples[i];
+      if (p.y < minY - 1e-4 || p.y > yHi) continue;
+      if (Math.hypot(p.x, p.z) <= coreR) continue;
+      wideYs.push(p.y);
+    }
+    if (wideYs.length < 24) {
+      return Math.max(this._baseDeckHeightLocal(root), 0);
+    }
+    wideYs.sort((a, b) => a - b);
+    // Max of the wide lower band = coin rim / disc top. p97 left the upper
+    // lip (~0.2 m after scale) still peeking above the apron.
+    const top = wideYs[wideYs.length - 1];
+    return Math.max(0, top);
+  }
+
+  /**
+   * Densest Y of the wide lower band (mid-slab). Kept for probes / fallback.
+   * @param {THREE.Object3D} root
+   * @returns {number}
+   */
+  _baseDeckHeightLocal(root) {
+    const samples = this._collectAppleLocalVerts(root);
+    if (!samples.length) return 0;
+
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < samples.length; i++) {
+      const y = samples[i].y;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    const height = Math.max(maxY - minY, 1e-4);
+    // Lower fifth of the tree; outside the trunk column (platform ring).
+    const yHi = minY + height * 0.2;
+    const trunkR = Math.max(0.55, height * 0.05);
+    const binW = Math.max(0.012, height * 0.0015);
+    /** @type {Map<number, number>} */
+    const bins = new Map();
+    let wideN = 0;
+    for (let i = 0; i < samples.length; i++) {
+      const p = samples[i];
+      if (p.y < minY - 1e-4 || p.y > yHi) continue;
+      if (Math.hypot(p.x, p.z) <= trunkR) continue;
+      wideN += 1;
+      const b = Math.round(p.y / binW) * binW;
+      bins.set(b, (bins.get(b) || 0) + 1);
+    }
+    if (wideN < 16 || bins.size < 1) {
+      // Fallback: high percentile of lower-band verts (any radius).
+      /** @type {number[]} */
+      const ys = [];
+      const cut = minY + height * 0.12;
+      for (let i = 0; i < samples.length; i++) {
+        if (samples[i].y <= cut) ys.push(samples[i].y);
+      }
+      if (!ys.length) return 0;
+      ys.sort((a, b) => a - b);
+      return Math.max(0, ys[Math.min(ys.length - 1, Math.floor(ys.length * 0.92))]);
+    }
+
+    // Strongest mode above hanging tips — that slab is the dirt-platform top.
+    const tipCut = minY + Math.max(0.03, height * 0.004);
+    let bestY = 0;
+    let bestC = 0;
+    for (const [y, c] of bins) {
+      if (y < tipCut) continue;
+      if (c > bestC) {
+        bestC = c;
+        bestY = y;
+      }
+    }
+    if (bestC < 1) {
+      for (const [y, c] of bins) {
+        if (c > bestC) {
+          bestC = c;
+          bestY = y;
+        }
+      }
+    }
+    return Math.max(0, bestY);
+  }
+
+  /**
+   * @param {THREE.Object3D} root
+   * @returns {THREE.Vector3[]}
+   */
+  _collectAppleLocalVerts(root) {
+    root.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+    const v = new THREE.Vector3();
+    /** @type {THREE.Vector3[]} */
+    const locals = [];
+    root.traverse((obj) => {
+      if (!obj.isMesh || !obj.geometry) return;
+      const pos = obj.geometry.attributes?.position;
+      if (!pos) return;
+      obj.updateWorldMatrix(true, false);
+      // Stride sample dense Meshy meshes — still enough for foot / deck stats.
+      const stride = pos.count > 40000 ? 4 : pos.count > 12000 ? 2 : 1;
+      for (let i = 0; i < pos.count; i += stride) {
+        v.fromBufferAttribute(pos, i).applyMatrix4(obj.matrixWorld).applyMatrix4(inv);
+        locals.push(v.clone());
+      }
+    });
+    return locals;
   }
 
   /**
@@ -533,197 +847,125 @@ export class BustVignette {
   }
 
   /**
-   * Soft-edge lawn: blades shorten + fade toward the rim; ground FrontSide only
-   * so the under-apron doesn’t flash through the MeshBasic floor.
-   * @param {THREE.Object3D} root
+   * Live lawn-edge RESPONSE knobs (LawnEdgeTuner). Does not touch fog/glitch/bust mesh.
+   * Rebuilds GrassEngine placement when coverage / patch size changes.
+   * @param {Partial<Record<string, number>>} [partial]
    */
-  _hardenGrassMaterials(root) {
-    const maxAniso = this.renderer?.capabilities?.getMaxAnisotropy?.() ?? 4;
-    const fadeStart = GRASS_FADE_START.toFixed(3);
-    const fadeEnd = GRASS_FADE_END.toFixed(3);
-    const radius = GRASS_RADIUS.toFixed(3);
-    const bustX = GRASS_BUST_LOCAL.x.toFixed(3);
-    const bustZ = GRASS_BUST_LOCAL.z.toFixed(3);
-    const treeX = GRASS_TREE_LOCAL.x.toFixed(3);
-    const treeZ = GRASS_TREE_LOCAL.z.toFixed(3);
-    const bustClear = GRASS_BUST_CLEAR_M.toFixed(3);
-    const bustClearFeather = GRASS_BUST_CLEAR_FEATHER_M.toFixed(3);
-    const bustPeak = GRASS_BUST_RING_PEAK_M.toFixed(3);
-    const bustOuter = GRASS_BUST_RING_OUTER_M.toFixed(3);
-    const bustBoost = GRASS_BUST_HEIGHT_BOOST.toFixed(3);
-    const treeInner = GRASS_TREE_TUFT_INNER_M.toFixed(3);
-    const treeOuter = GRASS_TREE_TUFT_OUTER_M.toFixed(3);
-    const treeBoost = GRASS_TREE_TUFT_BOOST.toFixed(3);
-    const tubeX = GRASS_TUBE_LOCAL.x.toFixed(3);
-    const tubeZ = GRASS_TUBE_LOCAL.z.toFixed(3);
-    const tubeInner = GRASS_TUBE_TUFT_INNER_M.toFixed(3);
-    const tubeOuter = GRASS_TUBE_TUFT_OUTER_M.toFixed(3);
-    const tubeBoost = GRASS_TUBE_TUFT_BOOST.toFixed(3);
+  setLawnEdgeParams(partial = {}) {
+    const prev = this._lawnEdgeParams;
+    const next = { ...prev, ...partial };
+    // Patch size: floor only — no upper limit (expands radius + blade count)
+    next.patchScale = Math.max(
+      0.15,
+      Number(next.patchScale) || LAWN_PATCH_SCALE
+    );
+    next.bladeLength = Math.max(
+      0.05,
+      Number(next.bladeLength) || LAWN_BLADE_LENGTH
+    );
+    next.bladeDensity = THREE.MathUtils.clamp(
+      Number.isFinite(Number(next.bladeDensity))
+        ? Number(next.bladeDensity)
+        : LAWN_BLADE_DENSITY,
+      0.25,
+      4
+    );
+    next.tuftAmount = THREE.MathUtils.clamp(
+      Number.isFinite(Number(next.tuftAmount))
+        ? Number(next.tuftAmount)
+        : LAWN_TUFT_AMOUNT,
+      0,
+      1
+    );
+    next.breezeStrength = THREE.MathUtils.clamp(
+      Number.isFinite(Number(next.breezeStrength))
+        ? Number(next.breezeStrength)
+        : LAWN_BREEZE_STRENGTH,
+      0,
+      0.35
+    );
+    next.breezeSpeed = THREE.MathUtils.clamp(
+      Number.isFinite(Number(next.breezeSpeed))
+        ? Number(next.breezeSpeed)
+        : LAWN_BREEZE_SPEED,
+      0,
+      3.5
+    );
+    next.coverageNoiseScale = THREE.MathUtils.clamp(
+      Number(next.coverageNoiseScale) || LAWN_COVERAGE_NOISE_SCALE,
+      0.6,
+      10
+    );
+    next.edgeFalloff = THREE.MathUtils.clamp(
+      Number(next.edgeFalloff) || LAWN_EDGE_FALLOFF,
+      0.4,
+      3.5
+    );
+    next.stragglerDensity = THREE.MathUtils.clamp(
+      Number(next.stragglerDensity) || 0,
+      0,
+      1
+    );
+    next.shapeDistortion = THREE.MathUtils.clamp(
+      Number(next.shapeDistortion) || 0,
+      0,
+      1
+    );
+    this._lawnEdgeParams = next;
 
-    root.traverse((obj) => {
-      if (!obj.isMesh) return;
-      obj.castShadow = false;
-      obj.receiveShadow = true;
-      obj.renderOrder = -1;
+    // Root stays unit scale — patch size is placement radius, not XZ squash
+    if (this.grassRoot) {
+      this.grassRoot.scale.set(1, 1, 1);
+    }
 
-      const name = `${obj.name} ${obj.material?.name ?? ""}`.toLowerCase();
-      const ground = name.includes("ground");
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      const next = [];
+    if (this.grassEngine) {
+      const placementChanged =
+        next.patchScale !== prev.patchScale ||
+        next.bladeLength !== prev.bladeLength ||
+        next.bladeDensity !== prev.bladeDensity ||
+        next.tuftAmount !== prev.tuftAmount ||
+        next.coverageNoiseScale !== prev.coverageNoiseScale ||
+        next.edgeFalloff !== prev.edgeFalloff ||
+        next.stragglerDensity !== prev.stragglerDensity ||
+        next.shapeDistortion !== prev.shapeDistortion;
 
-      for (const mat of mats) {
-        if (!mat) {
-          next.push(mat);
-          continue;
-        }
-
-        let lit = mat;
-        if (!mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
-          lit = new THREE.MeshStandardMaterial({
-            map: mat.map ?? null,
-            alphaMap: mat.alphaMap ?? null,
-            color: mat.color?.clone?.() ?? new THREE.Color(0xffffff),
-            side: ground ? THREE.FrontSide : THREE.DoubleSide,
-            transparent: !ground,
-            opacity: 1,
-            alphaTest: ground ? 0.12 : 0.12,
-            depthWrite: true,
-            metalness: 0,
-            roughness: ground ? 0.94 : 0.82,
-            envMapIntensity: 0
-          });
-          if ("alphaToCoverage" in lit) lit.alphaToCoverage = true;
-          mat.dispose?.();
-        }
-
-        lit.side = ground ? THREE.FrontSide : THREE.DoubleSide;
-        // Blades blend out at the rim; ground stays cutout against the apron.
-        lit.transparent = !ground;
-        lit.depthWrite = true;
-        lit.metalness = 0;
-        lit.roughness = Math.max(lit.roughness ?? 0.8, ground ? 0.94 : 0.82);
-        lit.envMapIntensity = 0;
-        lit.alphaTest = ground ? 0.12 : 0.12;
-        if ("alphaToCoverage" in lit) lit.alphaToCoverage = Boolean(ground);
-        if (lit.normalMap) lit.normalMap = null;
-        if ("transmission" in lit) lit.transmission = 0;
-
-        if (ground) {
-          lit.polygonOffset = true;
-          lit.polygonOffsetFactor = 1;
-          lit.polygonOffsetUnits = 1;
-        }
-
-        for (const tex of [lit.map, lit.alphaMap]) {
-          if (!tex) continue;
-          // Mipmapped alpha cutouts stair-step into squares — keep sharp mips.
-          tex.generateMipmaps = true;
-          tex.minFilter = THREE.LinearMipmapLinearFilter;
-          tex.magFilter = THREE.LinearFilter;
-          tex.anisotropy = Math.min(16, maxAniso);
-          tex.colorSpace = ground ? THREE.SRGBColorSpace : THREE.SRGBColorSpace;
-          tex.needsUpdate = true;
-        }
-
-        if (!lit.userData.__grassEdgeFade) {
-          lit.userData.__grassEdgeFade = true;
-          const prevKey = lit.customProgramCacheKey?.bind(lit);
-          lit.customProgramCacheKey = () =>
-            `${prevKey?.() ?? lit.uuid}:grass-tufts:v5:${radius}:${fadeStart}:${fadeEnd}:${bustClear}:${bustBoost}:${treeBoost}:${tubeBoost}:${ground ? 1 : 0}`;
-          const prevCompile = lit.onBeforeCompile?.bind(lit);
-          const heightBoostGlsl = ground
-            ? `vec2 bustDelta = position.xz - vec2(${bustX}, ${bustZ});
-float bustDist = length(bustDelta);
-float bustClearMask = smoothstep(${bustClear}, ${bustClear} + ${bustClearFeather}, bustDist);
-float heightMul = bustClearMask;`
-            : `vec2 bustDelta = position.xz - vec2(${bustX}, ${bustZ});
-float bustDist = length(bustDelta);
-// Hard clearance under the bust pedestal — no blades through the base.
-float bustClearMask = smoothstep(${bustClear}, ${bustClear} + ${bustClearFeather}, bustDist);
-float bustRing = smoothstep(${bustClear} + ${bustClearFeather}, ${bustPeak}, bustDist)
-  * smoothstep(${bustOuter}, ${bustPeak}, bustDist);
-vec2 treeDelta = position.xz - vec2(${treeX}, ${treeZ});
-float treeDist = length(treeDelta);
-float treeTuft = smoothstep(${treeOuter}, ${treeInner}, treeDist);
-vec2 tubeDelta = position.xz - vec2(${tubeX}, ${tubeZ});
-float tubeDist = length(tubeDelta);
-// Grow right up to the tube foot — no clearance hole at the neon.
-float tubeTuft = smoothstep(${tubeOuter}, ${tubeInner}, tubeDist);
-float tuftNoise = 0.65 + 0.35 * sin(position.x * 7.3 + position.z * 5.1);
-float heightMul = bustClearMask * (
-  1.0
-  + ${bustBoost} * bustRing
-  + ${treeBoost} * treeTuft * tuftNoise
-  + ${tubeBoost} * tubeTuft * tuftNoise
-);`;
-          lit.onBeforeCompile = (shader) => {
-            prevCompile?.(shader);
-            shader.vertexShader = shader.vertexShader
-              .replace(
-                "#include <common>",
-                `#include <common>
-varying float vGrassEdge;
-varying float vGrassWorldY;
-varying float vBustClear;`
-              )
-              .replace(
-                "#include <begin_vertex>",
-                `#include <begin_vertex>
-// Match export irregular_radius() — organic rim, not a perfect circle.
-float grassAng = atan(position.z, position.x);
-float grassWobble =
-  0.055 * sin(3.0 * grassAng + 0.40)
-  + 0.04 * sin(5.0 * grassAng - 1.10)
-  + 0.025 * sin(7.0 * grassAng + 2.30)
-  + 0.02 * sin(2.0 * grassAng + 0.85);
-float grassRim = ${radius} * clamp(1.0 + grassWobble, 0.93, 1.06);
-float grassR = length(position.xz) / max(grassRim, 1e-4);
-// Patchy rim — multi-octave noise so the edge dies in irregular lobes (not a disc).
-float rimNoise =
-  0.38
-  + 0.28 * sin(position.x * 1.85 + position.z * 2.4)
-  + 0.24 * sin(position.x * 3.9 - position.z * 3.2 + 1.3)
-  + 0.22 * sin(position.x * 7.6 + position.z * 6.1 - 0.9)
-  + 0.16 * sin(position.x * 13.2 - position.z * 11.0 + 2.1);
-rimNoise = clamp(rimNoise, 0.02, 1.0);
-float localFadeEnd = mix(${fadeStart} + 0.04, ${fadeEnd} * 0.88, pow(rimNoise, 0.7));
-float edgeLin = smoothstep(localFadeEnd, ${fadeStart} * (0.55 + 0.45 * rimNoise), grassR);
-vGrassEdge = pow(max(edgeLin * rimNoise, 0.0), 1.25);
-${heightBoostGlsl}
-vBustClear = bustClearMask;
-transformed.y *= vGrassEdge * heightMul;`
-              )
-              .replace(
-                "#include <project_vertex>",
-                `#include <project_vertex>
-vGrassWorldY = (modelMatrix * vec4(transformed, 1.0)).y;`
-              );
-            shader.fragmentShader = shader.fragmentShader
-              .replace(
-                "#include <common>",
-                `#include <common>
-varying float vGrassEdge;
-varying float vGrassWorldY;
-varying float vBustClear;`
-              )
-              .replace(
-                "#include <alphamap_fragment>",
-                `#include <alphamap_fragment>
-if (vGrassWorldY < -0.002) discard;
-if (vBustClear < 0.04) discard;
-if (vGrassEdge < 0.012) discard;
-diffuseColor.a *= smoothstep(0.012, 0.38, vGrassEdge) * smoothstep(0.04, 0.55, vBustClear);
-if (diffuseColor.a < 0.025) discard;`
-              );
-          };
-        }
-
-        lit.needsUpdate = true;
-        next.push(lit);
+      if (placementChanged) {
+        this.grassEngine.setParams({
+          coverage: {
+            coverageNoiseScale: next.coverageNoiseScale,
+            edgeFalloff: next.edgeFalloff,
+            stragglerDensity: next.stragglerDensity,
+            shapeDistortion: next.shapeDistortion
+          },
+          layout: grassLayoutForScale(1),
+          radius: GRASS_RADIUS * next.patchScale,
+          bladeLength: next.bladeLength,
+          bladeDensity: next.bladeDensity,
+          tuftAmount: next.tuftAmount,
+          breezeStrength: next.breezeStrength,
+          breezeSpeed: next.breezeSpeed
+        });
+      } else {
+        this.grassEngine.setBreeze({
+          breezeStrength: next.breezeStrength,
+          breezeSpeed: next.breezeSpeed
+        });
       }
+    }
+    return { ...next };
+  }
 
-      obj.material = next.length === 1 ? next[0] : next;
-    });
+  /**
+   * Tip-wind clock for procedural meadow.
+   * @param {number} timeSec
+   */
+  update(timeSec) {
+    this.grassEngine?.update?.(timeSec);
+  }
+
+  /** @returns {Record<string, number>} */
+  getLawnEdgeParams() {
+    return { ...this._lawnEdgeParams };
   }
 
   /**
@@ -774,7 +1016,7 @@ if (diffuseColor.a < 0.025) discard;`
 
     const neonWorld = new THREE.Vector3(
       BUST_NEON_XZ.x,
-      NEON_LIGHT_HEIGHT,
+      BUST_LANTERN_HEIGHT_M * LANTERN_LIGHT.flameFrac,
       BUST_NEON_XZ.z
     );
     this.group.localToWorld(neonWorld);

@@ -1,0 +1,65 @@
+[
+  {
+    "k": 0.18,
+    "d": 0.16,
+    "label": "baseline",
+    "maxContrast": 3.7,
+    "maxContrastY": 310,
+    "c310": 3.7,
+    "file": "vol-fog-item1-baseline.png"
+  },
+  {
+    "k": 0.4,
+    "d": 0.16,
+    "label": "k0.4",
+    "maxContrast": 13.5,
+    "maxContrastY": 310,
+    "c310": 13.5,
+    "file": "vol-fog-item1-k0.4.png"
+  },
+  {
+    "k": 0.6,
+    "d": 0.16,
+    "label": "k0.6",
+    "maxContrast": 20.1,
+    "maxContrastY": 310,
+    "c310": 20.1,
+    "file": "vol-fog-item1-k0.6.png"
+  },
+  {
+    "k": 0.4,
+    "d": 0.24,
+    "label": "k0.4-d0.24",
+    "maxContrast": 9,
+    "maxContrastY": 310,
+    "c310": 9,
+    "file": "vol-fog-item1-k0.4-d0.24.png"
+  },
+  {
+    "k": 0.4,
+    "d": 0.3,
+    "label": "k0.4-d0.3",
+    "maxContrast": 6.6,
+    "maxContrastY": 310,
+    "c310": 6.6,
+    "file": "vol-fog-item1-k0.4-d0.3.png"
+  },
+  {
+    "k": 0.28,
+    "d": 0.3,
+    "label": "ship",
+    "maxContrast": 3.1,
+    "maxContrastY": 646,
+    "c310": 2.7,
+    "file": "vol-fog-item1-ship.png"
+  },
+  {
+    "k": 0.3,
+    "d": 0.28,
+    "label": "alt",
+    "maxContrast": 3.7,
+    "maxContrastY": 310,
+    "c310": 3.7,
+    "file": "vol-fog-item1-alt.png"
+  }
+]

@@ -1,0 +1,490 @@
+{
+  "still": {
+    "n": 39,
+    "meanMin": 26.7,
+    "meanMax": 27.1,
+    "meanAvg": 26.9,
+    "blackMax": 0,
+    "darkFrames": 0,
+    "darkFrac": 0,
+    "fpsMin": 32,
+    "fpsMax": 42,
+    "visFlip": false,
+    "litFlip": false,
+    "lightMin": 10,
+    "lightMax": 10
+  },
+  "moving": {
+    "n": 127,
+    "meanMin": 0,
+    "meanMax": 27.5,
+    "meanAvg": 20.9,
+    "blackMax": 1,
+    "darkFrames": 29,
+    "darkFrac": 0.228,
+    "fpsMin": 31,
+    "fpsMax": 36,
+    "visFlip": false,
+    "litFlip": false,
+    "lightMin": 10,
+    "lightMax": 10
+  },
+  "transitions": [
+    {
+      "i": 40,
+      "t": 1330,
+      "from": 27.1,
+      "to": 0,
+      "fps": 33,
+      "vis": true,
+      "light": 10
+    },
+    {
+      "i": 41,
+      "t": 1362,
+      "from": 0,
+      "to": 26.9,
+      "fps": 33,
+      "vis": true,
+      "light": 10,
+      "kind": "recover"
+    },
+    {
+      "i": 44,
+      "t": 1450,
+      "from": 26.8,
+      "to": 0.1,
+      "fps": 33,
+      "vis": true,
+      "light": 10
+    },
+    {
+      "i": 45,
+      "t": 1478,
+      "from": 0.1,
+      "to": 26.6,
+      "fps": 33,
+      "vis": true,
+      "light": 10,
+      "kind": "recover"
+    },
+    {
+      "i": 55,
+      "t": 1792,
+      "from": 27.3,
+      "to": 0.1,
+      "fps": 31,
+      "vis": true,
+      "light": 10
+    },
+    {
+      "i": 56,
+      "t": 1819,
+      "from": 0.1,
+      "to": 26.8,
+      "fps": 31,
+      "vis": true,
+      "light": 10,
+      "kind": "recover"
+    },
+    {
+      "i": 57,
+      "t": 1847,
+      "from": 26.8,
+      "to": 0.1,
+      "fps": 31,
+      "vis": true,
+      "light": 10
+    },
+    {
+      "i": 58,
+      "t": 1879,
+      "from": 0.1,
+      "to": 26.5,
+      "fps": 31,
+      "vis": true,
+      "light": 10,
+      "kind": "recover"
+    },
+    {
+      "i": 62,
+      "t": 1990,
+      "from": 26.9,
+      "to": 0.1,
+      "fps": 31,
+      "vis": true,
+      "light": 10
+    },
+    {
+      "i": 63,
+      "t": 2015,
+      "from": 0.1,
+      "to": 27.4,
+      "fps": 33,
+      "vis": true,
+      "light": 10,
+      "kind": "recover"
+    },
+    {
+      "i": 64,
+      "t": 2047,
+      "from": 27.4,
+      "to": 0.2,
+      "fps": 33,
+      "vis": true,
+      "light": 10
+    },
+    {
+      "i": 65,
+      "t": 2085,
+      "from": 0.2,
+      "to": 27,
+      "fps": 33,
+      "vis": true,
+      "light": 10,
+      "kind": "recover"
+    },
+    {
+      "i": 67,
+      "t": 2146,
+      "from": 27.2,
+      "to": 0.1,
+      "fps": 33,
+      "vis": true,
+      "light": 10
+    },
+    {
+      "i": 68,
+      "t": 2177,
+      "from": 0.1,
+      "to": 27.4,
+      "fps": 33,
+      "vis": true,
+      "light": 10,
+      "kind": "recover"
+    },
+    {
+      "i": 73,
+      "t": 2339,
+      "from": 26.8,
+      "to": 0.1,
+      "fps": 32,
+      "vis": true,
+      "light": 10
+    },
+    {
+      "i": 76,
+      "t": 2441,
+      "from": 0.1,
+      "to": 26.9,
+      "fps": 32,
+      "vis": true,
+      "light": 10,
+      "kind": "recover"
+    },
+    {
+      "i": 78,
+      "t": 2484,
+      "from": 26.5,
+      "to": 0.1,
+      "fps": 32,
+      "vis": true,
+      "light": 10
+    },
+    {
+      "i": 79,
+      "t": 2511,
+      "from": 0.1,
+      "to": 26.9,
+      "fps": 32,
+      "vis": true,
+      "light": 10,
+      "kind": "recover"
+    },
+    {
+      "i": 80,
+      "t": 2541,
+      "from": 26.9,
+      "to": 0.1,
+      "fps": 33,
+      "vis": true,
+      "light": 10
+    },
+    {
+      "i": 84,
+      "t": 2660,
+      "from": 0.1,
+      "to": 26.7,
+      "fps": 33,
+      "vis": true,
+      "light": 10,
+      "kind": "recover"
+    },
+    {
+      "i": 85,
+      "t": 2692,
+      "from": 26.7,
+      "to": 0.1,
+      "fps": 33,
+      "vis": true,
+      "light": 10
+    },
+    {
+      "i": 86,
+      "t": 2719,
+      "from": 0.1,
+      "to": 27.3,
+      "fps": 33,
+      "vis": true,
+      "light": 10,
+      "kind": "recover"
+    },
+    {
+      "i": 89,
+      "t": 2811,
+      "from": 27.4,
+      "to": 0.1,
+      "fps": 33,
+      "vis": true,
+      "light": 10
+    },
+    {
+      "i": 90,
+      "t": 2841,
+      "from": 0.1,
+      "to": 26.9,
+      "fps": 33,
+      "vis": true,
+      "light": 10,
+      "kind": "recover"
+    },
+    {
+      "i": 91,
+      "t": 2871,
+      "from": 26.9,
+      "to": 0.1,
+      "fps": 33,
+      "vis": true,
+      "light": 10
+    },
+    {
+      "i": 92,
+      "t": 2902,
+      "from": 0.1,
+      "to": 26.8,
+      "fps": 33,
+      "vis": true,
+      "light": 10,
+      "kind": "recover"
+    },
+    {
+      "i": 96,
+      "t": 3017,
+      "from": 26.6,
+      "to": 0.1,
+      "fps": 33,
+      "vis": true,
+      "light": 10
+    },
+    {
+      "i": 97,
+      "t": 3058,
+      "from": 0.1,
+      "to": 26.6,
+      "fps": 33,
+      "vis": true,
+      "light": 10,
+      "kind": "recover"
+    },
+    {
+      "i": 112,
+      "t": 3467,
+      "from": 27,
+      "to": 0.1,
+      "fps": 35,
+      "vis": true,
+      "light": 10
+    },
+    {
+      "i": 114,
+      "t": 3522,
+      "from": 0.1,
+      "to": 27.4,
+      "fps": 35,
+      "vis": true,
+      "light": 10,
+      "kind": "recover"
+    }
+  ],
+  "sampleMoving": [
+    {
+      "t": 1251,
+      "mean": 27.1,
+      "black": 0,
+      "fps": 33,
+      "vis": true,
+      "lit": true,
+      "light": 10,
+      "fog": true,
+      "dens": 1,
+      "camY": 2.85,
+      "camX": 0
+    },
+    {
+      "t": 1612,
+      "mean": 27.2,
+      "black": 0,
+      "fps": 31,
+      "vis": true,
+      "lit": true,
+      "light": 10,
+      "fog": true,
+      "dens": 1,
+      "camY": 2.796,
+      "camX": 0.092
+    },
+    {
+      "t": 1903,
+      "mean": 26.6,
+      "black": 0,
+      "fps": 31,
+      "vis": true,
+      "lit": true,
+      "light": 10,
+      "fog": true,
+      "dens": 1,
+      "camY": 2.708,
+      "camX": 0.043
+    },
+    {
+      "t": 2206,
+      "mean": 27.3,
+      "black": 0,
+      "fps": 33,
+      "vis": true,
+      "lit": true,
+      "light": 10,
+      "fog": true,
+      "dens": 1,
+      "camY": 2.733,
+      "camX": -0.079
+    },
+    {
+      "t": 2511,
+      "mean": 26.9,
+      "black": 0,
+      "fps": 32,
+      "vis": true,
+      "lit": true,
+      "light": 10,
+      "fog": true,
+      "dens": 1,
+      "camY": 2.869,
+      "camX": -0.129
+    },
+    {
+      "t": 2811,
+      "mean": 0.1,
+      "black": 1,
+      "fps": 33,
+      "vis": true,
+      "lit": true,
+      "light": 10,
+      "fog": true,
+      "dens": 1,
+      "camY": 2.984,
+      "camX": -0.051
+    },
+    {
+      "t": 3121,
+      "mean": 27.2,
+      "black": 0,
+      "fps": 32,
+      "vis": true,
+      "lit": true,
+      "light": 10,
+      "fog": true,
+      "dens": 1,
+      "camY": 2.964,
+      "camX": 0.08
+    },
+    {
+      "t": 3383,
+      "mean": 27.1,
+      "black": 0,
+      "fps": 35,
+      "vis": true,
+      "lit": true,
+      "light": 10,
+      "fog": true,
+      "dens": 1,
+      "camY": 2.842,
+      "camX": 0.128
+    },
+    {
+      "t": 3661,
+      "mean": 26.5,
+      "black": 0,
+      "fps": 36,
+      "vis": true,
+      "lit": true,
+      "light": 10,
+      "fog": true,
+      "dens": 1,
+      "camY": 2.726,
+      "camX": 0.06
+    },
+    {
+      "t": 3952,
+      "mean": 27.1,
+      "black": 0,
+      "fps": 35,
+      "vis": true,
+      "lit": true,
+      "light": 10,
+      "fog": true,
+      "dens": 1,
+      "camY": 2.734,
+      "camX": -0.071
+    },
+    {
+      "t": 4258,
+      "mean": 0.1,
+      "black": 1,
+      "fps": 35,
+      "vis": true,
+      "lit": true,
+      "light": 10,
+      "fog": true,
+      "dens": 1,
+      "camY": 2.871,
+      "camX": -0.126
+    },
+    {
+      "t": 4551,
+      "mean": 26.9,
+      "black": 0,
+      "fps": 32,
+      "vis": true,
+      "lit": true,
+      "light": 10,
+      "fog": true,
+      "dens": 1,
+      "camY": 2.984,
+      "camX": -0.047
+    },
+    {
+      "t": 4822,
+      "mean": 27.1,
+      "black": 0,
+      "fps": 35,
+      "vis": true,
+      "lit": true,
+      "light": 10,
+      "fog": true,
+      "dens": 1,
+      "camY": 2.964,
+      "camX": 0.075
+    }
+  ]
+}

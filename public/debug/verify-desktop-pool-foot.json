@@ -1,0 +1,57 @@
+{
+  "metrics": {
+    "desktop": {
+      "name": "Retro Desktop",
+      "tubeLocalXZ": {
+        "x": 3.65,
+        "z": 1.15
+      },
+      "glowLocalXZ": {
+        "x": 3.65,
+        "z": 1.15
+      },
+      "poolLocalOffset": {
+        "x": 0,
+        "z": 0
+      },
+      "poolScale": 0.34,
+      "poolOffsetX": 0,
+      "coneVisible": false,
+      "coneMaxOpacity": 0,
+      "poolMaxOpacity": 0.36,
+      "dxGlowTube": 0,
+      "dzGlowTube": 0,
+      "poolOffsetAbs": 0
+    },
+    "bust": {
+      "name": "Bust",
+      "tubeLocalXZ": {
+        "x": 2.2,
+        "z": 0.85
+      },
+      "glowLocalXZ": {
+        "x": 2.2,
+        "z": 0.85
+      },
+      "poolLocalOffset": {
+        "x": 0,
+        "z": 0
+      },
+      "poolScale": 1,
+      "poolOffsetX": null,
+      "coneVisible": false,
+      "coneMaxOpacity": 0.1,
+      "poolMaxOpacity": 0.48,
+      "dxGlowTube": 0,
+      "dzGlowTube": 0,
+      "poolOffsetAbs": 0
+    }
+  },
+  "gates": {
+    "desktopCentered": true,
+    "desktopTight": true,
+    "desktopConeOff": true,
+    "bustUnderTube": true
+  },
+  "capture": "public/debug/verify-desktop-pool-foot.png"
+}

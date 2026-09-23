@@ -1,0 +1,115 @@
+{
+  "QUARTER_D": 0.075,
+  "results": [
+    {
+      "tag": "baseline-q",
+      "file": "vol-fog-seam-baseline-q.png",
+      "edge": {
+        "maxContrast": 19.8,
+        "maxContrastY": 310,
+        "c310": 19.8,
+        "above310": 26.2,
+        "below310": 45.9
+      }
+    },
+    {
+      "tag": "hide-shell",
+      "file": "vol-fog-seam-hide-shell.png",
+      "edge": {
+        "maxContrast": 22.2,
+        "maxContrastY": 310,
+        "c310": 22.2,
+        "above310": 24.6,
+        "below310": 46.8
+      }
+    },
+    {
+      "tag": "hide-floor",
+      "file": "vol-fog-seam-hide-floor.png",
+      "edge": {
+        "maxContrast": 22.2,
+        "maxContrastY": 310,
+        "c310": 22.2,
+        "above310": 24.6,
+        "below310": 46.9
+      }
+    },
+    {
+      "tag": "hide-lit",
+      "file": "vol-fog-seam-hide-lit.png",
+      "edge": {
+        "maxContrast": 22.4,
+        "maxContrastY": 310,
+        "c310": 22.4,
+        "above310": 24.7,
+        "below310": 47.1
+      }
+    },
+    {
+      "tag": "hide-apron",
+      "file": "vol-fog-seam-hide-apron.png",
+      "edge": {
+        "maxContrast": 22.2,
+        "maxContrastY": 310,
+        "c310": 22.2,
+        "above310": 24.6,
+        "below310": 46.9
+      }
+    },
+    {
+      "tag": "hide-tubes",
+      "file": "vol-fog-seam-hide-tubes.png",
+      "edge": {
+        "maxContrast": 23.5,
+        "maxContrastY": 310,
+        "c310": 23.5,
+        "above310": 22.2,
+        "below310": 45.7
+      }
+    },
+    {
+      "tag": "hide-vignettes",
+      "file": "vol-fog-seam-hide-vignettes.png",
+      "edge": {
+        "maxContrast": 11.5,
+        "maxContrastY": 419,
+        "c310": 2.5,
+        "above310": 32.8,
+        "below310": 35.3
+      }
+    },
+    {
+      "tag": "shell-floor-only",
+      "file": "vol-fog-seam-shell-floor-only.png",
+      "edge": {
+        "maxContrast": 4.9,
+        "maxContrastY": 418,
+        "c310": 0.7,
+        "above310": 19,
+        "below310": 19.7
+      }
+    },
+    {
+      "tag": "fog-off-q",
+      "file": "vol-fog-seam-fog-off-q.png",
+      "edge": {
+        "maxContrast": 42.4,
+        "maxContrastY": 660,
+        "c310": 19.4,
+        "above310": 57.3,
+        "below310": 76.8
+      }
+    },
+    {
+      "tag": "fog-off-notubes",
+      "file": "vol-fog-seam-fog-off-notubes.png",
+      "edge": {
+        "maxContrast": 43.8,
+        "maxContrastY": 660,
+        "c310": 3.2,
+        "above310": 54.3,
+        "below310": 57.5
+      }
+    }
+  ]
+}

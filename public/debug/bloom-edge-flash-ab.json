@@ -1,0 +1,66 @@
+{
+  "verdict": "OPACITY — flash remains with bloom off; opacity fade itself is the cause",
+  "withBloom": {
+    "bloomOn": true,
+    "timing": {
+      "t0": 5836.700000047684,
+      "introCompleteAt": 5836.700000047684,
+      "heavyEffectsAfter": 0,
+      "heavyDelayMs": null,
+      "bloomIntensity": 1.2,
+      "fogFadeAtArm": 0
+    },
+    "during": {
+      "edgeAvg": 14.75,
+      "edgeMaxDev": 3.22,
+      "centerAvg": 22.85,
+      "centerMaxDev": 3.31,
+      "n": 28
+    },
+    "after": {
+      "edgeAvg": 14.4,
+      "edgeMaxDev": 2.99,
+      "centerAvg": 23.82,
+      "centerMaxDev": 2.67,
+      "n": 24
+    },
+    "fadeEnd": {
+      "fogFade": 1,
+      "fogOpacity": 1,
+      "heavyGate": false,
+      "now": 10179
+    }
+  },
+  "withoutBloom": {
+    "bloomOn": false,
+    "timing": {
+      "t0": 5247.199999928474,
+      "introCompleteAt": 5247.199999928474,
+      "heavyEffectsAfter": 0,
+      "heavyDelayMs": null,
+      "bloomIntensity": 0,
+      "fogFadeAtArm": 0
+    },
+    "during": {
+      "edgeAvg": 14.69,
+      "edgeMaxDev": 3.44,
+      "centerAvg": 22.73,
+      "centerMaxDev": 3.21,
+      "n": 28
+    },
+    "after": {
+      "edgeAvg": 14.4,
+      "edgeMaxDev": 2.98,
+      "centerAvg": 23.86,
+      "centerMaxDev": 2.5,
+      "n": 24
+    },
+    "fadeEnd": {
+      "fogFade": 1,
+      "fogOpacity": 1,
+      "heavyGate": false,
+      "now": 9682.199999928474
+    }
+  },
+  "note": "edgeMaxDev during opacity ramp is the signal; after = settled baseline"
+}

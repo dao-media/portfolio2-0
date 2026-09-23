@@ -7,11 +7,11 @@
  *   SAVE / UNDO / RESET / COPY / FINALIZE — same pattern as FogTuner.
  *   FINALIZE → POST /__edge_glitch_finalize → patches constants.js exports.
  *
- * Two sizes to feel apart:
- *   armOuter  = cursor→edge TRIGGER distance
- *   localBase / localGrowth = WIDTH of the glitched strip once armed
+ * Feel shapes:
+ *   armOuter           = cursor→edge TRIGGER (on/off only)
+ *   spanAlong/Out/In   = L1 diamond at the CROSS POINT (half out / half in)
  *
- * localStorage key: "edge-glitch-tuner-history-v1"
+ * localStorage key: "edge-glitch-tuner-history-v2"
  */
 
 import {
@@ -19,12 +19,17 @@ import {
   createEdgeGlitchParams
 } from "../scene/edgeGlitch/constants.js";
 
-const STORAGE_KEY = "edge-glitch-tuner-history-v1";
+const STORAGE_KEY = "edge-glitch-tuner-history-v3";
 const MAX_HISTORY = 30;
 
 /** @param {string} key @param {number} v */
 function fmt(key, v) {
-  if (key === "armRamp") return v.toFixed(2);
+  if (key === "tearBands") {
+    return String(Math.round(v));
+  }
+  if (key === "armRamp") {
+    return v.toFixed(2);
+  }
   if (Math.abs(v) < 0.01) return v.toFixed(3);
   return v.toFixed(3);
 }
@@ -169,7 +174,7 @@ export class EdgeGlitchTuner {
       </div>
 
       <div id="eg-flash" class="eg-flash" hidden></div>
-      <p class="eg-hint">arm = trigger distance · local = strip width once armed</p>
+      <p class="eg-hint">arm/spans = L1 diamond · intensity + rgbSplit + tearBands = beauty tears</p>
       <div id="eg-sliders" class="eg-sliders"></div>
 
       <div class="eg-history-wrap">
@@ -377,7 +382,7 @@ export class EdgeGlitchTuner {
 const EDGE_GLITCH_TUNER_CSS = `
 #edge-glitch-tuner-toggle {
   position: fixed;
-  bottom: 112px;
+  top: 108px;
   right: 16px;
   z-index: 9000;
   width: 34px;

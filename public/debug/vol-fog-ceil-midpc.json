@@ -1,0 +1,43 @@
+{
+  "halfRes": true,
+  "fogMinY": -0.2,
+  "fogFloorFadeRangeY": 0.05,
+  "fogMaxY": 12.75,
+  "fogFadeOutRangeY": 1.2,
+  "fogFadeOutPow": 1.8,
+  "heightFogFactor": 0.31,
+  "heightFogStartY": 0,
+  "heightFogEndY": 0,
+  "heightFogExpK": 0.55,
+  "fogDensityMultiplier": 0.4,
+  "baseRaymarchStepCount": 16,
+  "baseMaxRayLength": 10,
+  "noiseBias": 0.28,
+  "noisePow": 1.4,
+  "globalScale": 3.7,
+  "noiseMovementX": 0.06,
+  "noiseMovementY": 0.06,
+  "noiseSpeed": 7.95,
+  "outputDither": 0.02,
+  "falloffNoiseWarp": 0.6,
+  "falloffCeilingJitter": 1.2,
+  "noiseYSlice": 0,
+  "noiseYScroll": 0.004,
+  "profile": {
+    "k": 0.55,
+    "dens": 0.4,
+    "jitter": 1.2,
+    "warp": 0.6,
+    "factor": 0.31,
+    "densAt0": 0.6599999999999999,
+    "densAtMid": 0.15794388868087794,
+    "densAtTop": 0.03779738177520844,
+    "densAt5": 0.04219238839642699,
+    "midPc": 2.6
+  },
+  "edge": {
+    "maxC": 24.4,
+    "maxY": 311,
+    "c310": 21.9
+  }
+}

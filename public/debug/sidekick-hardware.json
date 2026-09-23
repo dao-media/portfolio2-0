@@ -1,0 +1,134 @@
+{
+  "current": 0,
+  "aligned": true,
+  "isOpen": false,
+  "swiveling": false,
+  "sidekickRootPosition": [
+    0,
+    2.3319259011889963,
+    2.4
+  ],
+  "restPoseReady": false,
+  "sidekickScale": 1,
+  "keypad": {
+    "buttonsFound": true,
+    "buttonsVisible": true,
+    "buttonsMaterial": "sidekick_keypad_opaque",
+    "buttonsOpacity": 0,
+    "buttonsTransparent": true,
+    "buttonsAlphaTest": 0,
+    "buttonsProtected": true,
+    "sharesCoverMaterial": false,
+    "healthy": true,
+    "hardware": {
+      "meshes": [
+        {
+          "name": "Buttons",
+          "visible": true,
+          "material": "sidekick_keypad_opaque",
+          "type": "MeshPhysicalMaterial",
+          "map": null,
+          "opacity": 0,
+          "transparent": true,
+          "alphaTest": 0,
+          "side": 2,
+          "labelProtected": false,
+          "keypadProtected": true
+        },
+        {
+          "name": "KeyboardText",
+          "visible": false,
+          "material": "lambert3",
+          "type": "MeshBasicMaterial",
+          "map": "TmobileKeyboard",
+          "opacity": 0,
+          "transparent": true,
+          "alphaTest": 0.08,
+          "side": 2,
+          "labelProtected": true,
+          "keypadProtected": false
+        },
+        {
+          "name": "sideButtons",
+          "visible": true,
+          "material": "phong4",
+          "type": "MeshBasicMaterial",
+          "map": "TmobileButtons",
+          "opacity": 0,
+          "transparent": true,
+          "alphaTest": 0.08,
+          "side": 2,
+          "labelProtected": true,
+          "keypadProtected": false
+        },
+        {
+          "name": "buttonsFace",
+          "visible": true,
+          "material": "blinn1",
+          "type": "MeshPhysicalMaterial",
+          "map": null,
+          "opacity": 0,
+          "transparent": true,
+          "alphaTest": 0,
+          "side": 2,
+          "labelProtected": false,
+          "keypadProtected": false
+        },
+        {
+          "name": "bottonsSide",
+          "visible": true,
+          "material": "blinn1",
+          "type": "MeshPhysicalMaterial",
+          "map": null,
+          "opacity": 0,
+          "transparent": true,
+          "alphaTest": 0,
+          "side": 2,
+          "labelProtected": false,
+          "keypadProtected": false
+        },
+        {
+          "name": "scrollButton",
+          "visible": true,
+          "material": "sidekick_scrollball_resin",
+          "type": "MeshPhysicalMaterial",
+          "map": null,
+          "opacity": 0.72,
+          "transparent": true,
+          "alphaTest": 0,
+          "side": 0,
+          "labelProtected": false,
+          "keypadProtected": false
+        },
+        {
+          "name": "scrolButtonFrame",
+          "visible": true,
+          "material": "blinn1",
+          "type": "MeshPhysicalMaterial",
+          "map": null,
+          "opacity": 0,
+          "transparent": true,
+          "alphaTest": 0,
+          "side": 2,
+          "labelProtected": false,
+          "keypadProtected": false
+        },
+        {
+          "name": "transparentCover",
+          "visible": false,
+          "material": "sidekick_cover_mask",
+          "type": "MeshPhysicalMaterial",
+          "map": null,
+          "opacity": 0,
+          "transparent": true,
+          "alphaTest": 0.5,
+          "side": 2,
+          "labelProtected": false,
+          "keypadProtected": false
+        }
+      ],
+      "fusedSideButtons": true,
+      "separateKeyboardDecal": true
+    }
+  }
+}

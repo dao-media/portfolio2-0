@@ -1,0 +1,224 @@
+{
+  "VP_Japanese_Maple_v1_1": {
+    "name": "VP_Japanese_Maple_v1_1",
+    "mat": "VP_Jap_Maple_bark_1",
+    "tris": 120,
+    "worldMin": [
+      1.182,
+      0.606,
+      18.215
+    ],
+    "worldMax": [
+      1.291,
+      1.265,
+      18.308
+    ],
+    "avgEdgeLocal": 0.0106,
+    "uvRange": {
+      "min": [
+        0,
+        0
+      ],
+      "max": [
+        1,
+        1
+      ]
+    },
+    "mapSize": [
+      500,
+      2376
+    ]
+  },
+  "VP_Japanese_Maple_v1_2": {
+    "name": "VP_Japanese_Maple_v1_2",
+    "mat": "VP_Jap_Maple_bark_2",
+    "tris": 7807,
+    "worldMin": [
+      0.326,
+      1.016,
+      17.04
+    ],
+    "worldMax": [
+      2.473,
+      2.49,
+      19.611
+    ],
+    "avgEdgeLocal": 0.007,
+    "uvRange": {
+      "min": [
+        0,
+        0
+      ],
+      "max": [
+        1,
+        1
+      ]
+    },
+    "mapSize": [
+      270,
+      1500
+    ]
+  },
+  "VP_Japanese_Maple_v1_3": {
+    "name": "VP_Japanese_Maple_v1_3",
+    "mat": "VP_jap_maple_leaf_2",
+    "tris": 4508,
+    "worldMin": [
+      0.088,
+      0.856,
+      17.031
+    ],
+    "worldMax": [
+      2.519,
+      2.6,
+      19.918
+    ],
+    "avgEdgeLocal": 0.0087,
+    "uvRange": {
+      "min": [
+        0,
+        0
+      ],
+      "max": [
+        1,
+        1
+      ]
+    },
+    "mapSize": [
+      177,
+      602
+    ]
+  },
+  "VP_Japanese_Maple_v1_4": {
+    "name": "VP_Japanese_Maple_v1_4",
+    "mat": "VP_jap_maple_leaf_3",
+    "tris": 8492,
+    "worldMin": [
+      0.14,
+      0.905,
+      16.846
+    ],
+    "worldMax": [
+      2.702,
+      2.508,
+      19.923
+    ],
+    "avgEdgeLocal": 0.0082,
+    "uvRange": {
+      "min": [
+        0,
+        0
+      ],
+      "max": [
+        1,
+        1
+      ]
+    },
+    "mapSize": [
+      145,
+      553
+    ]
+  },
+  "VP_Japanese_Maple_v1_5": {
+    "name": "VP_Japanese_Maple_v1_5",
+    "mat": "VP_jap_maple_leaf_1",
+    "tris": 8000,
+    "worldMin": [
+      -0.002,
+      0.804,
+      16.84
+    ],
+    "worldMax": [
+      2.651,
+      2.564,
+      19.96
+    ],
+    "avgEdgeLocal": 0.0084,
+    "uvRange": {
+      "min": [
+        0,
+        0
+      ],
+      "max": [
+        1,
+        1
+      ]
+    },
+    "mapSize": [
+      171,
+      664
+    ]
+  },
+  "VP_pot_earth_round_small": {
+    "name": "VP_pot_earth_round_small",
+    "mat": "VP_pot_v3_earth",
+    "tris": 1175,
+    "worldMin": [
+      0.815,
+      0.624,
+      17.936
+    ],
+    "worldMax": [
+      1.582,
+      0.664,
+      18.704
+    ],
+    "avgEdgeLocal": 0.007,
+    "uvRange": {
+      "min": [
+        0,
+        0
+      ],
+      "max": [
+        1,
+        0.999
+      ]
+    },
+    "mapSize": null
+  },
+  "VP_pot_inside_plastic_pot_small": {
+    "name": "VP_pot_inside_plastic_pot_small",
+    "mat": "VP_pot_v3_inside",
+    "tris": 11500,
+    "worldMin": [
+      0.799,
+      0.04,
+      17.921
+    ],
+    "worldMax": [
+      1.599,
+      0.71,
+      18.719
+    ],
+    "avgEdgeLocal": 0.0179,
+    "uvRange": null,
+    "mapSize": null
+  },
+  "VP_pot_metal_brushed": {
+    "name": "VP_pot_metal_brushed",
+    "mat": "VP_metal_brushed",
+    "tris": 8720,
+    "worldMin": [
+      0.732,
+      0,
+      17.852
+    ],
+    "worldMax": [
+      1.667,
+      0.771,
+      18.787
+    ],
+    "avgEdgeLocal": 0.0212,
+    "uvRange": {
+      "min": [
+        -0.025,
+        0.001
+      ],
+      "max": [
+        1,
+        0.999
+      ]
+    },
+    "mapSize": null
+  }
+}

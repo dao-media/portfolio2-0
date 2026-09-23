@@ -5,7 +5,12 @@ import {
   WATER_CURSOR_VERSION
 } from "./waterCursorConfig.js";
 import { damp, Spring } from "./waterCursorSpring.js";
-import { waterCursorVertexShader, waterCursorFragmentShader } from "./waterCursorShaders.js";
+import {
+  waterCursorFragmentShader,
+  waterCursorRimResolveShader,
+  waterCursorRimResolveVertexShader,
+  waterCursorVertexShader
+} from "./waterCursorShaders.js";
 import {
   clampDeltaSeconds,
   finite,
@@ -54,9 +59,9 @@ export class WaterCursor {
     this._renderWarned = false;
 
     /** Raw pointer target — CSS pixels, top-left origin. Events only write here. */
-    this._pointer = new THREE.Vector2(window.innerWidth * 0.5, window.innerHeight * 0.5);
+    this._pointer = new THREE.Vector2(Number.NaN, Number.NaN);
     /** Smoothed follower position — CSS pixels. */
-    this._pos = this._pointer.clone();
+    this._pos = new THREE.Vector2(0, 0);
     /** Filtered velocity — px/s. */
     this._velocity = new THREE.Vector2();
     /** Motion heading — radians. */
@@ -65,6 +70,8 @@ export class WaterCursor {
     this._omega = 0;
     /** Signed stretch from spring (can go negative on settle). */
     this._stretch = 0;
+    /** Disk spiral shear. Null clears it. Strength stays under 1. */
+    this._diskShear = null;
 
     this._stretchSpring = new Spring(this.cfg.springStiffness, this.cfg.springDamping);
     this._waveSpring = new Spring(this.cfg.waveStiffness, this.cfg.waveDamping);
@@ -72,23 +79,14 @@ export class WaterCursor {
       this.cfg.presenceSpringStiffness,
       this.cfg.presenceSpringDamping
     );
-    this._presenceSpring.target = 1;
+    this._presenceSpring.target = 0;
     this._presenceUseSpring = false;
     this._wavePhase = 0;
+    /** True after first in-frame pointer sample (boot or enter). */
+    this._hasPointerSample = false;
 
-    /** Smoothed edge-glitch rim field. */
-    this._rimBlow = 0;
-    this._rimSlurp = 0;
-    this._rimNeck = 0;
-    this._rimPushX = 0;
-    this._rimPushY = 0;
-    this._rimTipAngle = 0;
-    this._rimTargetBlow = 0;
-    this._rimTargetSlurp = 0;
-    this._rimTargetNeck = 0;
-    this._rimTargetPushX = 0;
-    this._rimTargetPushY = 0;
-    this._rimTargetTipAngle = 0;
+    this._rimDtSec = 1 / 60;
+    this._rimClock = performance.now();
 
     this._quadPx = this.cfg.baseDiameter * this.cfg.quadScale;
     this._baseRadiusUv = 0.5 / this.cfg.quadScale;
@@ -103,14 +101,12 @@ export class WaterCursor {
       uTime: { value: 0 },
       uStretch: { value: 0 },
       uAngle: { value: 0 },
+      uGravity: { value: 0 },
+      uCurve: { value: 0 },
       uTailBias: { value: this.cfg.tailBias },
       uPressScale: { value: 1 },
       uRimPress: { value: 1 },
-      uBlow: { value: 0 },
-      uSlurp: { value: 0 },
-      uNeck: { value: 0 },
-      uSlurpAngle: { value: 0 },
-      uPresence: { value: 1 },
+      uPresence: { value: 0 },
       uRadius: { value: this._baseRadiusUv },
       uIdleRadiusWobble: {
         value: this.deformEnabled ? this.cfg.idleRadiusWobble : 0
@@ -119,7 +115,25 @@ export class WaterCursor {
       uWavePhase: { value: 0 },
       uDeformEnabled: { value: this.deformEnabled ? 1 : 0 },
       uColor: { value: new THREE.Vector3(_COLOR.r, _COLOR.g, _COLOR.b) },
-      uOpacity: { value: this.cfg.opacity }
+      uOpacity: { value: this.cfg.opacity },
+      uEdgeSdf: { value: null },
+      uRimPrev: { value: null },
+      uRimState: { value: null },
+      uCursorUv: { value: new THREE.Vector2(0.5, 0.5) },
+      uSdfEps: { value: 1.5 / 256 },
+      uRimGate: { value: 0 },
+      uArm: { value: 0.15 },
+      uArmRamp: { value: 1 },
+      uInsideFree: { value: this.cfg.rimInsideFree },
+      uSlurpBand: { value: this.cfg.rimSlurpBand },
+      uBlowExponent: { value: this.cfg.blowExponent },
+      uNeckPinch: { value: this.cfg.neckPinch },
+      uRecoilPushPx: { value: this.cfg.recoilPushPx },
+      uSnap: { value: this.cfg.snapThreshold },
+      uSmooth: { value: this.cfg.rimFieldSmooth },
+      uDt: { value: 1 / 60 },
+      uRimSlurp: { value: this.cfg.rimSlurp },
+      uQuadPx: { value: this._quadPx }
     };
 
     this.material = new THREE.ShaderMaterial({
@@ -138,10 +152,63 @@ export class WaterCursor {
     this.mesh.frustumCulled = false;
     this.scene.add(this.mesh);
 
+    this._sdfDummy = new THREE.DataTexture(
+      new Float32Array([0, 0, 0, 1]),
+      1,
+      1,
+      THREE.RGBAFormat,
+      THREE.FloatType
+    );
+    this._sdfDummy.minFilter = THREE.NearestFilter;
+    this._sdfDummy.magFilter = THREE.NearestFilter;
+    this._sdfDummy.colorSpace = THREE.NoColorSpace;
+    this._sdfDummy.needsUpdate = true;
+    this.uniforms.uEdgeSdf.value = this._sdfDummy;
+
+    const rimRT = () => {
+      const rt = new THREE.WebGLRenderTarget(2, 1, {
+        minFilter: THREE.NearestFilter,
+        magFilter: THREE.NearestFilter,
+        type: THREE.FloatType,
+        format: THREE.RGBAFormat,
+        depthBuffer: false,
+        stencilBuffer: false,
+        generateMipmaps: false
+      });
+      rt.texture.colorSpace = THREE.NoColorSpace;
+      return rt;
+    };
+    this._rimRead = rimRT();
+    this._rimWrite = rimRT();
+    this.uniforms.uRimPrev.value = this._rimRead.texture;
+    this.uniforms.uRimState.value = this._rimRead.texture;
+
+    this._rimScene = new THREE.Scene();
+    this._rimCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    this._rimMat = new THREE.ShaderMaterial({
+      uniforms: this.uniforms,
+      vertexShader: waterCursorRimResolveVertexShader,
+      fragmentShader: waterCursorRimResolveShader,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+      blending: THREE.NoBlending,
+      transparent: false
+    });
+    const rimQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this._rimMat);
+    rimQuad.frustumCulled = false;
+    this._rimScene.add(rimQuad);
+    this._clearRimTarget(this._rimRead);
+    this._clearRimTarget(this._rimWrite);
+
     this._pressTween = null;
     this._presenceTween = null;
-    /** Pointer inside the document viewport (CSS pixel bounds). */
-    this._inViewport = true;
+    /** Pointer inside the document viewport (CSS pixel bounds). Start hidden. */
+    this._inViewport = false;
+    /** True while pointer is over Mail / case-study chrome — blob shrinks away. */
+    this._uiChromeSuppressed = false;
+    /** Last presence show target (viewport ∧ !chrome). */
+    this._presenceTargetShow = false;
 
     this._onPointerMove = this._onPointerMove.bind(this);
     this._onDocumentLeave = this._onDocumentLeave.bind(this);
@@ -205,39 +272,45 @@ export class WaterCursor {
   }
 
   /**
-   * Edge-glitch rim — surface tension: blow / neck / positional recoil.
+   * Bind the bust edge SDF and live response knobs. The blob shader consumes
+   * a 2×1 GPU state target — nothing is read back to the CPU.
    * @param {{
-   *   blow?: number,
-   *   slurp?: number,
-   *   neck?: number,
-   *   pushX?: number,
-   *   pushY?: number,
-   *   tipAngle?: number
-   * }} [field]
+   *   gate?: boolean,
+   *   texture?: THREE.Texture | null,
+   *   size?: number,
+   *   arm?: number,
+   *   ramp?: number,
+   *   u?: number,
+   *   v?: number
+   * }} [src]
    */
-  setRimField(field = {}) {
+  setRimGpu(src = {}) {
     if (!this._initialized || this._disposed) return;
-    this._rimTargetBlow = Math.min(1, Math.max(0, Number.isFinite(field.blow) ? field.blow : 0));
-    this._rimTargetSlurp = Math.min(
-      1,
-      Math.max(0, Number.isFinite(field.slurp) ? field.slurp : 0)
+    this._syncRimKnobs();
+    const gate = Boolean(src.gate) && this.deformEnabled;
+    this.uniforms.uRimGate.value = gate ? 1 : 0;
+    this.uniforms.uCursorUv.value.set(
+      Number.isFinite(src.u) ? src.u : 0,
+      Number.isFinite(src.v) ? src.v : 0
     );
-    this._rimTargetNeck = Math.min(
-      1,
-      Math.max(0, Number.isFinite(field.neck) ? field.neck : 0)
-    );
-    this._rimTargetPushX = Number.isFinite(field.pushX) ? field.pushX : 0;
-    this._rimTargetPushY = Number.isFinite(field.pushY) ? field.pushY : 0;
-    if (Number.isFinite(field.tipAngle)) {
-      // Gate axis continuity — reject ~180° flips that make the mass "swap sides"
-      const next = field.tipAngle;
-      let diff = next - this._rimTargetTipAngle;
-      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      if (Math.abs(diff) <= Math.PI * 0.55) {
-        this._rimTargetTipAngle = next;
-      }
-      // else hold prior axis — noisy SDF normals must not invert the gate
-    }
+    const size = Math.max(1, Number.isFinite(src.size) ? src.size : 256);
+    this.uniforms.uSdfEps.value = 1.5 / size;
+    if (Number.isFinite(src.arm)) this.uniforms.uArm.value = src.arm;
+    if (Number.isFinite(src.ramp)) this.uniforms.uArmRamp.value = src.ramp;
+    this.uniforms.uEdgeSdf.value = src.texture ?? this._sdfDummy;
+  }
+
+  /** Push Shift+C / config response constants into the rim shader. */
+  _syncRimKnobs() {
+    this.uniforms.uBlowExponent.value = this.cfg.blowExponent;
+    this.uniforms.uNeckPinch.value = this.cfg.neckPinch;
+    this.uniforms.uRecoilPushPx.value = this.cfg.recoilPushPx;
+    this.uniforms.uSlurpBand.value = this.cfg.rimSlurpBand;
+    this.uniforms.uSnap.value = this.cfg.snapThreshold;
+    this.uniforms.uInsideFree.value = this.cfg.rimInsideFree;
+    this.uniforms.uSmooth.value = this.cfg.rimFieldSmooth;
+    this.uniforms.uRimSlurp.value = this.cfg.rimSlurp;
+    this.uniforms.uQuadPx.value = this._quadPx;
   }
 
   /**
@@ -265,6 +338,7 @@ export class WaterCursor {
     this.cfg.recoilPushPx = next.recoilPushPx;
     this.cfg.rimSlurpBand = next.rimSlurpBand;
     this.cfg.snapThreshold = next.snapThreshold;
+    this._syncRimKnobs();
     return this.getRimParams();
   }
 
@@ -291,15 +365,18 @@ export class WaterCursor {
     this.camera.position.set(0, 0, 1);
     this.camera.updateProjectionMatrix();
     this.mesh.scale.set(this._quadPx, this._quadPx, 1);
+    if (this.uniforms?.uQuadPx) this.uniforms.uQuadPx.value = this._quadPx;
   }
 
   render() {
     if (!this._initialized || this._disposed) return;
-    if (this.uniforms.uPresence.value < 0.001) return;
 
     try {
       const gl = this.renderer.getContext?.();
       if (gl && gl.isContextLost?.()) return;
+
+      this._resolveRimState();
+      if (this.uniforms.uPresence.value < 0.001) return;
 
       const prevAutoClear = this.renderer.autoClear;
       const prevTarget = this.renderer.getRenderTarget();
@@ -336,18 +413,106 @@ export class WaterCursor {
 
     this.mesh.geometry.dispose();
     this.material.dispose();
+    this._rimMat?.dispose();
+    this._rimRead?.dispose();
+    this._rimWrite?.dispose();
+    this._sdfDummy?.dispose();
+  }
+
+  /** Zero the rim state so the first damp step does not inherit garbage texels. */
+  _clearRimTarget(target) {
+    const renderer = this.renderer;
+    const prevTarget = renderer.getRenderTarget();
+    const prevColor = new THREE.Color();
+    const prevAlpha = renderer.getClearAlpha();
+    renderer.getClearColor(prevColor);
+    renderer.setRenderTarget(target);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear(true, false, false);
+    renderer.setClearColor(prevColor, prevAlpha);
+    renderer.setRenderTarget(prevTarget);
+  }
+
+  /**
+   * SDF taps + response curves into a 2×1 float target. Never readPixels.
+   */
+  _resolveRimState() {
+    const now = performance.now();
+    this._rimDtSec = clampDeltaSeconds(now - this._rimClock);
+    this._rimClock = now;
+    this.uniforms.uDt.value = this._rimDtSec;
+
+    const read = this._rimRead;
+    const write = this._rimWrite;
+    this.uniforms.uRimPrev.value = read.texture;
+
+    const renderer = this.renderer;
+    const prevTarget = renderer.getRenderTarget();
+    const prevAutoClear = renderer.autoClear;
+    const prevTone = renderer.toneMapping;
+    try {
+      renderer.toneMapping = THREE.NoToneMapping;
+      renderer.setRenderTarget(write);
+      renderer.autoClear = true;
+      renderer.clear();
+      renderer.render(this._rimScene, this._rimCam);
+      this._rimRead = write;
+      this._rimWrite = read;
+      this.uniforms.uRimState.value = write.texture;
+    } finally {
+      renderer.toneMapping = prevTone;
+      renderer.autoClear = prevAutoClear;
+      renderer.setRenderTarget(prevTarget);
+    }
   }
 
   _onPointerMove(event) {
     if (this._disposed) return;
     if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
-    this._pointer.x = event.clientX;
-    this._pointer.y = event.clientY;
-    this._syncViewportPresence(this._isPointerInViewport(event.clientX, event.clientY));
+    const x = event.clientX;
+    const y = event.clientY;
+    const inside = this._isPointerInViewport(x, y);
+    if (!this._hasPointerSample) {
+      if (!inside) return;
+      this.appearAt(x, y);
+      return;
+    }
+    this._pointer.x = x;
+    this._pointer.y = y;
+    this._syncViewportPresence(inside);
   }
 
   _isPointerInViewport(x, y) {
-    return x >= 0 && x <= this._width && y >= 0 && y <= this._height;
+    return (
+      Number.isFinite(x) &&
+      Number.isFinite(y) &&
+      x >= 0 &&
+      x <= this._width &&
+      y >= 0 &&
+      y <= this._height
+    );
+  }
+
+  /**
+   * Pop the blob onto a known CSS-pixel pointer (boot sample or first enter).
+   * Slight positional / stretch recoil — never spawns at screen center.
+   * @param {number} x
+   * @param {number} y
+   * @returns {boolean}
+   */
+  appearAt(x, y) {
+    if (this._disposed || !this._initialized) return false;
+    if (!this._isPointerInViewport(x, y)) return false;
+
+    this._hasPointerSample = true;
+    this._pointer.set(x, y);
+    // Seed a short offset so the follower + presence spring read as a pop/recoil.
+    const kick = 12;
+    this._pos.set(x + kick * 0.4, y - kick * 0.25);
+    this._velocity.set(-kick * 14, kick * 6);
+    this._omega = 0.35;
+    this._syncViewportPresence(true);
+    return true;
   }
 
   _onDocumentLeave() {
@@ -357,6 +522,7 @@ export class WaterCursor {
 
   _onDocumentEnter() {
     if (this._disposed) return;
+    if (!this._hasPointerSample) return;
     this._syncViewportPresence(this._isPointerInViewport(this._pointer.x, this._pointer.y));
   }
 
@@ -371,16 +537,38 @@ export class WaterCursor {
   }
 
   /**
-   * Shrink + fade out when the pointer leaves the viewport; grow back on return.
+   * Hide / shrink the blob while the pointer is over DOM UI chrome
+   * (Mail panel, case study modal). Restores the system cursor so chrome
+   * stays usable; re-hides native cursor when returning to open stage.
+   * @param {boolean} suppressed
+   */
+  setUiChromeSuppressed(suppressed) {
+    if (this._disposed || !this._initialized) return;
+    const next = Boolean(suppressed);
+    if (this._uiChromeSuppressed === next) return;
+    this._uiChromeSuppressed = next;
+    if (next) {
+      this._restoreNativeCursor();
+    } else if (this._inViewport) {
+      this._applyHiddenNativeCursor();
+    }
+    this._syncViewportPresence(this._inViewport);
+  }
+
+  /**
+   * Shrink + fade out when the pointer leaves the viewport (or UI chrome);
+   * grow back when returning to open stage space.
    * @param {boolean} inside
    */
   _syncViewportPresence(inside) {
-    if (this._inViewport === inside) return;
-    this._inViewport = inside;
+    this._inViewport = Boolean(inside);
+    const show = this._inViewport && !this._uiChromeSuppressed;
+    if (this._presenceTargetShow === show) return;
+    this._presenceTargetShow = show;
 
     this._presenceTween?.kill();
 
-    if (!inside) {
+    if (!show) {
       this._presenceUseSpring = false;
       this._velocity.multiplyScalar(0.35);
       this._omega *= 0.35;
@@ -476,40 +664,34 @@ export class WaterCursor {
       this._syncViewportPresence(false);
       return;
     }
+    if (!this._hasPointerSample) return;
     this._syncViewportPresence(this._isPointerInViewport(this._pointer.x, this._pointer.y));
   }
 
   /** @param {number} _time @param {number} deltaTimeMs — gsap.ticker delta (MILLISECONDS). */
   _tick(_time, deltaTimeMs) {
     if (!this._initialized || this._disposed) return;
+    // Stay fully dormant until we know a real pointer location (no center spawn).
+    if (!this._hasPointerSample) {
+      this.uniforms.uPresence.value = 0;
+      return;
+    }
 
     const dt = clampDeltaSeconds(deltaTimeMs);
     this.uniforms.uTime.value = performance.now() * 0.001;
 
-    const rimSmooth = this.cfg.rimFieldSmooth;
-    this._rimBlow = damp(this._rimBlow, this._rimTargetBlow, rimSmooth, dt);
-    this._rimSlurp = damp(this._rimSlurp, this._rimTargetSlurp, rimSmooth, dt);
-    this._rimNeck = damp(this._rimNeck, this._rimTargetNeck, rimSmooth, dt);
-    this._rimPushX = damp(this._rimPushX, this._rimTargetPushX, rimSmooth, dt);
-    this._rimPushY = damp(this._rimPushY, this._rimTargetPushY, rimSmooth, dt);
-    {
-      let diff = this._rimTargetTipAngle - this._rimTipAngle;
-      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      this._rimTipAngle = wrapAngle(this._rimTipAngle + diff * (1 - Math.exp(-rimSmooth * dt)));
-    }
-
-    const blow = this.deformEnabled ? this._rimBlow : 0;
-    const slurp = this.deformEnabled ? this._rimSlurp : 0;
-    const neck = this.deformEnabled ? this._rimNeck : 0;
-    // Positional recoil along -gradient (away from glitch); released on cross
-    const recoilMul = this.deformEnabled ? blow * (1 - slurp * 0.85) : 0;
-    const followMul = THREE.MathUtils.lerp(1, this.cfg.rimFollowDamp, blow * 0.55);
-    const followRate = this.cfg.followRate * followMul;
+    const guided =
+      this._diskShear &&
+      Number.isFinite(this._diskShear.guideX) &&
+      Number.isFinite(this._diskShear.guideY);
+    const followRate = guided ? 18 : this.cfg.followRate;
+    const targetX = guided ? this._diskShear.guideX : this._pointer.x;
+    const targetY = guided ? this._diskShear.guideY : this._pointer.y;
 
     const prevX = this._pos.x;
     const prevY = this._pos.y;
-    this._pos.x = damp(this._pos.x, this._pointer.x, followRate, dt);
-    this._pos.y = damp(this._pos.y, this._pointer.y, followRate, dt);
+    this._pos.x = damp(this._pos.x, targetX, followRate, dt);
+    this._pos.y = damp(this._pos.y, targetY, followRate, dt);
 
     const vx = (this._pos.x - prevX) / dt;
     const vy = (this._pos.y - prevY) / dt;
@@ -518,16 +700,9 @@ export class WaterCursor {
 
     this._updateDirection(dt);
 
-    // Rim couple orients the teardrop via uSlurpAngle alone — do NOT yank motion
-    // heading toward the SDF normal (that spun the blob instead of flowing through).
     if (this.deformEnabled) {
-      const rimAmt = Math.max(blow, slurp, neck);
-      if (rimAmt > 1e-3) {
-        this._omega *= Math.exp(-14 * rimAmt * dt);
-      }
-
       const turn = Math.min(Math.abs(this._omega) / this.cfg.omegaMax, 1);
-      this._waveSpring.target = this.cfg.waveAmp * turn * (1 - Math.max(blow, slurp) * 0.55);
+      this._waveSpring.target = this.cfg.waveAmp * turn;
       const waveAmp = Math.min(Math.max(this._waveSpring.update(dt), 0), MAX_WAVE_AMP);
       this._wavePhase = wrapAngle(this._wavePhase + this._omega * this.cfg.waveTravel * dt);
 
@@ -536,10 +711,12 @@ export class WaterCursor {
 
       const speedPx = this._velocity.length();
       const speed = Math.min(speedPx / this.cfg.maxSpeed, 1);
+      const onFlow = (this._diskShear?.strength ?? 0) > 0 && speedPx < this.cfg.directionSpeedThreshold;
       const shapedSpeed = Math.pow(Math.max(speed, 0), this.cfg.speedResponseExponent);
 
-      // Mild motion stretch only — blow shape is shader teardrop, not spring stretch
-      this._stretchSpring.target = this.cfg.maxStretch * shapedSpeed * (1 - blow * 0.75);
+      this._stretchSpring.target = onFlow
+        ? Math.max(this.cfg.maxStretch * shapedSpeed, 0.34)
+        : this.cfg.maxStretch * shapedSpeed;
       this._stretchSpring.update(dt);
       this._stretch = THREE.MathUtils.clamp(
         this._stretchSpring.value,
@@ -559,35 +736,63 @@ export class WaterCursor {
 
     this._updatePresenceSpring(dt);
 
+    this._applyDiskShear(dt);
+
     this.uniforms.uStretch.value = this._stretch;
     this.uniforms.uAngle.value = this._angle;
+    this.uniforms.uGravity.value = this.deformEnabled ? (this._diskShear?.strength ?? 0) : 0;
+    this.uniforms.uCurve.value = this.deformEnabled ? (this._diskShear?.curve ?? 0) : 0;
     this.uniforms.uRimPress.value = 1;
-    this.uniforms.uBlow.value = blow;
-    this.uniforms.uSlurp.value = slurp * this.cfg.rimSlurp;
-    this.uniforms.uNeck.value = neck;
-    this.uniforms.uSlurpAngle.value = this._rimTipAngle;
-    this.mesh.position.set(
-      this._pos.x + this._rimPushX * recoilMul,
-      this._pos.y + this._rimPushY * recoilMul,
-      0
-    );
+    this.mesh.position.set(this._pos.x, this._pos.y, 0);
+  }
+
+  /**
+   * Accretion-disk spiral. Strength under 1 so the pointer still leads.
+   * @param {{ strength: number, angle: number } | null} shear
+   */
+  setDiskShear(shear) {
+    if (!shear || !(shear.strength > 0) || !Number.isFinite(shear.angle)) {
+      this._diskShear = null;
+      return;
+    }
+    this._diskShear = {
+      strength: Math.min(shear.strength, 0.92),
+      angle: shear.angle,
+      guideX: shear.guideX,
+      guideY: shear.guideY,
+      curve: Number.isFinite(shear.curve) ? shear.curve : 0
+    };
+  }
+
+  /**
+   * Heading follows the disk flow. A still pointer locks to that tangent
+   * instead of coasting — coasting was what snapped the blob vertical.
+   * The track guide owns translation, so this does not drift the position.
+   * @param {number} dt
+   */
+  _applyDiskShear(dt) {
+    const shear = this._diskShear;
+    const strength = shear?.strength ?? 0;
+    if (!(strength > 0) || !this.deformEnabled) return;
+    const speedPx = this._velocity.length();
+    if (speedPx < this.cfg.directionSpeedThreshold) {
+      this._angle = shear.angle;
+      this._omega = 0;
+      return;
+    }
+    const speed = Math.min(speedPx / 900, 1);
+    const steer = strength * (1 - speed * 0.6);
+    let diff = shear.angle - this._angle;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    this._angle = wrapAngle(this._angle + diff * (1 - Math.exp(-10 * steer * dt)));
   }
 
   /**
    * Heading tracks velocity while moving; coasts on angular momentum when stopped.
    * Radial deformations spring; rotation has inertia — no return force.
-   * During rim couple, freeze heading so edge flow doesn't spin the blob.
+   * Rim teardrop axis is the GPU tip angle, not this heading.
    */
   _updateDirection(dt) {
-    const rimAmt = this.deformEnabled
-      ? Math.max(this._rimBlow, this._rimSlurp, this._rimNeck)
-      : 0;
-    if (rimAmt > 0.2) {
-      this._omega *= Math.exp(-18 * rimAmt * dt);
-      this._angle = wrapAngle(this._angle);
-      return;
-    }
-
     const speedPx = this._velocity.length();
 
     if (speedPx > this.cfg.directionSpeedThreshold) {
@@ -622,7 +827,11 @@ export class WaterCursor {
     if (!bad) return true;
 
     console.warn("[WaterCursor] State corruption recovered");
-    this._pos.copy(this._pointer);
+    if (this._hasPointerSample && Number.isFinite(this._pointer.x)) {
+      this._pos.copy(this._pointer);
+    } else {
+      this._pos.set(0, 0);
+    }
     this._velocity.set(0, 0);
     this._angle = 0;
     this._omega = 0;
@@ -630,11 +839,17 @@ export class WaterCursor {
     this._wavePhase = 0;
     this._stretchSpring.reset();
     this._waveSpring.reset();
-    this._presenceSpring.target = 1;
-    this._presenceSpring.value = 1;
+    if (this._hasPointerSample && this._inViewport) {
+      this._presenceSpring.target = 1;
+      this._presenceSpring.value = 1;
+      this.uniforms.uPresence.value = 1;
+    } else {
+      this._presenceSpring.target = 0;
+      this._presenceSpring.value = 0;
+      this.uniforms.uPresence.value = 0;
+    }
     this._presenceSpring.velocity = 0;
     this._presenceUseSpring = false;
-    this.uniforms.uPresence.value = 1;
     return true;
   }
 }

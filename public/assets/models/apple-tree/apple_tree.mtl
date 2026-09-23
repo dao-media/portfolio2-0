@@ -1,0 +1,37 @@
+# Working MTL for scene/export — masters/apple-tree/apple_tree.mtl left untouched.
+# Maps wired to textures shipped beside the OBJ.
+
+newmtl apple
+Ns 225.000000
+Ka 1.000000 1.000000 1.000000
+Kd 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.0 0.0 0.0
+Ni 1.000000
+d 1.000000
+illum 2
+map_Kd apple_texture_2.jpg
+
+newmtl bark
+Ns 225.000000
+Ka 1.000000 1.000000 1.000000
+Kd 1.000000 1.000000 1.000000
+Ks 0.000000 0.000000 0.000000
+Ke 0.0 0.0 0.0
+Ni 1.000000
+d 1.000000
+illum 1
+map_Kd apple_tree_bark.jpg
+map_Bump apple_tree_bark_NORM.jpg
+
+newmtl leaf
+Ns 225.000000
+Ka 1.000000 1.000000 1.000000
+Kd 1.000000 1.000000 1.000000
+Ks 0.085271 0.085271 0.085271
+Ke 0.0 0.0 0.0
+Ni 1.000000
+d 1.000000
+illum 2
+map_Kd leaf.jpg
+map_Bump leaf_NORM.jpg

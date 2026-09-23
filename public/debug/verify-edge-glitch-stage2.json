@@ -1,0 +1,88 @@
+{
+  "edgeUv": {
+    "u": 0.443359375,
+    "v": 0.166015625,
+    "d": 0.01991804502904415
+  },
+  "insideUv": {
+    "u": 0.494140625,
+    "v": 0.416015625,
+    "d": -0.09219080954790115
+  },
+  "far": {
+    "bandPixels": 25147,
+    "debug": {
+      "stage": 2,
+      "enabled": true,
+      "applied": true,
+      "csmCount": 1,
+      "bandOuter": 0.045,
+      "cursorOuter": 0.11,
+      "sdfSize": 256,
+      "pointerLive": true,
+      "cursorUv": {
+        "x": 0.04000000059604647,
+        "y": 0.94
+      },
+      "dCursor": 0.5072262287139893,
+      "cursorGate": 0,
+      "approach": "Stage 2: outside band × cursorGate from SDF@pointer (0 inside / far; 1 near outside edge). Overlay + CSM share the gate.",
+      "overlayVisible": true
+    }
+  },
+  "mid": {
+    "bandPixels": 20917,
+    "debug": {
+      "stage": 2,
+      "enabled": true,
+      "applied": true,
+      "csmCount": 1,
+      "bandOuter": 0.045,
+      "cursorOuter": 0.11,
+      "sdfSize": 256,
+      "pointerLive": true,
+      "cursorUv": {
+        "x": 0.494140625,
+        "y": 0.416015625
+      },
+      "dCursor": -0.083048015832901,
+      "cursorGate": 0,
+      "approach": "Stage 2: outside band × cursorGate from SDF@pointer (0 inside / far; 1 near outside edge). Overlay + CSM share the gate.",
+      "overlayVisible": true
+    }
+  },
+  "near": {
+    "bandPixels": 130040,
+    "debug": {
+      "stage": 2,
+      "enabled": true,
+      "applied": true,
+      "csmCount": 1,
+      "bandOuter": 0.045,
+      "cursorOuter": 0.11,
+      "sdfSize": 256,
+      "pointerLive": true,
+      "cursorUv": {
+        "x": 0.443359375,
+        "y": 0.166015625
+      },
+      "dCursor": 0.03221176564693451,
+      "cursorGate": 0.7929665124699665,
+      "approach": "Stage 2: outside band × cursorGate from SDF@pointer (0 inside / far; 1 near outside edge). Overlay + CSM share the gate.",
+      "overlayVisible": true
+    }
+  },
+  "shots": {
+    "far": "public/debug/verify-edge-glitch-stage2-far.png",
+    "inside": "public/debug/verify-edge-glitch-stage2-inside.png",
+    "edge": "public/debug/verify-edge-glitch-stage2-edge.png"
+  },
+  "gates": {
+    "farGateOff": true,
+    "insideGateOff": true,
+    "edgeGateOn": true,
+    "farQuiet": true,
+    "insideQuieterThanEdge": true,
+    "edgeActive": true
+  }
+}

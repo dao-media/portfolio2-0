@@ -1,0 +1,22 @@
+{
+  "popIn": {
+    "trigger": "introComplete/land",
+    "msLandToFadeDone": 1183,
+    "maxBloomDuringSampledFade": 1.2,
+    "bloomHeldOffDuringFade": true
+  },
+  "deadStill": {
+    "avg": 10.72,
+    "maxDev": 0,
+    "maxFf": 0,
+    "bloom": 1.2,
+    "fade": 1
+  },
+  "light": {
+    "r": 0.314,
+    "g": 0.991,
+    "b": 0.016,
+    "phase": 0.002
+  },
+  "confirmNote": "Pre-fix isolated A/B was inconclusive (fog fill < bloom threshold); fix still holds bloom across opacity ramp per C05. Pop-in arms at land."
+}
