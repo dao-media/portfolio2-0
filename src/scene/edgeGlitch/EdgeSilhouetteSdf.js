@@ -299,13 +299,27 @@ export class EdgeSilhouetteSdf {
       mesh.layers.enable(EDGE_GLITCH_MASK_LAYER);
     }
 
-    camera.layers.set(EDGE_GLITCH_MASK_LAYER);
+    // Clone so the beauty camera's layer mask never changes. A mask that
+    // excludes every light compiles a second program for each surface.
+    if (!this._maskCam) this._maskCam = camera.clone();
+    this._maskCam.position.copy(camera.position);
+    this._maskCam.quaternion.copy(camera.quaternion);
+    this._maskCam.scale.copy(camera.scale);
+    this._maskCam.fov = camera.fov;
+    this._maskCam.aspect = camera.aspect;
+    this._maskCam.near = camera.near;
+    this._maskCam.far = camera.far;
+    this._maskCam.updateProjectionMatrix();
+    this._maskCam.layers.set(EDGE_GLITCH_MASK_LAYER);
+    this._maskCam.updateMatrixWorld(true);
     scene.overrideMaterial = this.maskMat;
     renderer.setRenderTarget(this.maskRT);
     renderer.autoClear = true;
     renderer.setClearColor(0x000000, 1);
     renderer.clear();
-    renderer.render(scene, camera);
+    const maskT0 = performance.now();
+    renderer.render(scene, this._maskCam);
+    this.lastMaskMs = performance.now() - maskT0;
 
     // Bust-only packed depth (same layer-4 set) for occlusion vs FogDepthCapture.
     const prevTone = renderer.toneMapping;
@@ -314,7 +328,9 @@ export class EdgeSilhouetteSdf {
     renderer.setRenderTarget(this.depthRT);
     renderer.setClearColor(0x000000, 1);
     renderer.clear(true, true, false);
-    renderer.render(scene, camera);
+    const depthT0 = performance.now();
+    renderer.render(scene, this._maskCam);
+    this.lastDepthMs = performance.now() - depthT0;
     renderer.toneMapping = prevTone;
 
     scene.overrideMaterial = prevOverride;

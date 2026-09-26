@@ -448,53 +448,53 @@ export class DuoMailOverlay {
       this._beams.classList.remove("is-on");
       this._pulses?.classList.remove("is-on");
       this._beams.style.setProperty("--mail-beams", "0");
+      this._beamSig = null;
       return;
     }
 
-    /** Mail end of rails: final square during entrance, else live layout. */
     const panelTarget =
       this._entranceActive && this._entranceTo ? this._entranceTo : this._layout;
-    const pairs = buildCornerPairs(this._duoRect, panelTarget);
+    fillCornerPairs(this._duoRect, panelTarget, _PAIRS);
 
     const vw = window.innerWidth;
     const vh = window.innerHeight;
+    const tipT = this._entranceActive
+      ? Math.min(1, Math.max(0.001, this._pulseProgress))
+      : 1;
+    const beamAmt = this._entranceActive
+      ? this._beamStrength ?? 0
+      : this._open
+        ? 1
+        : 0;
+    if (this._beamSigMatches(vw, vh, tipT, beamAmt)) {
+      return;
+    }
+    this._beamSigStore(vw, vh, tipT, beamAmt);
+
     this._beams.setAttribute("viewBox", `0 0 ${vw} ${vh}`);
     this._beams.setAttribute("width", String(vw));
     this._beams.setAttribute("height", String(vh));
 
-    // During entrance, beam tips track the traveling shape (rails grow with it).
-    const tipT = this._entranceActive
-      ? Math.min(1, Math.max(0.001, this._pulseProgress))
-      : 1;
-    const tipQuad = lerpCornerQuad(pairs, tipT);
+    fillLerpQuad(_PAIRS, tipT, _TIP);
+    fillDuoCorners(this._duoRect, _DUO);
 
     if (this._frustum) {
-      const duo = duoFaceCorners(this._duoRect);
-      // Frustum = Duo face → current tip (not full Mail until tip arrives).
-      this._frustum.setAttribute(
-        "points",
-        [
-          `${duo[0][0]},${duo[0][1]}`,
-          `${duo[1][0]},${duo[1][1]}`,
-          `${duo[2][0]},${duo[2][1]}`,
-          `${duo[3][0]},${duo[3][1]}`,
-          `${tipQuad[3][0]},${tipQuad[3][1]}`,
-          `${tipQuad[2][0]},${tipQuad[2][1]}`,
-          `${tipQuad[1][0]},${tipQuad[1][1]}`,
-          `${tipQuad[0][0]},${tipQuad[0][1]}`
-        ].join(" ")
-      );
+      this._frustum.setAttribute("points", pointsAttr8(_DUO, _TIP));
     }
 
-    const applyPair = (line, i, strokeUrl) => {
+    const applyPair = (line, i) => {
       if (!line) return;
-      const [x1, y1] = [pairs[i][0], pairs[i][1]];
-      const [x2, y2] = tipQuad[i];
+      const pair = _PAIRS[i];
+      const tip = _TIP[i];
+      const x1 = pair[0];
+      const y1 = pair[1];
+      const x2 = tip[0];
+      const y2 = tip[1];
       line.setAttribute("x1", String(x1));
       line.setAttribute("y1", String(y1));
       line.setAttribute("x2", String(x2));
       line.setAttribute("y2", String(y2));
-      if (strokeUrl) line.setAttribute("stroke", strokeUrl);
+      line.setAttribute("stroke", _BEAM_STROKES[i]);
       const grad = this._beamGrads[i];
       if (grad) {
         grad.setAttribute("x1", String(x1));
@@ -504,21 +504,47 @@ export class DuoMailOverlay {
       }
     };
 
-    this._beamHalos.forEach((line, i) =>
-      applyPair(line, i, `url(#duo-mail-beam-grad-${i})`)
-    );
-    this._beamCores.forEach((line, i) =>
-      applyPair(line, i, `url(#duo-mail-beam-grad-${i})`)
-    );
+    for (let i = 0; i < this._beamHalos.length; i += 1) applyPair(this._beamHalos[i], i);
+    for (let i = 0; i < this._beamCores.length; i += 1) applyPair(this._beamCores[i], i);
 
-    const beamAmt = this._entranceActive
-      ? this._beamStrength ?? 0
-      : this._open
-        ? 1
-        : 0;
     this._beams.style.setProperty("--mail-beams", beamAmt.toFixed(3));
     this._beams.classList.toggle("is-on", beamAmt > 0.01);
-    this._syncPulses(pairs);
+    this._syncPulses(_PAIRS);
+  }
+
+  _beamSigMatches(vw, vh, tipT, beamAmt) {
+    const sig = this._beamSig;
+    if (!sig) return false;
+    if (sig[0] !== vw || sig[1] !== vh || sig[2] !== tipT || sig[3] !== beamAmt) return false;
+    for (let i = 0; i < 4; i += 1) {
+      const pair = _PAIRS[i];
+      const base = 4 + i * 4;
+      if (
+        sig[base] !== pair[0] ||
+        sig[base + 1] !== pair[1] ||
+        sig[base + 2] !== pair[2] ||
+        sig[base + 3] !== pair[3]
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  _beamSigStore(vw, vh, tipT, beamAmt) {
+    const sig = this._beamSig || (this._beamSig = new Float64Array(20));
+    sig[0] = vw;
+    sig[1] = vh;
+    sig[2] = tipT;
+    sig[3] = beamAmt;
+    for (let i = 0; i < 4; i += 1) {
+      const pair = _PAIRS[i];
+      const base = 4 + i * 4;
+      sig[base] = pair[0];
+      sig[base + 1] = pair[1];
+      sig[base + 2] = pair[2];
+      sig[base + 3] = pair[3];
+    }
   }
 
   /**
@@ -705,6 +731,17 @@ export class DuoMailOverlay {
   }
 
   open() {
+    console.info("[DuoMailOverlay] open", {
+      hasRoot: Boolean(this.root),
+      hidden: this.root?.hidden ?? null,
+      open: this._open
+    });
+    window.__mailOpenLog = window.__mailOpenLog || [];
+    window.__mailOpenLog.push({
+      t: Math.round(performance.now()),
+      hasRoot: Boolean(this.root),
+      hidden: this.root?.hidden ?? null
+    });
     if (!this.root) return;
     this._open = true;
     this._userPlaced = false;
@@ -721,9 +758,22 @@ export class DuoMailOverlay {
     this._shell?.classList.remove("is-visible");
     this._shell?.classList.add("is-entering");
     if (this._shell) {
-      this._shell.style.opacity = "0";
-      this._shell.style.transform = "scale(0.96)";
-      this._shell.style.pointerEvents = "none";
+      this._shell.style.visibility = "visible";
+      this._shell.style.opacity = "1";
+      this._shell.style.transform = "scale(1)";
+      this._shell.style.pointerEvents = "auto";
+    }
+    if (this._duoRect?.width > 1) {
+      const dest = this._layoutCentered();
+      this._entranceTo = dest;
+      this._layout = dest;
+      this._entranceT = DUO_MAIL_ENTRANCE_SEC * 0.86;
+      this._pulseProgress = 0.86;
+      this._applyLayout();
+    } else {
+      this._layout = this._layoutCentered();
+      this._applyLayout();
+      this._finishEntrance();
     }
     this._beams?.style.setProperty("--mail-beams", "0");
     this.onProjectionDirty?.();
@@ -740,6 +790,7 @@ export class DuoMailOverlay {
     this._entranceTo = null;
     this._layout = null;
     this._duoRect = null;
+    this._beamSig = null;
     this._beams?.classList.remove("is-on");
     this._pulses?.classList.remove("is-on");
     this._beams?.style.setProperty("--mail-beams", "0");
@@ -757,6 +808,27 @@ export class DuoMailOverlay {
       this._shell.style.pointerEvents = "";
     }
     this.root.hidden = true;
+  }
+
+  _ensureDuoRect() {
+    if (this._duoRect) return this._duoRect;
+    this._duoRect = {
+      left: 0,
+      top: 0,
+      width: 0,
+      height: 0,
+      corners: [
+        [0, 0],
+        [0, 0],
+        [0, 0],
+        [0, 0]
+      ],
+      measure: "",
+      normal: null,
+      _seen: false,
+      _hasCorners: false
+    };
+    return this._duoRect;
   }
 
   get isOpen() {
@@ -785,21 +857,45 @@ export class DuoMailOverlay {
    */
   setScreenRect(rect) {
     if (!this._shell) return;
-    if (!rect || !this._open) {
-      this._shell.style.visibility = this._open ? "visible" : "hidden";
+    if (!rect) {
+      if (this._open) this._shell.style.visibility = "visible";
       this._beams?.classList.remove("is-on");
       this._pulses?.classList.remove("is-on");
       return;
     }
-    this._duoRect = {
-      left: rect.left,
-      top: rect.top,
-      width: rect.width,
-      height: rect.height,
-      corners: rect.corners ? rect.corners.map((c) => [c[0], c[1]]) : null,
-      measure: rect.measure,
-      normal: rect.normal
-    };
+    this._duoRect = this._ensureDuoRect();
+    const slot = this._duoRect;
+    const nextMeasure = rect.measure || "";
+    const unchanged =
+      !this._entranceActive &&
+      Math.abs(slot.left - rect.left) < 0.5 &&
+      Math.abs(slot.top - rect.top) < 0.5 &&
+      Math.abs(slot.width - rect.width) < 0.5 &&
+      Math.abs(slot.height - rect.height) < 0.5 &&
+      slot.measure === nextMeasure &&
+      slot._seen;
+    if (unchanged) return;
+
+    slot.left = rect.left;
+    slot.top = rect.top;
+    slot.width = rect.width;
+    slot.height = rect.height;
+    slot.measure = nextMeasure;
+    slot.normal = rect.normal || null;
+    slot._seen = true;
+    const corners = rect.corners;
+    if (Array.isArray(corners) && corners.length === 4) {
+      for (let i = 0; i < 4; i += 1) {
+        slot.corners[i][0] = corners[i][0];
+        slot.corners[i][1] = corners[i][1];
+      }
+      slot._hasCorners = true;
+    } else {
+      writeRectCorners(slot, slot.corners);
+      slot._hasCorners = false;
+    }
+
+    if (!this._open) return;
 
     // After drag/resize, keep placement but still update projection beams.
     if (this._userPlaced) {
@@ -840,6 +936,90 @@ export class DuoMailOverlay {
       this.onProjectionDirty?.();
     }
   }
+}
+
+const _PAIRS = [
+  [0, 0, 0, 0],
+  [0, 0, 0, 0],
+  [0, 0, 0, 0],
+  [0, 0, 0, 0]
+];
+const _TIP = [
+  [0, 0],
+  [0, 0],
+  [0, 0],
+  [0, 0]
+];
+const _DUO = [
+  [0, 0],
+  [0, 0],
+  [0, 0],
+  [0, 0]
+];
+const _PANEL = [
+  [0, 0],
+  [0, 0],
+  [0, 0],
+  [0, 0]
+];
+const _BEAM_STROKES = [
+  "url(#duo-mail-beam-grad-0)",
+  "url(#duo-mail-beam-grad-1)",
+  "url(#duo-mail-beam-grad-2)",
+  "url(#duo-mail-beam-grad-3)"
+];
+
+function writeRectCorners(r, out) {
+  out[0][0] = r.left;
+  out[0][1] = r.top;
+  out[1][0] = r.left + r.width;
+  out[1][1] = r.top;
+  out[2][0] = r.left + r.width;
+  out[2][1] = r.top + r.height;
+  out[3][0] = r.left;
+  out[3][1] = r.top + r.height;
+}
+
+function fillDuoCorners(d, out) {
+  if (d?._hasCorners && Array.isArray(d.corners) && d.corners.length === 4) {
+    for (let i = 0; i < 4; i += 1) {
+      out[i][0] = d.corners[i][0];
+      out[i][1] = d.corners[i][1];
+    }
+    return out;
+  }
+  writeRectCorners(d, out);
+  return out;
+}
+
+function fillCornerPairs(duoRect, panel, out) {
+  fillDuoCorners(duoRect, _DUO);
+  if (Array.isArray(panel)) {
+    for (let i = 0; i < 4; i += 1) {
+      _PANEL[i][0] = panel[i][0];
+      _PANEL[i][1] = panel[i][1];
+    }
+  } else {
+    writeRectCorners(panel, _PANEL);
+  }
+  for (let i = 0; i < 4; i += 1) {
+    out[i][0] = _DUO[i][0];
+    out[i][1] = _DUO[i][1];
+    out[i][2] = _PANEL[i][0];
+    out[i][3] = _PANEL[i][1];
+  }
+}
+
+function fillLerpQuad(pairs, t, out) {
+  for (let i = 0; i < 4; i += 1) {
+    const pair = pairs[i];
+    out[i][0] = pair[0] + (pair[2] - pair[0]) * t;
+    out[i][1] = pair[1] + (pair[3] - pair[1]) * t;
+  }
+}
+
+function pointsAttr8(duo, tip) {
+  return `${duo[0][0]},${duo[0][1]} ${duo[1][0]},${duo[1][1]} ${duo[2][0]},${duo[2][1]} ${duo[3][0]},${duo[3][1]} ${tip[3][0]},${tip[3][1]} ${tip[2][0]},${tip[2][1]} ${tip[1][0]},${tip[1][1]} ${tip[0][0]},${tip[0][1]}`;
 }
 
 /**

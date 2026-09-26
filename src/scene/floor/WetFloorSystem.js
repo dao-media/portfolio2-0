@@ -36,6 +36,13 @@ export class WetFloorSystem {
     this._probeSize = 0;
     /** @type {number | null} Governor cadence override (null = config). */
     this._probeEveryNOverride = null;
+    this._restEveryN = null;
+    this._restProbeSize = null;
+    /** Settled cube is one render per arrival, then frozen. */
+    this._bakeOnce = true;
+    this._bakePending = false;
+    this._prebaked = false;
+    this._bakes = 0;
     /** @type {THREE.WebGLCubeRenderTarget | null} */
     this._cubeTarget = null;
     /** @type {THREE.CubeCamera | null} */
@@ -103,9 +110,7 @@ uniform float uBubbleFeather;`
 #include <opaque_fragment>`
         );
     };
-    const priorKey = mat.customProgramCacheKey?.bind(mat);
-    mat.customProgramCacheKey = () =>
-      `wet-floor-bubble-v1|${priorKey?.() ?? "std"}`;
+    mat.customProgramCacheKey = () => "wet-floor-bubble-v1";
     mat.needsUpdate = true;
   }
 
@@ -153,11 +158,80 @@ uniform float uBubbleFeather;`
 
   /**
    * Governor override for CubeCamera cadence (null = use wetFloorConfig).
+   * A rest-fidelity cadence is a floor: the governor can only skip more frames.
    * @param {number | null} n
    */
   setProbeEveryN(n) {
     this._probeEveryNOverride =
       n == null || !Number.isFinite(n) ? null : Math.max(1, Math.round(n));
+  }
+
+  /**
+   * Settled rest probe. One cube render per arrival, then the map stays frozen.
+   * @param {{ probeSize?: number } | null} opts
+   */
+  setRestProbe(opts) {
+    if (!opts) return;
+    this.armSettleBake(opts);
+  }
+
+  /**
+   * Bake-once-on-settle. The next update() renders the cube a single time.
+   * A prebake from the black-hole warm is consumed by the first arrival
+   * instead of rendering again.
+   * @param {{ probeSize?: number, prebaked?: boolean }} [opts]
+   */
+  armSettleBake(opts = {}) {
+    this._bakeOnce = true;
+    if (Number.isFinite(opts.probeSize)) {
+      const size = Math.round(opts.probeSize);
+      const before = this._probeSize;
+      this._ensureProbe(size);
+      if (this._probeSize !== before && this._cubeTarget && !this._matte) {
+        this.material.envMap = this._cubeTarget.texture;
+        this.material.needsUpdate = true;
+      }
+    }
+    if (opts.prebaked) {
+      this._prebaked = false;
+      this._bakePending = false;
+      return;
+    }
+    if (this._prebaked) {
+      this._prebaked = false;
+      this._bakePending = false;
+      return;
+    }
+    this._bakePending = true;
+  }
+
+  /** Hop — do not render. The last cube stays on the material. */
+  clearSettleBake() {
+    this._bakePending = false;
+  }
+
+  /** Warm already rendered the cube. Settling must not arm another bake. */
+  consumePrebake() {
+    if (!this._prebaked) return;
+    this._prebaked = false;
+    this._bakePending = false;
+  }
+
+  /** Black-hole warm already rendered the cube. First settle must not repeat it. */
+  markPrebaked() {
+    this._bakeOnce = true;
+    this._prebaked = true;
+    this._bakePending = false;
+  }
+
+  /** Cadence actually used by update(). */
+  effectiveProbeEveryN() {
+    const base = Math.max(1, Math.round(this._params.probeEveryN ?? 3));
+    const gov = this._probeEveryNOverride;
+    const rest = this._restEveryN;
+    let every = gov ?? rest ?? base;
+    if (rest != null) every = Math.max(every, rest);
+    return every;
   }
 
   /**
@@ -256,12 +330,10 @@ uniform float uBubbleFeather;`
     this.setBubbleCenter(opts.probeWorld ?? null);
 
     if (this._matte || !this._cubeCamera || !this._cubeTarget) return;
-    const every = Math.max(
-      1,
-      Math.round(this._probeEveryNOverride ?? this._params.probeEveryN ?? 3)
-    );
-    this._frame += 1;
-    if (this._frame % every !== 0) return;
+    // Bake-once-on-settle: a hop never sets pending, and rest never re-enters.
+    if (!this._bakePending) return false;
+    this._bakePending = false;
+    this._bakes += 1;
 
     const near = this._params.probeNear ?? 0.2;
     const far = this._params.probeFar ?? 80;
@@ -301,6 +373,7 @@ uniform float uBubbleFeather;`
     this.renderer.getSize(size);
     this.renderer.setViewport(0, 0, Math.max(1, size.x), Math.max(1, size.y));
     this.renderer.setScissorTest(false);
+    return true;
   }
 
   debugState() {
@@ -309,6 +382,12 @@ uniform float uBubbleFeather;`
       matte: this._matte,
       workQuality: this._workQuality,
       probeSize: this._probeSize,
+      probeEveryN: this._bakeOnce ? null : this.effectiveProbeEveryN(),
+      bakeOnce: this._bakeOnce,
+      bakePending: this._bakePending,
+      prebaked: this._prebaked,
+      bakes: this._bakes,
+      restEveryN: this._restEveryN,
       envIntensity: this.material.envMapIntensity,
       layer: this.floorMesh.layers.mask,
       params: this.getParams()

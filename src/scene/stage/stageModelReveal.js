@@ -169,7 +169,7 @@ export function hideSceneExcept(scene, root) {
  * @param {THREE.Camera} camera
  * @param {THREE.Object3D} [root]
  */
-export function compileHeldRoot(renderer, scene, camera, root) {
+export async function compileHeldRoot(renderer, scene, camera, root) {
   if (!renderer || !scene || !camera) return;
   const mask = camera.layers.mask;
   const prevTarget = renderer.getRenderTarget();
@@ -183,14 +183,28 @@ export function compileHeldRoot(renderer, scene, camera, root) {
     obj.layers.enable(GPU_HOLD_LAYER);
   });
 
-  renderer.compile(scene, camera);
-
   const restore = root ? hideSceneExcept(scene, root) : null;
+  renderer.shadowMap.needsUpdate = true;
+  // Bind a target before compile. A null target compiles the ACES tone-mapped
+  // variant; the composer beauty pass compiles NoToneMapping. Those are
+  // different program keys, and the ACES ones showed up as hop 0→3 leaks.
+  renderer.setRenderTarget(_compileTarget);
+  renderer.autoClear = true;
+  const linked = renderer.compileAsync(scene, camera);
+  if (restore) restore();
+  renderer.setRenderTarget(prevTarget);
+  renderer.autoClear = prevAutoClear;
+  camera.layers.mask = mask;
+  for (const light of lights) light.layers.disable(GPU_HOLD_LAYER);
+  await linked;
+  camera.layers.enable(GPU_HOLD_LAYER);
+  for (const light of lights) light.layers.enable(GPU_HOLD_LAYER);
+  const restoreDraw = root ? hideSceneExcept(scene, root) : null;
   renderer.shadowMap.needsUpdate = true;
   renderer.setRenderTarget(_compileTarget);
   renderer.autoClear = true;
   renderer.render(scene, camera);
-  if (restore) restore();
+  if (restoreDraw) restoreDraw();
 
   renderer.setRenderTarget(prevTarget);
   renderer.autoClear = prevAutoClear;

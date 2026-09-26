@@ -28,6 +28,7 @@ import {
   SIDEKICK_FUSED_BUTTON_MESH_NAMES
 } from "./gltfMaterialOwnership.js";
 import "./sidekickMotionEasing.js";
+import { SidekickIdleFloat } from "./sidekickIdleFloat.js";
 
 const MODEL_URL = "/assets/models/sidekick/Sidekick3.glb";
 const SCREEN_NODE_NAME = "Screen";
@@ -42,11 +43,12 @@ const SWIVEL_PART_NAME = "swivelPart";
 const SCREEN_FRAME_REVEAL = 0.22;
 const SWIVEL_DURATION = 0.88 * 0.7;
 /**
- * SFX leads the swivel by a fixed offset so the click is locked to motion.
- * Open needs more lead; close only compensates play-start latency.
+ * Seconds the clip plays before the swivel starts.
+ * Open trails the lid by ~50 ms at 0, so the swivel waits that long.
+ * Close still trailed by ~100 ms at 0.04, so it waits 0.14 s.
  */
-const OPEN_SFX_LEAD = 0.2;
-const CLOSE_SFX_LEAD = 0.04;
+const OPEN_SFX_LEAD = 0.05;
+const CLOSE_SFX_LEAD = 0.14;
 const SWIVEL_CLOSED_SLIDE_Z = -Math.PI;
 
 /** Deck glyph cutout only. CALL/END/D-pad (`sideButtons`) is a fused atlas body. */
@@ -162,6 +164,8 @@ const KEYBOARD_LABEL_REVEAL = 0.32;
 const SIDEKICK_DISPLAY_CENTER_Y = LOOK.y;
 const STAGE_EULER = new THREE.Euler(Math.PI / 2, Math.PI, Math.PI, "YXZ");
 
+const _LEAN_AXIS = new THREE.Vector3(0, 0, 1);
+const _LEAN_QUAT = new THREE.Quaternion();
 const _BOX = new THREE.Box3();
 const _VEC = new THREE.Vector3();
 const _VEC2 = new THREE.Vector3();
@@ -234,6 +238,8 @@ export class SidekickVignette {
     this.scrollCapture = deps.scrollCapture ?? null;
     this.onAligned = deps.onAligned ?? null;
     this.onRequestClose = deps.onRequestClose ?? null;
+    this.onScreenCommand = deps.onScreenCommand ?? null;
+    this.onScreenReady = deps.onScreenReady ?? null;
     this.introGate = deps.introGate ?? null;
     this.loadingManager = deps.loadingManager ?? null;
     this.reducedMotion = deps.reducedMotion ?? false;
@@ -266,6 +272,7 @@ export class SidekickVignette {
     this._restPoseReady = false;
 
     this.isOpen = false;
+    this._remoteCompose = false;
     this._swivelTween = null;
     this._swivelTarget = null;
     this._sfxLeadTween = null;
@@ -276,6 +283,10 @@ export class SidekickVignette {
     this._pendingScene = null;
     this.scrollballLed = null;
     this.smsScreen = null;
+    this._idleFloat = new SidekickIdleFloat();
+    this._idleBaseQuat = new THREE.Quaternion();
+    this._idleTime = 0;
+    this._focusBlend = 0;
     this._sendSequenceRunning = false;
 
     this.group.userData.skipFloorSnap = true;
@@ -391,7 +402,8 @@ export class SidekickVignette {
     this._hideChassisRigMeshes();
     ensureSidekickKeypadMaterials(this.phoneRoot);
     this.scrollballLed = SidekickScrollballLed.attach(this.phoneRoot, {
-      reducedMotion: this.reducedMotion
+      reducedMotion: this.reducedMotion,
+      light: this.deps.stageLights?.scrollball ?? null
     });
 
     this._openSwivelZ = this.swivel.rotation.z;
@@ -777,6 +789,7 @@ export class SidekickVignette {
       STAGE_EULER.y + this.blockoutRef.rotation.y,
       STAGE_EULER.z
     );
+    this._idleBaseQuat.copy(this.sidekickRoot.quaternion);
   }
 
   _snapPhoneDisplayHeight() {
@@ -898,6 +911,11 @@ export class SidekickVignette {
   async _applyScreenTexture() {
     if (!this.screenMesh) return;
 
+    if (globalThis.__STAGE_WORKER) {
+      this.onScreenReady?.();
+      return;
+    }
+
     if (!this.smsScreen) {
       this.smsScreen = new SidekickSmsScreen({
         reducedMotion: this.reducedMotion,
@@ -925,8 +943,8 @@ export class SidekickVignette {
     this.screenMesh.userData.sidekickScreenAligned = true;
 
     // Open beat may finish before the atlas is ready — catch up the flip.
-    if (this.isOpen && !this.smsScreen.isComposeVisible && !this.smsScreen.isFlipping) {
-      void this.smsScreen.flipToCompose();
+    if (this.isOpen && !this._screenComposeVisible()) {
+      this._notifyScreen("flipToCompose");
     }
   }
 
@@ -1001,10 +1019,10 @@ export class SidekickVignette {
         this.isOpen = to >= 1 - 1e-6;
         if (this.isOpen) {
           this._applyOpenSettledPose();
-          void this.smsScreen?.flipToCompose();
+          this._notifyScreen("flipToCompose");
         } else {
           this._applyClosedSettledPose();
-          this.smsScreen?.snapToSplash();
+          this._notifyScreen("snapToSplash");
         }
       }
     });
@@ -1032,8 +1050,8 @@ export class SidekickVignette {
     const startProgress = this._currentSwivelProgress();
     if (startProgress >= 1 - 1e-6 && this.isOpen && !this._swivelTween) {
       this._applyOpenSettledPose();
-      if (this.smsScreen && !this.smsScreen.isComposeVisible && !this.smsScreen.isFlipping) {
-        void this.smsScreen.flipToCompose();
+      if (!this._screenComposeVisible()) {
+        this._notifyScreen("flipToCompose");
       }
       return;
     }
@@ -1041,7 +1059,7 @@ export class SidekickVignette {
     if (this.reducedMotion) {
       playSidekickOpen();
       this._applyOpenSettledPose();
-      void this.smsScreen?.flipToCompose();
+      this._notifyScreen("flipToCompose");
       return;
     }
 
@@ -1061,19 +1079,17 @@ export class SidekickVignette {
 
     const startProgress = this._currentSwivelProgress();
     if (startProgress <= 0.001 && !this.isOpen && !this._swivelTween && !this._sfxLeadTween) {
-      this._applyClosedSettledPose();
-      this.smsScreen?.snapToSplash();
       return;
     }
 
     // Flip SMS → splash as the lid starts closing (paper reverse).
-    void this.smsScreen?.flipToSplash();
+    this._notifyScreen("flipToSplash");
 
     if (this.reducedMotion) {
       this._killSfxLead();
       playSidekickClose();
       this._applyClosedSettledPose();
-      this.smsScreen?.snapToSplash();
+      this._notifyScreen("snapToSplash");
       return;
     }
 
@@ -1097,14 +1113,34 @@ export class SidekickVignette {
    */
   handlePointerDown(hit) {
     if (this._sendSequenceRunning) return true;
-    if (!this.isOpen || !this.smsScreen?.isComposeVisible) return false;
+    if (!this.isOpen) return false;
+    if (!this.onScreenCommand && !this.smsScreen?.isComposeVisible) return false;
+    if (this.onScreenCommand && !this._remoteCompose) return false;
 
     const onScreen = hit?.object ? this._isScreenHit(hit.object) : Boolean(hit?.uv);
     if (!onScreen) return false;
 
-    this.smsScreen.handlePointer(hit?.uv);
-    // Always consume screen hits while compose is up — chassis still closes.
+    const uv = hit?.uv;
+    this._notifyScreen("pointer", { uv: uv ? { x: uv.x, y: uv.y } : null });
     return true;
+  }
+
+  _screenComposeVisible() {
+    if (this.onScreenCommand && !this.smsScreen) return Boolean(this._remoteCompose);
+    return Boolean(this.smsScreen?.isComposeVisible) && !this.smsScreen?.isFlipping;
+  }
+
+  _notifyScreen(command, payload) {
+    if (command === "flipToCompose") this._remoteCompose = true;
+    if (command === "snapToSplash" || command === "flipToSplash") this._remoteCompose = false;
+    if (this.onScreenCommand) {
+      this.onScreenCommand(command, payload);
+      return;
+    }
+    if (command === "flipToCompose") void this.smsScreen?.flipToCompose();
+    if (command === "snapToSplash") this.smsScreen?.snapToSplash();
+    if (command === "flipToSplash") void this.smsScreen?.flipToSplash();
+    if (command === "pointer") this.smsScreen?.handlePointer(payload?.uv);
   }
 
   handlePointerMove() {
@@ -1136,6 +1172,7 @@ export class SidekickVignette {
    * @param {number} focusBlend
    */
   updateFocus(_camera, focusBlend) {
+    this._focusBlend = focusBlend;
     if (!this._restPoseReady || !this.sidekickRoot) return;
 
     const t = THREE.MathUtils.clamp(focusBlend, 0, 1);
@@ -1145,8 +1182,34 @@ export class SidekickVignette {
 
   update(time) {
     if (!this._aligned || !this.sidekickRoot) return;
+    const note = this._noteRig;
+    let t0 = note ? performance.now() : 0;
     ensureSidekickKeypadMaterials(this.phoneRoot);
+    if (note) note("sidekick.keypad", performance.now() - t0);
+    t0 = note ? performance.now() : 0;
     this.scrollballLed?.update(time);
+    if (note) note("sidekick.led", performance.now() - t0);
+    t0 = note ? performance.now() : 0;
+    this._tickIdleFloat(time);
+    if (note) note("sidekick.float", performance.now() - t0);
+  }
+
+  /** Closed rest only. The open swivel owns the phone once focus or the lid starts. */
+  _tickIdleFloat(time) {
+    if (!this._restPoseReady) return;
+    const dt = Math.min(Math.max(time - this._idleTime, 0), 0.05);
+    this._idleTime = time;
+    const resting =
+      !this.reducedMotion &&
+      !this.isOpen &&
+      !this._swivelTween &&
+      !this._sendSequenceRunning &&
+      this._focusBlend < 0.04;
+    const motion = this._idleFloat.tick(dt, time, resting);
+    const rest = this._restHeroPose.position;
+    this.sidekickRoot.position.set(rest.x + motion.x, rest.y + motion.y, rest.z);
+    _LEAN_QUAT.setFromAxisAngle(_LEAN_AXIS, motion.lean);
+    this.sidekickRoot.quaternion.copy(_LEAN_QUAT).multiply(this._idleBaseQuat);
   }
 
   debugKeypad() {

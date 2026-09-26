@@ -5,34 +5,44 @@ import { DesktopVignette, desktopVignetteMeta } from "./vignettes/DesktopVignett
 import { BustVignette, bustVignetteMeta } from "./vignettes/BustVignette.js";
 import { addDegreeLabels } from "./stage/placeholderVignettes.js";
 import { SidekickVignette, sidekickVignetteMeta } from "./vignettes/SidekickVignette.js";
+import {
+  configureSidekickScreenMaterial,
+  ensureSidekickScreenMapLocked
+} from "./vignettes/sidekickScreenTexture.js";
 import { ArchaeologyVignette, archaeologyVignetteMeta } from "./vignettes/ArchaeologyVignette.js";
 import { PostPass } from "./stage/PostPass.js";
+import { CursorDepthOfField } from "./stage/CursorDepthOfField.js";
 import { createStageLoadGate } from "./stage/StageLoadGate.js";
 import { StageBootSequence } from "../ui/xpBoot/StageBootSequence.js";
 import { NeonSystem } from "./neon/NeonSystem.js";
-import { VolumetricFogPass } from "./neon/VolumetricFogPass.js";
 import { EdgeGlitchSystem } from "./edgeGlitch/EdgeGlitchSystem.js";
 import { EdgeGlitchPass } from "./edgeGlitch/EdgeGlitchPass.js";
 import { EDGE_GLITCH_STAGE } from "./edgeGlitch/constants.js";
 import { AccentLightSystem } from "./accent/AccentLightSystem.js";
-import {
-  FOG_DEFAULTS,
-  createFogParams,
-  FOG_HEAVY_FADE_IN_MS
-} from "../fog/fogConfig.js";
-import { VIDEO_FOG_FADE_IN_MS } from "./neon/videoFogConfig.js";
+import { createFogParams } from "../fog/fogConfig.js";
 import { configureSpotShadow } from "./stage/configureSpotShadow.js";
 import { VignetteContactShadows } from "./stage/VignetteContactShadows.js";
 import { LiveStageEnvironment } from "./stage/LiveStageEnvironment.js";
 import { buildStageStudioRoom } from "./stage/StageStudioRoom.js";
 import { buildStageFloor } from "./stage/StageFloor.js";
-import { createProceduralStarfield, updateStarfield } from "./blackhole/ProceduralStarfield.js";
-import { createMilkyWayDome, updateMilkyWayDome } from "./blackhole/MilkyWayNebulaShader.js";
+import {
+  createFlightStarMirror,
+  createProceduralStarfield,
+  updateStarfield
+} from "./blackhole/ProceduralStarfield.js";
+import { createCursorStarTrail, updateCursorStarTrail } from "./blackhole/CursorStarTrail.js";
+import {
+  createMilkyWayDome,
+  introSkyDropPitch,
+  skyDropAxis,
+  updateMilkyWayDome
+} from "./blackhole/MilkyWayNebulaShader.js";
 import { createNebulaCluster, updateNebulaCluster } from "./blackhole/NebulaCloudCluster.js";
 import {
   loadWetFloorTextures,
   WetFloorSystem
 } from "./floor/WetFloorSystem.js";
+import { createEnvLightParams } from "./stage/envLightConfig.js";
 import { StageScrollCapture } from "./stage/StageScrollCapture.js";
 import { SCROLL_CAPTURE_MESH_IDS } from "./stage/scrollCaptureTargets.js";
 import {
@@ -43,9 +53,6 @@ import {
   CAM_FAR,
   CAM_REST_BACK,
   LOOK,
-  AMBIENT_INTENSITY,
-  HEMI_INTENSITY,
-  STAGE_ENV_INTENSITY,
   SPOT_HEIGHT_M,
   SPOT_INTENSITY,
   SPOT_ANGLE,
@@ -73,19 +80,27 @@ import {
   placeOnStage,
   STAGE_RADIUS,
   STAGE_BG,
+  REST_DPR,
+  REST_PIXEL_BUDGET_MP,
+  FLOOR_DROP_MS,
+  FLOOR_FRAME_MS,
+  FLOOR_MIN_MP,
+  FLOOR_MP_NOTCHES,
+  FLOOR_RECOVER_MS,
+  FLOOR_RECOVER_SEC,
+  BLACK_HOLE_DPR,
+  BLACK_HOLE_MSAA,
   EXPOSURE,
   BOOT_MIN_MS,
   NEON_BLOOM,
+  CURSOR_DOF,
   WET_FLOOR_LAYER,
-  VIGNETTE_FOG_RADIUS,
-  VIGNETTE_FOG_FEATHER,
   STAGE_FOG_MODE,
   STAGE_FOG_ENABLED,
   INACTIVE_VIGNETTE_LAYER,
   NEON_FOG_LAYER,
   NEON_SHADOW
 } from "./stage/constants.js";
-import { VideoFogSystem } from "./neon/VideoFogSystem.js";
 import { PINNED_VOLUMETRIC_FOG } from "../fog/volumetricFogPinned.js";
 import {
   normalizeWheelDelta,
@@ -101,19 +116,23 @@ import { INTRO_TRACK_DESCENT } from "./stage/stageCameraTrack.js";
 import {
   GPU_HOLD_LAYER,
   compileHeldRoot,
-  hideSceneExcept,
   releaseRootToCamera,
   setGroupRenderOpacity,
   warmMeshesChunked
 } from "./stage/stageModelReveal.js";
 import { createFrameBudget, setActiveFrameBudget, spanFrame, tagFrame } from "./stage/frameBudget.js";
+import { createStageLightRig } from "./stage/StageLightRig.js";
 import {
   StagePerfGovernor,
   MOTION_DPR
 } from "./stage/stagePerfGovernor.js";
+import { restFidelityForIndex, restResource } from "./stage/restFidelity.js";
+import { createVignette0WarmState, stepVignette0Warm } from "./stage/warmVignette0.js";
+import { ChunkedTextureQueue } from "./stage/chunkedTextureUpload.js";
 import { STAGE_FLOOR_Y, measureBlockoutReferenceBounds, measureSceneBounds, snapAllGroupsToFloor, snapGroupToFloor } from "./vignettes/pcSceneBlockout.js";
 import { preloadPcTextures, setPcTextureLoadingManager } from "./vignettes/pcProductionMaterials.js";
 import { WaterCursor } from "../cursor/WaterCursor.js";
+import { WorkerCrtPlaceholder } from "../stage/workerCrtPlaceholder.js";
 import { CameraRig } from "./camera/CameraRig.js";
 import {
   BLACK_HOLE_CENTER,
@@ -153,8 +172,10 @@ const EDGE_GLITCH_NEAR_NDC_PAD = 0.14;
  * `?work` or `?work=1` → 60% object raster. `?quality=0.6` sets the scale.
  * `?work=0` forces full. Screen canvases are not read from this.
  */
-function readWorkRenderScale() {
-  const params = new URLSearchParams(window.location.search);
+function readWorkRenderScale(search) {
+  const params = new URLSearchParams(
+    search != null ? search : window.location.search
+  );
   if (params.has("quality")) {
     const n = Number(params.get("quality"));
     if (Number.isFinite(n) && n > 0) return Math.min(1, n);
@@ -167,24 +188,211 @@ function readWorkRenderScale() {
   return 1;
 }
 
+/** Tail of three r172 WebGLPrograms.getProgramCacheKey, last token first in the split. */
+const PROGRAM_KEY_TAIL = [
+  "precision",
+  "outputColorSpace",
+  "envMapMode",
+  "envMapCubeUVHeight",
+  "mapUv",
+  "alphaMapUv",
+  "lightMapUv",
+  "aoMapUv",
+  "bumpMapUv",
+  "normalMapUv",
+  "displacementMapUv",
+  "emissiveMapUv",
+  "metalnessMapUv",
+  "roughnessMapUv",
+  "anisotropyMapUv",
+  "clearcoatMapUv",
+  "clearcoatNormalMapUv",
+  "clearcoatRoughnessMapUv",
+  "iridescenceMapUv",
+  "iridescenceThicknessMapUv",
+  "sheenColorMapUv",
+  "sheenRoughnessMapUv",
+  "specularMapUv",
+  "specularColorMapUv",
+  "specularIntensityMapUv",
+  "transmissionMapUv",
+  "thicknessMapUv",
+  "combine",
+  "fogExp2",
+  "sizeAttenuation",
+  "morphTargetsCount",
+  "morphAttributeCount",
+  "numDirLights",
+  "numPointLights",
+  "numSpotLights",
+  "numSpotLightMaps",
+  "numHemiLights",
+  "numRectAreaLights",
+  "numDirLightShadows",
+  "numPointLightShadows",
+  "numSpotLightShadows",
+  "numSpotLightShadowsWithMaps",
+  "numLightProbes",
+  "shadowMapType",
+  "toneMapping",
+  "numClippingPlanes",
+  "numClipIntersection",
+  "depthPacking",
+  "boolMaskA",
+  "boolMaskB",
+  "rendererColorSpace",
+  "customProgramCacheKey"
+];
+
+const PROGRAM_MASK_A = [
+  "supportsVertexTextures",
+  "instancing",
+  "instancingColor",
+  "instancingMorph",
+  "matcap",
+  "envMap",
+  "normalMapObjectSpace",
+  "normalMapTangentSpace",
+  "clearcoat",
+  "iridescence",
+  "alphaTest",
+  "vertexColors",
+  "vertexAlphas",
+  "vertexUv1s",
+  "vertexUv2s",
+  "vertexUv3s",
+  "vertexTangents",
+  "anisotropy",
+  "alphaHash",
+  "batching",
+  "dispersion",
+  "batchingColor"
+];
+
+const PROGRAM_MASK_B = [
+  "fog",
+  "useFog",
+  "flatShading",
+  "logarithmicDepthBuffer",
+  "reverseDepthBuffer",
+  "skinning",
+  "morphTargets",
+  "morphNormals",
+  "morphColors",
+  "premultipliedAlpha",
+  "shadowMapEnabled",
+  "doubleSided",
+  "flipSided",
+  "useDepthPacking",
+  "dithering",
+  "transmission",
+  "sheen",
+  "opaque",
+  "pointsUvs",
+  "decodeVideoTexture",
+  "decodeVideoTextureEmissive",
+  "alphaToCoverage"
+];
+
+function maskBits(prev, next, names) {
+  const left = Number(prev);
+  const right = Number(next);
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return [`${prev}>${next}`];
+  const changed = left ^ right;
+  const parts = [];
+  for (let i = 0; i < names.length; i += 1) {
+    if ((changed & (1 << i)) === 0) continue;
+    parts.push(`${names[i]}:${(left >> i) & 1}>${(right >> i) & 1}`);
+  }
+  return parts.length ? parts : [`${prev}>${next}`];
+}
+
+/**
+ * Which cache-key fields differ between a warm program and the live one.
+ * @param {string[] | undefined} warmKeys
+ * @param {string} liveKey
+ */
+function programKeyDelta(warmKeys, liveKey) {
+  if (!warmKeys?.length) return "no-warm-key";
+  if (warmKeys.includes(liveKey)) return "";
+  let best = null;
+  for (let k = 0; k < warmKeys.length; k += 1) {
+    const diff = diffProgramKeys(warmKeys[k], liveKey);
+    if (!best || diff.length < best.length) best = diff;
+  }
+  return best || "opaque";
+}
+
+function diffProgramKeys(warmKey, liveKey) {
+  const warm = String(warmKey).split(",");
+  const live = String(liveKey).split(",");
+  const n = PROGRAM_KEY_TAIL.length;
+  const parts = [];
+  if (warm.length !== live.length) parts.push(`len ${warm.length}>${live.length}`);
+  const warmStart = warm.length - n;
+  const liveStart = live.length - n;
+  if (warmStart < 0 || liveStart < 0) return `unaligned ${warm.length}/${live.length}`;
+  const warmPrefix = warm.slice(0, warmStart).join(",");
+  const livePrefix = live.slice(0, liveStart).join(",");
+  if (warmPrefix !== livePrefix) parts.push("prefix");
+  for (let i = 0; i < n; i += 1) {
+    const left = warm[warmStart + i];
+    const right = live[liveStart + i];
+    if (left === right) continue;
+    const label = PROGRAM_KEY_TAIL[i];
+    if (label === "boolMaskA") parts.push(...maskBits(left, right, PROGRAM_MASK_A));
+    else if (label === "boolMaskB") parts.push(...maskBits(left, right, PROGRAM_MASK_B));
+    else parts.push(`${label}:${left}>${right}`);
+  }
+  return parts.join(" ") || "opaque";
+}
+
 export class StageExperience {
   /**
    * @param {HTMLCanvasElement} canvas
    */
-  constructor(canvas) {
+  constructor(canvas, options = {}) {
     this.canvas = canvas;
-    this.reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    this.isCoarse = window.matchMedia("(pointer: coarse)").matches;
-    this._fullPixelRatio = Math.min(window.devicePixelRatio || 1, this.isCoarse ? 1.5 : 1.75);
-    this._renderScale = readWorkRenderScale();
+    this._inWorker = Boolean(options.worker || globalThis.__STAGE_WORKER);
+    this._hostPost = typeof options.postMessage === "function" ? options.postMessage : null;
+    this._search = options.search ?? "";
+    this._cssWidth = options.width || 0;
+    this._cssHeight = options.height || 0;
+    if (this._inWorker) {
+      this.reducedMotion = Boolean(options.reducedMotion);
+      this.isCoarse = Boolean(options.isCoarse);
+      this._fullPixelRatio = Math.min(options.dpr || 1, this.isCoarse ? 1.5 : 1.75);
+    } else {
+      this.reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      this.isCoarse = window.matchMedia("(pointer: coarse)").matches;
+      this._fullPixelRatio = Math.min(window.devicePixelRatio || 1, this.isCoarse ? 1.5 : 1.75);
+    }
+    this._renderScale = readWorkRenderScale(this._inWorker ? this._search : undefined);
     this.pixelRatio = this._fullPixelRatio * this._renderScale;
 
-    this.hud = new HUDController();
+    if (this._inWorker) {
+      this._crtPlaceholder = new WorkerCrtPlaceholder();
+      this._crtPlaceholder.onCommand = (command, payload) => {
+        this._hostPost?.({ type: "crt", command, ...(payload || {}) });
+      };
+      this.setCrtHoverIndex = (index) => this._crtPlaceholder.setHoverIndex?.(index);
+      this.hud = {
+        setProgress() {},
+        updateMySpacePanelForVignette() {},
+        getMySpaceScreen: () => this._crtPlaceholder
+      };
+      this.bootSequence = {
+        setProgress: (progress) => this._hostPost?.({ type: "bootProgress", progress }),
+        dismiss: () => this._hostPost?.({ type: "ready" })
+      };
+    } else {
+      this.hud = new HUDController();
+      this.bootSequence = new StageBootSequence({
+        fader: document.getElementById("fader"),
+        hud: this.hud
+      });
+    }
     this.loadingManager = new THREE.LoadingManager();
-    this.bootSequence = new StageBootSequence({
-      fader: document.getElementById("fader"),
-      hud: this.hud
-    });
     setPcTextureLoadingManager(this.loadingManager);
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
@@ -193,6 +401,9 @@ export class StageExperience {
     this.locked = true;
     this._interactionReady = false;
     this.introComplete = false;
+    this._vignette0Warm = createVignette0WarmState();
+    this._descentPendingWarm = false;
+    this._landFrameMs = [];
     this.introRig = { descent: INTRO_TRACK_DESCENT };
     this._introTrackT = 0;
     this._introTrackLinear = 0;
@@ -227,6 +438,7 @@ export class StageExperience {
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: true,
+      ...(this._inWorker ? { alpha: false } : {}),
       powerPreference: "high-performance"
     });
     this.renderer.setPixelRatio(this.pixelRatio);
@@ -235,15 +447,36 @@ export class StageExperience {
       this.renderer.setSize(w, h, false);
     }
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    if (!import.meta.env.DEV) this.renderer.debug.checkShaderErrors = false;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = EXPOSURE;
+    this._envLight = createEnvLightParams();
+    this.renderer.toneMappingExposure = this._envLight.exposure;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.setClearColor(STAGE_BG, 1);
+    this.chunkedTextures = new ChunkedTextureQueue();
+    this._installChunkedUploads();
+    this._installGlProbe();
+    this._installProgramLog();
+    this._floorMp = null;
+    this._floorUnderSec = 0;
+    this._floorIgnoreNext = false;
+    this._resizeSkipScene = false;
+    this._skipBeauty = false;
+    this._flushShadowBake = false;
+    this._frameCause = "render";
+    this._lastCause = "render";
+    this._floorStats = { maxMs: 0, minFps: 999, cause: "render", frames: 0 };
+    this._gapTasks = [];
+    this._rafEnd = 0;
+    this._installGapProbe();
+    this._floorPostT = 0;
+    this._bakeScratch = new THREE.WebGLRenderTarget(4, 4, { depthBuffer: true });
 
+    const view = this._viewportCssSize();
     this.camera = new THREE.PerspectiveCamera(
       CAM_FOV,
-      window.innerWidth / window.innerHeight,
+      view.w / view.h,
       CAM_NEAR,
       CAM_FAR
     );
@@ -260,9 +493,10 @@ export class StageExperience {
     this.captureBlend = 0;
     this._captureBlendTarget = false;
     this._captureBlendTween = null;
+    const viewPointer = this._viewportCssSize();
     this._lastPointer = {
-      x: window.innerWidth * 0.5,
-      y: window.innerHeight * 0.5
+      x: viewPointer.w * 0.5,
+      y: viewPointer.h * 0.5
     };
     this._introHandoffUntil = 0;
     this._introSettleUntil = 0;
@@ -285,6 +519,12 @@ export class StageExperience {
     /** Previous settled stop — kept on layer 0 during hop to avoid pop-out. */
     this._layerCullFromIndex = 0;
     this._wasSettledForCull = false;
+    this._restFidelityKey = "";
+    /** Settled DPR fraction of the device ratio. Motion uses the governor. */
+    this._restDpr = REST_DPR;
+    this._pixelBudgetMp = REST_PIXEL_BUDGET_MP;
+    this._restDprActive = false;
+    this._restDprWait = false;
     /** Wet-floor probeEveryN override from governor (null = use config). */
     this._wetProbeEveryNOverride = null;
     /** Neon shadow mapSize override from governor. */
@@ -306,14 +546,10 @@ export class StageExperience {
     this._buildLighting();
     this.liveEnv = new LiveStageEnvironment(this.renderer);
     this.scene.environment = this.liveEnv.getStudioEnvironment();
-    this.scene.environmentIntensity = STAGE_ENV_INTENSITY;
+    this.scene.environmentIntensity = this._envLight.environmentIntensity;
     this.vignettes = this._buildVignettes();
-    // Atmosphere mode must exist before _mountNeonSystem (video fog enable / userOff).
-    // STAGE_FOG_ENABLED gates construction — mode alone is not enough when parked.
-    this._fogMode =
-      STAGE_FOG_MODE === "video" || STAGE_FOG_MODE === "volumetric" || STAGE_FOG_MODE === "off"
-        ? STAGE_FOG_MODE
-        : "video";
+    // Fog renderers live in src/fog-aside and are not constructed.
+    this._fogMode = "off";
     this._volFogFade = 0;
     this._volFogUserOff = this._fogMode !== "volumetric";
     this._videoFogFade = 0;
@@ -338,24 +574,12 @@ export class StageExperience {
     this._initCameraRig();
     this._updatePlaceholderVisibility(0);
 
-    if (import.meta.env.DEV) {
+    if (import.meta.env.DEV && !this._inWorker) {
       window.__stage = this;
     }
 
-    // Fog systems only when STAGE_FOG_ENABLED — files stay on disk for restore.
-    if (STAGE_FOG_ENABLED) {
-      this.volumetricFog = new VolumetricFogPass(this.camera, {
-        useComposerDepth: false,
-        depthPacked: true,
-        halfRes: FOG_DEFAULTS.halfRes,
-        params: createFogParams()
-      });
-      this.volumetricFog.setEnabled(false);
-      this.volumetricFog.setDensityScale(0);
-      this.volumetricFog.setCompositeOpacity?.(0);
-      this.volumetricFog.setNoiseFrozen(this.reducedMotion);
-    }
-
+    this.cursorDof = new CursorDepthOfField();
+    this._dofBokeh = 0;
     this.post = new PostPass(
       this.renderer,
       this.pixelRatio,
@@ -365,9 +589,17 @@ export class StageExperience {
         scene: this.scene,
         bloom: !this.reducedMotion,
         volumetricPass: this.volumetricFog,
-        edgeGlitchPass: this._edgeGlitchPass
+        edgeGlitchPass: this._edgeGlitchPass,
+        width: this._viewportCssSize().w,
+        height: this._viewportCssSize().h
       }
     );
+    if (this.post.dofEffect) this.post.dofEffect.target = this.cursorDof.point;
+    this.post.smaaEffect?.addEventListener("load", () => {
+      this._pixelBudgetKey = "";
+      this._publishPixelBudget();
+    });
+    this._publishPixelBudget();
 
     this._initLoadGate();
 
@@ -379,10 +611,12 @@ export class StageExperience {
       if (!Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) return;
       this._clientPointer = { x: event.clientX, y: event.clientY };
     };
-    window.addEventListener("pointermove", this._onClientPointerSample, {
-      passive: true,
-      capture: true
-    });
+    if (!this._inWorker) {
+      window.addEventListener("pointermove", this._onClientPointerSample, {
+        passive: true,
+        capture: true
+      });
+    }
 
     this._bindUi();
     this._bindInput();
@@ -391,9 +625,11 @@ export class StageExperience {
     this._setActiveVignette(0);
     this._runIntro();
 
-    window.addEventListener("resize", this._onResize);
-    this._viewportResizeObserver = new ResizeObserver(() => this._onResize());
-    this._viewportResizeObserver.observe(document.documentElement);
+    if (!this._inWorker) {
+      window.addEventListener("resize", this._onResize);
+      this._viewportResizeObserver = new ResizeObserver(() => this._onResize());
+      this._viewportResizeObserver.observe(document.documentElement);
+    }
     this._onResize();
     this.clock = new THREE.Clock();
     // Discard constructor-time delta so the first spring step isn't a spike.
@@ -486,6 +722,10 @@ export class StageExperience {
     this.scene.add(this.milkyWayDome);
     this.starfield = createProceduralStarfield();
     this.scene.add(this.starfield);
+    this.starfieldFlight = createFlightStarMirror(this.starfield);
+    this.scene.add(this.starfieldFlight);
+    this.cursorStarTrail = createCursorStarTrail();
+    this.scene.add(this.cursorStarTrail);
     this.nebulaClouds = createNebulaCluster();
     this.scene.add(this.nebulaClouds);
     loadWetFloorTextures()
@@ -496,7 +736,20 @@ export class StageExperience {
         mat.roughnessMap = maps.roughnessMap;
         mat.normalMap = maps.normalMap;
         mat.metalnessMap = maps.metalnessMap;
+        for (const tex of [mat.map, mat.roughnessMap, mat.normalMap, mat.metalnessMap]) {
+          if (!tex) continue;
+          tex.channel = 0;
+          Object.defineProperty(tex, "channel", {
+            configurable: true,
+            enumerable: true,
+            get() {
+              return 0;
+            },
+            set() {}
+          });
+        }
         mat.needsUpdate = true;
+        if (this._wetFloorMesh) this._wetFloorMesh.visible = true;
         this.wetFloor = new WetFloorSystem({
           renderer: this.renderer,
           scene: this.scene,
@@ -512,12 +765,87 @@ export class StageExperience {
   }
 
   _buildLighting() {
-    // POV SpotLight is the key; tiny ambient/hemi keep shadow areas from going pure black.
-    this.environment.add(new THREE.AmbientLight(0xffffff, AMBIENT_INTENSITY));
-    const hemi = new THREE.HemisphereLight(0xd8dce8, STAGE_BG, HEMI_INTENSITY);
-    hemi.position.set(0, 12, 0);
-    this.environment.add(hemi);
+    // POV SpotLight is the key. Ambient is near-off; the studio env does the fill.
+    const env = this._envLight ?? createEnvLightParams();
+    this.ambientLight = new THREE.AmbientLight(0xffffff, env.ambientIntensity);
+    // Portal sun / fill / ambient stay in the scene at intensity 0 until the
+    // gate opens, so the directional and ambient counts never change.
+    this._portalSun = new THREE.DirectionalLight(0xffe6c0, 0);
+    this._portalSun.name = "arch-portal-sun";
+    this._portalSun.userData.portalIntensity = 3.4;
+    this._portalFill = new THREE.DirectionalLight(0x9ec8ff, 0);
+    this._portalFill.name = "arch-portal-fill";
+    this._portalFill.userData.portalIntensity = 1.1;
+    this._portalAmb = new THREE.AmbientLight(0xffd8a8, 0);
+    this._portalAmb.name = "arch-portal-amb";
+    this._portalAmb.userData.portalIntensity = 0.7;
+    this.scene.add(this._portalSun, this._portalSun.target, this._portalFill, this._portalFill.target, this._portalAmb);
+    this.stageLights = createStageLightRig(this.scene);
+    this.environment.add(this.ambientLight);
+    this.hemiLight = new THREE.HemisphereLight(0xd8dce8, STAGE_BG, env.hemiIntensity);
+    this.hemiLight.position.set(0, 12, 0);
+    this.environment.add(this.hemiLight);
+  }
 
+  /**
+   * DEV — Shift+E. Env intensity, ambient, hemisphere, exposure.
+   * Does not touch the POV spot, neon, or accent lights.
+   * @param {Record<string, number>} [partial]
+   */
+  setEnvLightParams(partial = {}) {
+    const base = this._envLight ?? createEnvLightParams();
+    const next = { ...base, ...partial };
+    next.environmentIntensity = Math.min(2, Math.max(0, Number(next.environmentIntensity) || 0));
+    next.ambientIntensity = Math.min(0.5, Math.max(0, Number(next.ambientIntensity) || 0));
+    next.hemiIntensity = Math.min(0.5, Math.max(0, Number(next.hemiIntensity) || 0));
+    next.exposure = Math.min(2.2, Math.max(0.4, Number(next.exposure) || EXPOSURE));
+    this._envLight = next;
+    this.scene.environmentIntensity = next.environmentIntensity;
+    if (this.ambientLight) this.ambientLight.intensity = next.ambientIntensity;
+    if (this.hemiLight) this.hemiLight.intensity = next.hemiIntensity;
+    this.renderer.toneMappingExposure = next.exposure;
+    return this.getEnvLightParams();
+  }
+
+  /** DEV — current env / fill / exposure. */
+  getEnvLightParams() {
+    const env = this._envLight ?? createEnvLightParams();
+    return { ...env };
+  }
+
+  /**
+   * Bust material response to scene IBL. r172 uses scene.environmentIntensity
+   * only when material.envMap is null; a set envMap uses material.envMapIntensity.
+   */
+  debugEnvLight() {
+    const bust = this.vignettes?.[0]?.instance?.bustRoot ?? null;
+    /** @type {Array<Record<string, unknown>>} */
+    const materials = [];
+    bust?.traverse((obj) => {
+      if (!obj.isMesh) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const mat of mats) {
+        if (!mat) continue;
+        materials.push({
+          mesh: obj.name || "(unnamed)",
+          material: mat.name || "(unnamed)",
+          type: mat.type,
+          metalness: typeof mat.metalness === "number" ? +mat.metalness.toFixed(3) : null,
+          roughness: typeof mat.roughness === "number" ? +mat.roughness.toFixed(3) : null,
+          envMapIntensity: typeof mat.envMapIntensity === "number" ? +mat.envMapIntensity.toFixed(3) : null,
+          hasOwnEnvMap: Boolean(mat.envMap)
+        });
+      }
+    });
+    return {
+      ...this.getEnvLightParams(),
+      sceneEnvironmentIntensity: this.scene.environmentIntensity,
+      rendererExposure: this.renderer.toneMappingExposure,
+      ambient: this.ambientLight?.intensity ?? null,
+      hemi: this.hemiLight?.intensity ?? null,
+      hasEnvironment: Boolean(this.scene.environment),
+      bustMaterials: materials
+    };
   }
 
   /**
@@ -578,17 +906,7 @@ export class StageExperience {
     this.vignettes.forEach((vig) => this.neon.attach(vig));
     this.neon.finishMount();
     this.neon.setStageFloor?.(this.stageFloor);
-    if (STAGE_FOG_ENABLED) {
-      this.videoFog = new VideoFogSystem(this.scene, this.camera, {
-        vignetteCount: this.vignettes.length
-      });
-      this.videoFog.seatOnVignettes(this.vignettes);
-      this.videoFog.setUserOff(this._fogMode !== "video");
-      this.videoFog.setEnabled(this._fogMode === "video");
-      this.videoFog.setSizeFromRenderer(this.renderer);
-    } else {
-      this.videoFog = null;
-    }
+    this.videoFog = null;
     this.edgeGlitch = new EdgeGlitchSystem({
       renderer: this.renderer,
       scene: this.scene,
@@ -655,7 +973,8 @@ export class StageExperience {
     this._interactionReady = true;
     this._ensureWaterCursor();
     this._tryRevealDuo();
-    this._showBlackHoleEnter();
+    this._enterArmed = true;
+    this._maybeShowEnter();
     if (this._blackHoleActive && navigator.webdriver) {
       this._triggerBlackHoleSpiral();
     }
@@ -667,37 +986,76 @@ export class StageExperience {
    * Does not block the XP load gate.
    */
   _mountDuoFab() {
-    this.duoMail = new DuoMailOverlay({
-      onOpenCaseStudy: (slug) => this._duoOpenCaseStudy(slug),
-      onRequestClose: () => this._duoCloseToIdle(),
-      onSelect: () => this.duoFab?.captureMailScreen?.(),
-      onProjectionDirty: () => this.duoFab?.captureMailScreen?.()
-    });
-    this.duoCaseStudy = new DuoCaseStudyOverlay({
-      onBack: () => this._duoBackToMail(),
-      onClose: () => this._duoCloseAll()
-    });
+    if (!this._inWorker) {
+      this.duoMail = new DuoMailOverlay({
+        onOpenCaseStudy: (slug) => this._duoOpenCaseStudy(slug),
+        onRequestClose: () => this._duoCloseToIdle(),
+        onSelect: () => this.duoFab?.captureMailScreen?.(),
+        onProjectionDirty: () => this.duoFab?.captureMailScreen?.()
+      });
+      this.duoCaseStudy = new DuoCaseStudyOverlay({
+        onBack: () => this._duoBackToMail(),
+        onClose: () => this._duoCloseAll()
+      });
+    }
 
+    const view = this._viewportCssSize();
     this.duoFab = new DuoFabSystem({
       canvas: this.canvas,
       loadingManager: this.loadingManager,
+      width: view.w,
+      height: view.h,
+      reducedMotion: this.reducedMotion,
+      onCaptureRequest: this._inWorker
+        ? () => this._hostPost?.({ type: "duo", action: "capture" })
+        : null,
       onStateChange: (state) => {
         this.duoMode = state === "mail" || state === "caseStudy";
+        if (this._inWorker) this._hostPost?.({ type: "duo", action: "state", state });
       },
       onHoverChange: (hovered) => {
-        if (!this.waterCursor) {
+        if (!this.waterCursor && this.canvas.style) {
           this.canvas.style.cursor = hovered ? "pointer" : "default";
         }
       },
       getScreenRect: (rect) => {
-        this.duoMail?.setScreenRect?.(rect);
+        if (!this._inWorker) {
+          this.duoMail?.setScreenRect?.(rect);
+          return;
+        }
+        if (!rect) {
+          if (this._duoRectNull) return;
+          this._duoRectNull = true;
+          this._hostPost?.({ type: "duo", action: "screenRect", rect: null });
+          return;
+        }
+        const msg = this._duoRectMsg || (this._duoRectMsg = {
+          type: "duo",
+          action: "screenRect",
+          rect: { left: 0, top: 0, width: 0, height: 0 }
+        });
+        const slot = msg.rect;
+        if (
+          this._duoRectLive &&
+          !this._duoRectNull &&
+          Math.abs(slot.left - rect.left) < 0.5 &&
+          Math.abs(slot.top - rect.top) < 0.5 &&
+          Math.abs(slot.width - rect.width) < 0.5 &&
+          Math.abs(slot.height - rect.height) < 0.5
+        ) {
+          return;
+        }
+        slot.left = rect.left;
+        slot.top = rect.top;
+        slot.width = rect.width;
+        slot.height = rect.height;
+        this._duoRectNull = false;
+        this._duoRectLive = true;
+        this._hostPost?.(msg);
       },
       getMailShell: () => this.duoMail?.shell ?? null
     });
-    {
-      const { w, h } = this._viewportCssSize();
-      this.duoFab.setSize(w, h);
-    }
+    this.duoFab.setSize(view.w, view.h);
 
     this.duoFab
       .load()
@@ -724,6 +1082,7 @@ export class StageExperience {
     this.duoMode = true;
     this.duoCaseStudy?.close();
     this.duoMail?.open();
+    if (this._inWorker) this._hostPost?.({ type: "duo", action: "openMail" });
     this.duoFab?.captureMailScreen?.();
   }
 
@@ -742,6 +1101,7 @@ export class StageExperience {
     this.duoFab.openCaseStudy();
     this.duoMode = true;
     this.duoCaseStudy?.open(slug);
+    if (this._inWorker) this._hostPost?.({ type: "duo", action: "openCaseStudy", slug });
   }
 
   _duoBackToMail() {
@@ -768,12 +1128,13 @@ export class StageExperience {
     const index = this.cameraRig.state.index;
     if (index === this._lastCameraIndex) return;
     this._lastCameraIndex = index;
-    this._setActiveVignette(index);
-    this._setCaption(index);
-    if (this.ui.caption) this.ui.caption.style.opacity = "1";
+    this._rigLap("index.setActive", () => this._setActiveVignette(index));
+    this._rigLap("index.caption", () => {
+      this._setCaption(index);
+      if (this.ui.caption) this.ui.caption.style.opacity = "1";
+    });
     if (index === 2) {
-      // Fit once the orbital camera faces this stop (safe now — on-stop only).
-      this._fitSidekickRestPose(false);
+      this._rigLap("index.fitSidekick", () => this._fitSidekickRestPose(false));
     }
   }
 
@@ -1037,12 +1398,71 @@ export class StageExperience {
     };
   }
 
+  /**
+   * Pixel ratio that keeps the drawing buffer inside the rest megapixel budget.
+   * @param {number} cssW
+   * @param {number} cssH
+   */
+  _pixelRatioForBudget(cssW, cssH) {
+    const area = Math.max(1, cssW * cssH);
+    const fromBudget = Math.sqrt((this._effectiveBudgetMp() * 1e6) / area);
+    const deviceCap = this._fullPixelRatio * (this._renderScale || 1);
+    return Math.max(0.2, Math.min(deviceCap, fromBudget));
+  }
+
   _applyRenderScale() {
-    const govMul = this.perfGovernor?.effectiveDprMul ?? 1;
-    this.pixelRatio = this._fullPixelRatio * this._renderScale * govMul;
-    this.renderer.setPixelRatio(this.pixelRatio);
-    if (this.post) this.post.pixelRatio = this.pixelRatio;
+    const sequence = Boolean(this._blackHoleActive);
+    const { w, h } = this._viewportCssSize();
+    const budgetRatio = this._pixelRatioForBudget(w, h);
+    const sequenceFull = this._fullPixelRatio * this._renderScale * BLACK_HOLE_DPR;
+    if (sequence && this._floorMp == null) {
+      this.pixelRatio = sequenceFull;
+    } else if (sequence) {
+      this.pixelRatio = Math.min(sequenceFull, budgetRatio);
+    } else if (this._restDprActive) {
+      this.pixelRatio = budgetRatio;
+    } else {
+      const govMul = this.perfGovernor?.effectiveDprMul ?? 1;
+      const motion = this._fullPixelRatio * this._renderScale * govMul;
+      this.pixelRatio = Math.min(budgetRatio, motion);
+    }
+    // Canvas stays at the sequence cap. The floor walks composer buffer
+    // sizes that were allocated during warm; a swap does not call setSize
+    // on a live frame.
+    const canvasRatio = sequenceFull;
+    const canvasChanged =
+      Math.abs(canvasRatio - (this.renderer.getPixelRatio?.() || 0)) > 0.002;
+    const dw = Math.max(1, Math.round(w * this.pixelRatio));
+    const dh = Math.max(1, Math.round(h * this.pixelRatio));
+    const drawChanged = Boolean(
+      this.post && (this.post.drawWidth !== dw || this.post.drawHeight !== dh)
+    );
+    if (!canvasChanged && !drawChanged) return;
+    const visible = Boolean(this.introComplete || this._blackHoleActive);
+    if (canvasChanged) {
+      if (visible) {
+        this._skipBeauty = true;
+        this._floorIgnoreNext = true;
+        this._frameCause = "resize";
+      }
+      this.renderer.setPixelRatio(canvasRatio);
+      if (this.post) {
+        this.post.pixelRatio = canvasRatio;
+        this.post.setSize(w, h);
+      }
+    }
+    const allocated = this.post?.setDrawSize(dw, dh) === true;
+    if (visible && allocated) {
+      this._skipBeauty = true;
+      this._floorIgnoreNext = true;
+      this._frameCause = "resize";
+    }
+    this._publishPixelBudget();
+    // The hole hides the stage. Don't rebuild shadow maps on this owner.
+    // A floor notch keeps the baked shadow map; disposing it is another stall.
+    if (sequence || this._floorMp != null) return;
     if (!this.spotLight?.shadow) return;
+    if (this._holdPrebakedShadows()) return;
     const shadowMul = this.perfGovernor?.profile?.shadowMul ?? 1;
     const size = Math.max(
       256,
@@ -1057,8 +1477,14 @@ export class StageExperience {
     this._applyNeonShadowSize();
   }
 
+  _holdPrebakedShadows() {
+    if (!this.introComplete) return true;
+    return (this._settledWarmFrames ?? 0) < 4;
+  }
+
   _applyNeonShadowSize() {
     if (!this.neon?.stopLights) return;
+    if (this._holdPrebakedShadows()) return;
     const shadowMul = this.perfGovernor?.profile?.shadowMul ?? 1;
     const size = Math.max(
       256,
@@ -1102,6 +1528,12 @@ export class StageExperience {
       fullDpr,
       workScale,
       pixelRatio: +this.pixelRatio.toFixed(3),
+      pixelBudgetMp: this._pixelBudgetMp,
+      restDpr: this._restDpr,
+      restDprActive: this._restDprActive,
+      dprOwner: this._blackHoleActive ? "sequence" : this._restDprActive ? "rest" : "motion",
+      msaa: this.post?.composer?.multisampling ?? 0,
+      smaa: Boolean(this.post?.smaaPass?.enabled),
       effectiveDpr: +effectiveDpr.toFixed(3),
       settledFullDpr: +settledFullDpr.toFixed(3),
       motionDpr: MOTION_DPR,
@@ -1119,6 +1551,9 @@ export class StageExperience {
       edgeGlitchCostActive: this._edgeGlitchCostActive(),
       edgeGlitchGates: this._edgeGlitchGateDiag(),
       governor: gov?.dump?.() ?? null,
+      restFidelity: this.debugRestFidelity(),
+      warmVignette0: this.debugWarmVignette0(),
+      landFrameMs: this._landFrameMs.slice(),
       frameBudget: this.frameBudget?.dump?.() ?? null
     };
   }
@@ -1261,6 +1696,78 @@ export class StageExperience {
    * + neon shadow cameras (layer 0) skip traversal. Tubes / floor glow stay on 0.
    * From + destination stay on 0 during hops to avoid pop-in.
    */
+  /**
+   * Put the same content roots the live hop uses onto layer 0, and park the
+   * rest. Returns a restore. The program key includes every light the camera
+   * can see, so a warm that enables the inactive layer compiles the wrong key.
+   * @param {number[]} keepIndices
+   */
+  _warmKeepLayers(keepIndices) {
+    const keep = new Set(keepIndices);
+    const saved = [];
+    const vignettes = this.vignettes || [];
+    for (let i = 0; i < vignettes.length; i += 1) {
+      const vig = vignettes[i];
+      const entry = this.neon?.entries?.[i];
+      const active = keep.has(i);
+      /** @type {import("three").Object3D[]} */
+      const roots = [];
+      if (entry?.contentRoot) roots.push(entry.contentRoot);
+      if (entry?.tube) roots.push(entry.tube);
+      else if (!entry?.contentRoot && vig?.group) {
+        for (const child of vig.group.children) {
+          if (
+            child === entry?.tube ||
+            child === entry?.floorGlow ||
+            child.name === "neon-tube" ||
+            child.name === "neon-floor-glow" ||
+            child.name?.startsWith?.("arch-portal")
+          ) {
+            continue;
+          }
+          roots.push(child);
+        }
+      }
+      for (const root of roots) {
+        if (active && root.visible === false) {
+          saved.push([root, root.layers.mask, false, null]);
+          root.visible = true;
+        }
+        root.traverse((obj) => {
+          if (obj.isLight) return;
+          const held = obj.layers.isEnabled(GPU_HOLD_LAYER);
+          if (held && !active) return;
+          const cull = obj.isMesh ? obj.frustumCulled : null;
+          saved.push([obj, obj.layers.mask, null, cull]);
+          if (active) {
+            obj.layers.disable(INACTIVE_VIGNETTE_LAYER);
+            obj.layers.disable(GPU_HOLD_LAYER);
+            obj.layers.enable(0);
+            if (obj.isMesh) obj.frustumCulled = false;
+          } else {
+            obj.layers.disable(0);
+            obj.layers.enable(INACTIVE_VIGNETTE_LAYER);
+          }
+        });
+      }
+    }
+    const floor = this.wetFloor?.floorMesh ?? this._wetFloorMesh ?? null;
+    if (floor) {
+      const cull = floor.frustumCulled;
+      saved.push([floor, floor.layers.mask, null, cull]);
+      floor.layers.enable(0);
+      floor.frustumCulled = false;
+    }
+    return () => {
+      for (let i = saved.length - 1; i >= 0; i -= 1) {
+        const [obj, mask, visible, cull] = saved[i];
+        obj.layers.mask = mask;
+        if (visible === false) obj.visible = false;
+        if (cull != null) obj.frustumCulled = cull;
+      }
+    };
+  }
+
   _syncInactiveVignetteLayers() {
     const s = this.cameraRig?.state;
     if (!s || !this.vignettes?.length) return;
@@ -1275,6 +1782,7 @@ export class StageExperience {
     }
     this._wasSettledForCull = settled;
     this._layerCullPrevIndex = to;
+    this._syncRestFidelity(settled, to);
 
     const keep = new Set([to]);
     if (!settled) keep.add(this._layerCullFromIndex);
@@ -1303,6 +1811,7 @@ export class StageExperience {
       }
       for (const root of roots) {
         root.traverse((obj) => {
+          if (obj.isLight) return;
           if (obj.layers.isEnabled(GPU_HOLD_LAYER)) return;
           if (active) {
             obj.layers.disable(INACTIVE_VIGNETTE_LAYER);
@@ -1317,9 +1826,807 @@ export class StageExperience {
   }
 
   /**
+   * Settled resources from restFidelity.js. Hops restore the full versions.
+   * @param {boolean} settled
+   * @param {number} index
+   */
+  _syncRestFidelity(settled, index) {
+    const key = !this.introComplete
+      ? "intro"
+      : settled
+        ? `rest:${index}`
+        : "motion";
+    if (key === this._restFidelityKey) return;
+    this._restFidelityKey = key;
+
+    const engines = [];
+    for (const vig of this.vignettes ?? []) {
+      const engine = vig?.instance?.grassEngine;
+      if (engine) engines.push(engine);
+    }
+    for (const engine of engines) {
+      engine.clearRestCull?.();
+      engine.setWindDetail?.(true);
+    }
+
+    if (!settled || !this.introComplete) {
+      if (!settled && this.introComplete) {
+        const wet = restResource(0, "wet-floor-probe");
+        this.wetFloor?.armSettleBake?.({ probeSize: wet?.probeSize ?? 64 });
+        this.neon?.deferShadowBake?.();
+      }
+      return;
+    }
+    this.wetFloor?.consumePrebake?.();
+    const spec = restFidelityForIndex(index);
+    if (!spec) return;
+    const engine = this.vignettes?.[index]?.instance?.grassEngine ?? null;
+    const cull = restResource(index, "grass-rest-cull");
+    if (engine && cull) {
+      engine.applyRestCull(this.camera, {
+        subpixelPx: cull.subpixelPx,
+        ndcMargin: cull.ndcMargin
+      });
+    }
+    if (engine && restResource(index, "grass-rest-wind")) {
+      engine.setWindDetail(false);
+    }
+  }
+
+  /**
+   * Settled frames use the megapixel budget. The governor keeps the motion floor.
+   * The resize is one frame after arrival so it is not the reveal frame.
+   * The first land is pre-sized during vignette-0 warm.
+   * @param {number} value
+   */
+  setRestDpr(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return this._restDpr;
+    this._restDpr = Math.min(1, Math.max(0.5, n));
+    if (this._restDprActive) this._applyRenderScale();
+    return this._restDpr;
+  }
+
+  /**
+   * Rest drawing-buffer cap in megapixels. Ignored while the black-hole
+   * sequence owns the camera. Clamped to 0.8–6.
+   * @param {number} megapixels
+   */
+  setPixelBudget(megapixels) {
+    const n = Number(megapixels);
+    if (!Number.isFinite(n)) return this._pixelBudgetMp;
+    this._pixelBudgetMp = Math.min(6, Math.max(0.8, n));
+    this._floorMp = null;
+    this._floorUnderSec = 0;
+    if (!this._blackHoleActive) this._resizeSkipScene = true;
+    return this._pixelBudgetMp;
+  }
+
+  _effectiveBudgetMp() {
+    if (this._floorMp == null) return this._pixelBudgetMp;
+    return Math.min(this._pixelBudgetMp, this._floorMp);
+  }
+
+  _installChunkedUploads() {
+    const renderer = this.renderer;
+    const orig = renderer.initTexture.bind(renderer);
+    renderer.initTexture = (texture) => {
+      if (this.chunkedTextures.claim(texture, renderer, orig)) return;
+      return orig(texture);
+    };
+  }
+
+  _chunkUploadsAllowed() {
+    const last = this._lastFrameMs || 0;
+    if (last >= FLOOR_DROP_MS) return false;
+    if (this._uploadStop || this._enterShown) return false;
+    if (!this._blackHoleActive) return false;
+    const seq = this.blackHoleSeq;
+    return (
+      seq?.phase === BLACK_HOLE_PHASE.APPROACH &&
+      (seq.restParallaxBlend?.() ?? 0) >= 0.98
+    );
+  }
+
+  _dropFloorNotch() {
+    if (this._vignette0Warm && !this._vignette0Warm.done) return;
+    if ((this.clock?.elapsedTime ?? 0) < (this._floorResizeAt ?? 0)) return;
+    const current = this._effectiveBudgetMp();
+    if (current <= FLOOR_MIN_MP + 0.02) return;
+    let next = FLOOR_MIN_MP;
+    for (let i = FLOOR_MP_NOTCHES.length - 1; i >= 0; i -= 1) {
+      if (FLOOR_MP_NOTCHES[i] < current - 0.04) {
+        next = FLOOR_MP_NOTCHES[i];
+        break;
+      }
+    }
+    if (this._floorMp != null && Math.abs(this._floorMp - next) < 0.02) return;
+    this._floorMp = next;
+    this._resizeSkipScene = true;
+    this._floorResizeAt = (this.clock?.elapsedTime ?? 0) + 1;
+  }
+
+  _raiseFloorNotch() {
+    if (this._floorMp == null) return;
+    let next = null;
+    for (const notch of FLOOR_MP_NOTCHES) {
+      if (notch > this._floorMp + 0.04) {
+        next = notch;
+        break;
+      }
+    }
+    if (next == null || next >= this._pixelBudgetMp - 0.04) this._floorMp = null;
+    else this._floorMp = next;
+    this._resizeSkipScene = true;
+    this._floorResizeAt = (this.clock?.elapsedTime ?? 0) + 1;
+  }
+
+  _observeFloor(frameMs, dt) {
+    if (!(frameMs > 0) || frameMs > 2000) return;
+    const stats = this._floorStats;
+    stats.frames += 1;
+    if (frameMs > stats.maxMs) {
+      stats.maxMs = frameMs;
+      stats.minFps = 1000 / frameMs;
+      stats.cause = this._lastCause || "render";
+      stats.worstGl = this._lastGl || null;
+      stats.worstWorkMs = Math.round((this._lastWorkMs || 0) * 10) / 10;
+      stats.worstBeautyMs = Math.round((this._lastBeautyMs || 0) * 10) / 10;
+      stats.worstDuoMs = Math.round((this._lastDuoMs || 0) * 10) / 10;
+      stats.worstEdgeMs = Math.round((this._lastEdgeMs || 0) * 10) / 10;
+      stats.worstPreMs = Math.round((this._lastPreMs || 0) * 10) / 10;
+      stats.worstPrePart = this._prePart || "";
+      stats.worstRig = {
+        steps: this._lastRigSteps || [],
+        state: this._lastRigState || null
+      };
+      stats.worstWaterMs = Math.round((this._lastWaterMs || 0) * 10) / 10;
+    }
+    if (frameMs > FLOOR_FRAME_MS) {
+      if (!stats.breaches) stats.breaches = [];
+      if (stats.breaches.length < 16) {
+        stats.breaches.push({
+          ms: Math.round(frameMs * 10) / 10,
+          cause: this._lastCause || "render",
+          workMs: Math.round((this._lastWorkMs || 0) * 10) / 10,
+          beautyMs: Math.round((this._lastBeautyMs || 0) * 10) / 10,
+          duoMs: Math.round((this._lastDuoMs || 0) * 10) / 10,
+          gl: this._lastGl || null,
+          thread: this._threadForCause(this._lastCause || "render"),
+          ignored: this._floorIgnoreNext === true
+        });
+      }
+    }
+    if (this._floorIgnoreNext) {
+      this._floorIgnoreNext = false;
+      return;
+    }
+    if (frameMs >= FLOOR_DROP_MS) {
+      this._dropFloorNotch();
+      this._floorUnderSec = 0;
+      return;
+    }
+    if (frameMs <= FLOOR_RECOVER_MS) {
+      this._floorUnderSec += Math.min(0.05, dt || 0);
+      if (this._floorUnderSec >= FLOOR_RECOVER_SEC && this._floorMp != null) {
+        this._raiseFloorNotch();
+        this._floorUnderSec = 0;
+      }
+    } else {
+      this._floorUnderSec = 0;
+    }
+  }
+
+  _publishFloor(dt) {
+    this._floorPostT += dt || 0;
+    if (this._floorPostT < 0.5) return;
+    this._floorPostT = 0;
+    const stats = this._floorStats;
+    this._hostPost?.({
+      type: "floor",
+      maxMs: Math.round(stats.maxMs * 10) / 10,
+      minFps: Math.round(stats.minFps * 10) / 10,
+      cause: stats.cause,
+      frames: stats.frames,
+      floorMp: this._floorMp,
+      budgetMp: this._effectiveBudgetMp(),
+      pixelRatio: this.pixelRatio,
+      textures: this.chunkedTextures?.pending ?? 0,
+      breaches: stats.breaches || [],
+      worstGl: stats.worstGl || null,
+      programs: Math.max(0, (this.renderer.info.programs?.length ?? 0) - (this._programBaseline ?? 0)),
+      programLeaks: this._programLeakRows(),
+      thread: this._threadForCause(stats.cause),
+      worstWorkMs: stats.worstWorkMs ?? 0,
+      worstBeautyMs: stats.worstBeautyMs ?? 0,
+      worstDuoMs: stats.worstDuoMs ?? 0,
+      worstEdgeMs: stats.worstEdgeMs ?? 0,
+      worstPreMs: stats.worstPreMs ?? 0,
+      worstPrePart: stats.worstPrePart || "",
+      worstRig: stats.worstRig || null,
+      rigHits: this._rigHits || [],
+      paintPeakMs: Math.round((this._paintPeakMs || 0) * 10) / 10,
+      worstWaterMs: stats.worstWaterMs ?? 0,
+      uploadPeakMs: Math.round((this._uploadPeakMs || 0) * 10) / 10,
+      gap: this._lastGap || null,
+      composerW: this.post?.drawWidth ?? 0,
+      composerH: this.post?.drawHeight ?? 0,
+      lightCensus: this._lightCensusRows(),
+      hop03: this._hop03Buckets(),
+      wetSlots: {
+        warm: this._wetWarmSnap || null,
+        live: this._wetLiveSnap || null,
+        shared: this._wetShared || [],
+        channelWrites: this._channelWrites || []
+      },
+      stallLabel: this._stallLabel || ""
+    });
+  }
+
+  /**
+   * A task that ran outside _animate. The floor report uses this when the
+   * next rAF gap is long and the previous callback did almost no work.
+   * @param {string} name
+   * @param {number} ms
+   */
+  _installGapProbe() {
+    if (this._gapProbe) return;
+    this._gapProbe = true;
+    const orig = globalThis.setTimeout.bind(globalThis);
+    const stage = this;
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      if (typeof fn !== "function") return orig(fn, delay, ...args);
+      return orig(() => {
+        const t0 = performance.now();
+        try {
+          fn(...args);
+        } finally {
+          const ms = performance.now() - t0;
+          if (ms >= 20 && stage._rafEnd && performance.now() - stage._rafEnd > 0) {
+            stage._noteGap(fn.name ? `timeout:${fn.name}` : "timeout", ms);
+          }
+        }
+      }, delay);
+    };
+  }
+
+  _noteGap(name, ms) {
+    if (!(ms >= 20)) return;
+    const task = { name: String(name || "task"), ms: Math.round(ms) };
+    if (!this._gapTasks) this._gapTasks = [];
+    this._gapTasks.push(task);
+    if (this._gapTasks.length > 8) this._gapTasks.shift();
+    const stats = this._floorStats;
+    if (!stats || stats.cause !== "gap:unaccounted") return;
+    const label = `gap:${task.name}:${task.ms}`;
+    stats.cause = label;
+    this._lastCause = label;
+    this._lastGap = { ms: task.ms, tasks: [task] };
+    const breaches = stats.breaches;
+    if (!breaches) return;
+    for (let i = breaches.length - 1; i >= 0; i -= 1) {
+      if (breaches[i].cause !== "gap:unaccounted") continue;
+      breaches[i].cause = label;
+      breaches[i].thread = this._threadForCause(label);
+      break;
+    }
+  }
+
+  /**
+   * @param {string} cause
+   */
+  _threadForCause(cause) {
+    const label = String(cause || "");
+    if (label.startsWith("gap:longtask") || label.startsWith("gap:toCanvas") || label.includes("toCanvas")) {
+      return "main";
+    }
+    if (label.startsWith("gap:")) return label === "gap:unaccounted" ? "unaccounted" : "main";
+    return "worker";
+  }
+
+  _installProgramLog() {
+    const programs = this.renderer?.info?.programs;
+    if (!programs || programs.__floorLog) return;
+    const orig = programs.push.bind(programs);
+    const stage = this;
+    programs.push = (program) => {
+      const count = orig(program);
+      if (stage._enterShown) stage._noteProgram(program);
+      else stage._noteWarmProgram(program);
+      return count;
+    };
+    programs.__floorLog = true;
+  }
+
+  _programState() {
+    const rig = this.cameraRig?.state;
+    const index = rig?.index ?? this.current ?? 0;
+    const settled = Boolean(rig?.isSettled);
+    const hole = Boolean(this._blackHoleActive);
+    const from = this._layerCullFromIndex ?? index;
+    const edge = Number(this.edgeGlitch?.glitchPass?.uniforms?.uEnabled?.value ?? 0) > 0.5;
+    const smaa = this.post?._aaMode === "smaa" && Boolean(this.post?.smaaPass?.enabled);
+    let motion = "hop";
+    if (hole) motion = "black-hole";
+    else if (settled || !this.introComplete) motion = "settled";
+    return {
+      stop: index,
+      motion,
+      from: motion === "hop" ? from : index,
+      to: index,
+      duo: this.duoFab?.state || "idle",
+      edge,
+      smaa,
+      hole
+    };
+  }
+
+  _noteWarmProgram(program) {
+    const name = program?.name || program?.type || "program";
+    const cacheKey = program?.cacheKey || "";
+    if (!this._warmProgramKeys) this._warmProgramKeys = new Map();
+    let keys = this._warmProgramKeys.get(name);
+    if (!keys) {
+      keys = [];
+      this._warmProgramKeys.set(name, keys);
+    }
+    if (keys.length < 8 && !keys.includes(cacheKey)) keys.push(cacheKey);
+    if (name === "wet-concrete-floor" && !this._wetWarmSnap) {
+      this._wetWarmSnap = this._snapWetSlots("warm");
+    }
+  }
+
+  _noteProgram(program) {
+    const state = this._programState();
+    const name = program?.name || program?.type || "program";
+    const key = [
+      state.motion,
+      `${state.from}>${state.to}`,
+      `duo:${state.duo}`,
+      `edge:${state.edge ? 1 : 0}`,
+      `smaa:${state.smaa ? 1 : 0}`,
+      name
+    ].join("|");
+    if (!this._programLeakMap) this._programLeakMap = new Map();
+    const row = this._programLeakMap.get(key) || { key, name, count: 0, lights: this._lightKey(), ...state };
+    row.count += 1;
+    const delta = programKeyDelta(this._warmProgramKeys?.get(name), program?.cacheKey || "") || "same-as-warm";
+    if (!row.keyDelta) row.keyDelta = delta;
+    this._programLeakMap.set(key, row);
+    if (state.motion === "hop" && state.from === 0 && state.to === 3) {
+      if (!this._hop03) this._hop03 = [];
+      if (this._hop03.length < 160) {
+        this._hop03.push({
+          name,
+          type: program?.type || "",
+          role: this._programRole(program),
+          delta
+        });
+      }
+    }
+    if (name === "wet-concrete-floor" && !this._wetLiveSnap) {
+      this._wetLiveSnap = this._snapWetSlots("live");
+      this._wetShared = this._sharedTextureReport();
+    }
+  }
+
+  _programRole(program) {
+    const name = program?.name || "";
+    const type = program?.type || "";
+    const override = this.scene?.overrideMaterial;
+    if (override && override.type === type && (override.name || "") === name) {
+      if (/Depth|distance/i.test(type)) return "depth";
+      if (/pick|id/i.test(name)) return "pick";
+      return "override";
+    }
+    if (/MeshDepth|MeshDistance/i.test(type) || /depth/i.test(name)) return "depth";
+    if (/pick|gpu-id|id-pass/i.test(name)) return "pick";
+    if (/override/i.test(name)) return "override";
+    return "own";
+  }
+
+  _watchWetChannels(mat) {
+    const slots = ["map", "roughnessMap", "normalMap", "metalnessMap", "aoMap", "emissiveMap", "envMap"];
+    this._channelWrites = [];
+    for (let i = 0; i < slots.length; i += 1) {
+      const tex = mat[slots[i]];
+      if (!tex?.isTexture || tex.userData.__channelWatch) continue;
+      tex.userData.__channelWatch = true;
+      let value = tex.channel;
+      const slot = slots[i];
+      const log = this._channelWrites;
+      Object.defineProperty(tex, "channel", {
+        configurable: true,
+        enumerable: true,
+        get() {
+          return value;
+        },
+        set(next) {
+          if (next !== value && log.length < 12) {
+            log.push({ slot, uuid: tex.uuid.slice(0, 8), from: value, to: next });
+          }
+          value = next;
+        }
+      });
+    }
+  }
+
+  _snapWetSlots(when) {
+    const mat = this._wetFloorMaterial;
+    if (!mat) return null;
+    const slots = [
+      "map", "alphaMap", "lightMap", "aoMap", "bumpMap", "normalMap", "displacementMap",
+      "emissiveMap", "metalnessMap", "roughnessMap", "anisotropyMap", "clearcoatMap",
+      "clearcoatNormalMap", "clearcoatRoughnessMap", "iridescenceMap", "iridescenceThicknessMap",
+      "sheenColorMap", "sheenRoughnessMap", "specularMap", "specularColorMap", "specularIntensityMap",
+      "transmissionMap", "thicknessMap", "envMap"
+    ];
+    const maps = {};
+    for (let i = 0; i < slots.length; i += 1) {
+      const tex = mat[slots[i]];
+      if (!tex?.isTexture) continue;
+      maps[slots[i]] = { uuid: tex.uuid.slice(0, 8), channel: tex.channel };
+    }
+    return {
+      when,
+      type: mat.type,
+      transmission: mat.transmission ?? 0,
+      version: mat.version,
+      maps
+    };
+  }
+
+  _sharedTextureReport() {
+    const owners = new Map();
+    const note = (mat, slot, tex) => {
+      if (!tex?.isTexture) return;
+      const row = owners.get(tex.uuid) || { uuid: tex.uuid.slice(0, 8), channel: tex.channel, slots: [] };
+      const label = `${mat?.name || mat?.type || "mat"}.${slot}`;
+      if (row.slots.length < 8 && !row.slots.includes(label)) row.slots.push(label);
+      row.channel = tex.channel;
+      owners.set(tex.uuid, row);
+    };
+    const visitMat = (mat) => {
+      if (!mat) return;
+      for (const key of Object.keys(mat)) {
+        const tex = mat[key];
+        if (tex?.isTexture) note(mat, key, tex);
+      }
+    };
+    this.scene?.traverse((obj) => {
+      if (!obj.material) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (let i = 0; i < mats.length; i += 1) visitMat(mats[i]);
+    });
+    const shared = [];
+    for (const row of owners.values()) {
+      if (row.slots.length > 1) shared.push(row);
+    }
+    return shared.slice(0, 24);
+  }
+
+  _hop03Buckets() {
+    const rows = this._hop03 || [];
+    const groups = new Map();
+    const special = [];
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i];
+      const bucket = groups.get(row.delta) || { delta: row.delta, count: 0, names: [], types: [] };
+      bucket.count += 1;
+      if (bucket.names.length < 12 && !bucket.names.includes(row.name)) bucket.names.push(row.name);
+      if (bucket.types.length < 6 && !bucket.types.includes(row.type)) bucket.types.push(row.type);
+      groups.set(row.delta, bucket);
+      if (row.role !== "own" && special.length < 40) {
+        special.push({ name: row.name, type: row.type, role: row.role, delta: row.delta });
+      }
+    }
+    return {
+      total: rows.length,
+      buckets: [...groups.values()].sort((a, b) => b.count - a.count),
+      special
+    };
+  }
+
+  /**
+   * Light counts the beauty camera would compile, matching WebGLRenderer's
+   * projectObject (hidden ancestors drop the subtree; layer misses do not).
+   */
+  _lightKey() {
+    const cam = this.camera;
+    const counts = { p: 0, ps: 0, s: 0, ss: 0, d: 0, ds: 0, r: 0, h: 0, a: 0 };
+    const visit = (obj) => {
+      if (obj.visible === false) return;
+      if (obj.isLight && (!cam || obj.layers.test(cam.layers))) {
+        if (obj.isPointLight) {
+          counts.p += 1;
+          if (obj.castShadow) counts.ps += 1;
+        } else if (obj.isSpotLight) {
+          counts.s += 1;
+          if (obj.castShadow) counts.ss += 1;
+        } else if (obj.isDirectionalLight) {
+          counts.d += 1;
+          if (obj.castShadow) counts.ds += 1;
+        } else if (obj.isRectAreaLight) counts.r += 1;
+        else if (obj.isHemisphereLight) counts.h += 1;
+        else if (obj.isAmbientLight) counts.a += 1;
+      }
+      const children = obj.children;
+      for (let i = 0; i < children.length; i += 1) visit(children[i]);
+    };
+    if (this.scene) visit(this.scene);
+    return `p${counts.p} ps${counts.ps} s${counts.s} ss${counts.ss} d${counts.d} ds${counts.ds} r${counts.r} h${counts.h} a${counts.a}`;
+  }
+
+  /** One row per stop/hop/Duo/edge/black-hole visit. Keys must stay a single string. */
+  _noteLightCensus() {
+    const state = this._programState();
+    const id = [
+      state.motion,
+      `${state.from}>${state.to}`,
+      `duo:${state.duo}`,
+      `edge:${state.edge ? 1 : 0}`,
+      `smaa:${state.smaa ? 1 : 0}`,
+      `hole:${state.hole ? 1 : 0}`
+    ].join("|");
+    const lights = this._lightKey();
+    if (!this._lightCensus) this._lightCensus = new Map();
+    const row = this._lightCensus.get(id) || { id, keys: [] };
+    if (!row.keys.includes(lights)) row.keys.push(lights);
+    this._lightCensus.set(id, row);
+  }
+
+  _lightCensusRows() {
+    if (!this._lightCensus) return [];
+    return [...this._lightCensus.values()];
+  }
+
+  _programLeakRows() {
+    if (!this._programLeakMap) return [];
+    const states = new Map();
+    for (const row of this._programLeakMap.values()) {
+      const cut = row.key.lastIndexOf("|");
+      const key = cut >= 0 ? row.key.slice(0, cut) : row.key;
+      const bucket = states.get(key) || {
+        key,
+        count: 0,
+        names: [],
+        stop: row.stop,
+        motion: row.motion,
+        from: row.from,
+        to: row.to,
+        duo: row.duo,
+        edge: row.edge,
+        smaa: row.smaa,
+        hole: row.hole,
+        lights: row.lights,
+        keyDelta: ""
+      };
+      bucket.count += row.count;
+      if (bucket.names.length < 8 && !bucket.names.includes(row.name)) bucket.names.push(row.name);
+      if (row.keyDelta && (row.name === "wet-concrete-floor" || !bucket.keyDelta)) {
+        bucket.keyDelta = row.keyDelta;
+      }
+      states.set(key, bucket);
+    }
+    return [...states.values()].sort((a, b) => b.count - a.count).slice(0, 20);
+  }
+
+  _installGlProbe() {
+    const gl = this.renderer.getContext();
+    const bucket = {
+      compileMs: 0,
+      compiles: 0,
+      linkMs: 0,
+      links: 0,
+      infoLogMs: 0,
+      infoLogs: 0,
+      linkStatusMs: 0,
+      linkStatus: 0,
+      readPixels: 0,
+      readPixelsMs: 0,
+      texImageMs: 0,
+      texImages: 0,
+      texSubMs: 0,
+      texSubs: 0
+    };
+    this._glBucket = bucket;
+    const wrap = (name, msKey, nKey) => {
+      const orig = gl[name].bind(gl);
+      gl[name] = (...args) => {
+        const t0 = performance.now();
+        const result = orig(...args);
+        bucket[msKey] += performance.now() - t0;
+        bucket[nKey] += 1;
+        return result;
+      };
+    };
+    wrap("compileShader", "compileMs", "compiles");
+    wrap("linkProgram", "linkMs", "links");
+    wrap("getProgramInfoLog", "infoLogMs", "infoLogs");
+    wrap("getShaderInfoLog", "infoLogMs", "infoLogs");
+    wrap("readPixels", "readPixelsMs", "readPixels");
+    wrap("texImage2D", "texImageMs", "texImages");
+    wrap("texSubImage2D", "texSubMs", "texSubs");
+    const origParam = gl.getProgramParameter.bind(gl);
+    const linkStatus = gl.LINK_STATUS;
+    const completion = 0x91b1;
+    gl.getProgramParameter = (program, pname) => {
+      const t0 = performance.now();
+      const result = origParam(program, pname);
+      if (pname === linkStatus || pname === completion) {
+        bucket.linkStatusMs += performance.now() - t0;
+        bucket.linkStatus += 1;
+      }
+      return result;
+    };
+    this._glMark = { ...bucket, programs: this.renderer.info.programs?.length ?? 0 };
+  }
+
+  _snapshotGl() {
+    const bucket = this._glBucket;
+    const mark = this._glMark;
+    if (!bucket || !mark) return null;
+    const programs = this.renderer.info.programs?.length ?? 0;
+    const round = (n) => Math.round(n * 10) / 10;
+    const snap = {
+      compileMs: round(bucket.compileMs - mark.compileMs),
+      compiles: bucket.compiles - mark.compiles,
+      linkMs: round(bucket.linkMs - mark.linkMs),
+      links: bucket.links - mark.links,
+      infoLogMs: round(bucket.infoLogMs - mark.infoLogMs),
+      infoLogs: bucket.infoLogs - mark.infoLogs,
+      linkStatusMs: round(bucket.linkStatusMs - mark.linkStatusMs),
+      linkStatus: bucket.linkStatus - mark.linkStatus,
+      readPixels: bucket.readPixels - mark.readPixels,
+      readPixelsMs: round(bucket.readPixelsMs - mark.readPixelsMs),
+      texImageMs: round(bucket.texImageMs - mark.texImageMs),
+      texImages: bucket.texImages - mark.texImages,
+      texSubMs: round(bucket.texSubMs - mark.texSubMs),
+      texSubs: bucket.texSubs - mark.texSubs,
+      newPrograms: programs - mark.programs
+    };
+    this._glMark = { ...bucket, programs };
+    return snap;
+  }
+
+  resetFloorStats() {
+    this._floorStats = { maxMs: 0, minFps: 999, cause: "render", frames: 0, breaches: [] };
+    this._floorPostT = 1;
+    this._lastGap = null;
+    this._gapTasks = [];
+    this._rigHits = [];
+    this._paintPeakMs = 0;
+    this._lastRigSteps = [];
+    this._lastRigState = null;
+  }
+
+  /** Clear the rig-span lap list for this frame. */
+  _beginRigProbe() {
+    this._rigSteps = [];
+  }
+
+  /**
+   * Record one rig-span sub-step. Hits ≥ 40 ms keep the stop/hop/Duo state
+   * so a one-frame stall can be tied to the interaction that caused it.
+   * @param {string} name
+   * @param {number} ms
+   */
+  _rigRecord(name, ms) {
+    if (name === "duoFab.projectsPaint" && ms > (this._paintPeakMs || 0)) {
+      this._paintPeakMs = ms;
+    }
+    if (!(ms >= 0.4)) return;
+    const rounded = Math.round(ms * 10) / 10;
+    if (!this._rigSteps) this._rigSteps = [];
+    this._rigSteps.push([name, rounded]);
+    if (ms < 40) return;
+    const state = this._programState();
+    if (!this._rigHits) this._rigHits = [];
+    if (this._rigHits.length >= 32) return;
+    this._rigHits.push({
+      name,
+      ms: rounded,
+      motion: state.motion,
+      from: state.from,
+      to: state.to,
+      duo: state.duo,
+      edge: state.edge ? 1 : 0,
+      stop: state.stop
+    });
+  }
+
+  /**
+   * @template T
+   * @param {string} name
+   * @param {() => T} fn
+   * @returns {T}
+   */
+  _rigLap(name, fn) {
+    const t0 = performance.now();
+    const value = fn();
+    this._rigRecord(name, performance.now() - t0);
+    return value;
+  }
+
+  _publishPixelBudget() {
+    const draw = new THREE.Vector2();
+    this.renderer.getDrawingBufferSize(draw);
+    const drawMp = (draw.x * draw.y) / 1e6;
+    const payload = {
+      type: "pixelBudget",
+      targetMp: this._pixelBudgetMp,
+      pixelRatio: this.pixelRatio,
+      drawW: draw.x,
+      drawH: draw.y,
+      drawMp: Math.round(drawMp * 100) / 100,
+      smaa: Boolean(this.post?.smaaPass?.enabled),
+      msaa: this.post?.composer?.multisampling ?? 0
+    };
+    const key = `${payload.targetMp}|${payload.pixelRatio}|${payload.drawW}x${payload.drawH}|${payload.smaa}|${payload.msaa}`;
+    if (key === this._pixelBudgetKey) return;
+    this._pixelBudgetKey = key;
+    this._hostPost?.(payload);
+  }
+
+  /** First land: resize while the black hole (or the hold) is still up. */
+  _primeRestDpr() {
+    if (this._restDprActive) return;
+    this._restDprActive = true;
+    this._restDprWait = false;
+    this._applyRenderScale();
+  }
+
+  /**
+   * @param {boolean} settled
+   * @param {number} index
+   */
+  _tickRestDpr(settled, index) {
+    if (!this.introComplete) return;
+    const restStop = settled && index >= 0 && index <= 3;
+    if (restStop) {
+      if (this._restDprActive) {
+        this._restDprWait = false;
+        return;
+      }
+      if (!this._restDprWait) {
+        this._restDprWait = true;
+        return;
+      }
+      this._restDprWait = false;
+      this._restDprActive = true;
+      this._applyRenderScale();
+      return;
+    }
+    this._restDprWait = false;
+    if (this._restDprActive) {
+      this._restDprActive = false;
+      this._applyRenderScale();
+    }
+  }
+
+  debugRestFidelity() {
+    const index = this.cameraRig?.state?.index ?? this.current ?? 0;
+    const spec = restFidelityForIndex(index);
+    const engine = this.vignettes?.[index]?.instance?.grassEngine ?? null;
+    const light = this.neon?.stopLights?.[0]?.light ?? null;
+    return {
+      key: this._restFidelityKey,
+      resources: spec ? spec.resources.map((resource) => resource.id) : [],
+      grass: engine?._restStats ?? null,
+      windDetail: engine?._material?.userData?.grassUniforms?.uWindDetail?.value ?? null,
+      wet: this.wetFloor?.debugState?.() ?? null,
+      lanternBakes: light?.userData?.shadowBakes ?? null,
+      lanternAutoUpdate: light?.shadow?.autoUpdate ?? null
+    };
+  }
+
+  /**
    * Apply governor wet / shadow / DPR side effects when the profile changes.
    */
   _syncPerfGovernorSideEffects() {
+    // Rest owns the settled image. A ladder step must not resize shadows
+    // until the hop hands this profile back.
+    if (this._restDprActive) return;
     const p = this.perfGovernor?.profile;
     if (!p) return;
     const wetN = p.wetProbeEveryN ?? null;
@@ -1437,70 +2744,10 @@ export class StageExperience {
    * Bloom only ever sees fog at opacity 0 or 1, never the mid-ramp.
    * @param {number} dt
    */
-  _tickVolumetricFog(dt) {
-    if (!STAGE_FOG_ENABLED) return;
-    const pass = this.volumetricFog;
-    if (!pass) return;
+  _tickVolumetricFog() {}
 
-    if (this._fogMode !== "volumetric" || !this.introComplete || this._volFogUserOff) {
-      pass.setEnabled(false);
-      pass.setDensityScale(0);
-      pass.setCompositeOpacity?.(0);
-      this._volFogFade = 0;
-      return;
-    }
-
-    pass.setEnabled(true);
-    // Density + in-scatter at authored strength — never ramp through bloom crossing.
-    pass.setDensityScale(1);
-    const fadeSec = FOG_HEAVY_FADE_IN_MS / 1000;
-    const step = fadeSec > 0 ? Math.min(Math.max(dt, 0), 1 / 20) / fadeSec : 1;
-    const wasComplete = this._volFogFade >= 1;
-    this._volFogFade = Math.min(1, this._volFogFade + step);
-    pass.setCompositeOpacity?.(this._volFogFade);
-    if (!wasComplete && this._volFogFade >= 1 && this._introLandAt) {
-      this._fogFadeDoneAt = performance.now();
-      // Bloom return is owned by `_tickIntroBloomReturn` (shared with fog-off).
-      this._bloomReturnT = 0;
-    }
-    // Hold bloom at 0 while opacity ramps (never extracts mid-fade).
-    if (this._volFogFade < 1) {
-      this._syncBloomForFogFade(false);
-    }
-  }
-
-  /**
-   * Video fog land fade (mirrors volumetric composite opacity timing).
-   * @param {number} dt
-   */
-  _tickVideoFog(dt) {
-    if (!STAGE_FOG_ENABLED) return;
-    const fog = this.videoFog;
-    if (!fog) return;
-
-    if (this._fogMode !== "video" || !this.introComplete || this._videoFogUserOff) {
-      fog.setEnabled(false);
-      fog.setCompositeFade(0);
-      this._videoFogFade = 0;
-      return;
-    }
-
-    fog.setEnabled(true);
-    const fadeSec = VIDEO_FOG_FADE_IN_MS / 1000;
-    const step = fadeSec > 0 ? Math.min(Math.max(dt, 0), 1 / 20) / fadeSec : 1;
-    const wasComplete = this._videoFogFade >= 1;
-    this._videoFogFade = Math.min(1, this._videoFogFade + step);
-    fog.setCompositeFade(this._videoFogFade);
-    // Arrive + depth uniforms land later this frame; final update runs after setVignetteFog.
-
-    if (!wasComplete && this._videoFogFade >= 1 && this._introLandAt) {
-      this._fogFadeDoneAt = performance.now();
-      this._bloomReturnT = 0;
-    }
-    if (this._videoFogFade < 1) {
-      this._syncBloomForFogFade(false);
-    }
-  }
+  /** Video fog is parked in src/fog-aside. */
+  _tickVideoFog() {}
 
   /**
    * Soft-return neon bloom after intro land. Runs whether fog is parked or live —
@@ -1672,9 +2919,16 @@ export class StageExperience {
 
   _ensureWaterCursor() {
     if (this.waterCursor || this.reducedMotion || !this._interactionReady) return;
+    if (this._inWorker && this.isCoarse) return;
+    const view = this._viewportCssSize();
     this.waterCursor = WaterCursor.tryCreate({
       renderer: this.renderer,
-      ticker: gsap.ticker
+      ticker: gsap.ticker,
+      headless: this._inWorker,
+      pointerFine: this._inWorker ? !this.isCoarse : undefined,
+      reducedMotion: this._inWorker ? this.reducedMotion : undefined,
+      width: this._inWorker ? view.w : 0,
+      height: this._inWorker ? view.h : 0
     });
     if (this.waterCursor) {
       const { w, h } = this._viewportCssSize();
@@ -1719,18 +2973,85 @@ export class StageExperience {
     });
   }
 
+  /**
+   * Sky pitch for the aerial drop. Zero during the flight, on the ring, and
+   * once height has landed — ring hops and cursor parallax stay fixed.
+   * @returns {{ pitch: number, axis: THREE.Vector3 }}
+   */
+  _introSkyDrop() {
+    const rig = this.cameraRig;
+    const axis = skyDropAxis(this.camera);
+    if (!rig?._introActive || rig.poseSuspended) {
+      return { pitch: 0, axis };
+    }
+    const lookDist = Math.max(rig.restRadius - rig.vignetteRadius, 1);
+    const pitch = introSkyDropPitch(rig.state.height - rig.restHeight, lookDist);
+    return { pitch, axis };
+  }
+
+  debugWarmVignette0() {
+    const warm = this._vignette0Warm;
+    const light = this.neon?.stopLights?.[0]?.light ?? null;
+    if (!warm) return null;
+    return {
+      phase: warm.phase,
+      done: warm.done,
+      meshes: warm.meshes,
+      meshAt: warm.meshAt,
+      textures: warm.textures,
+      textureAt: warm.textureAt,
+      shadowBaked: warm.shadowBaked,
+      prelit: warm.prelit,
+      drawCalls: warm.drawCalls,
+      lanternIntensity: light?.intensity ?? null,
+      shadowPrebaked: light?.userData?.shadowPrebaked ?? false,
+      lanternBakes: light?.userData?.shadowBakes ?? null
+    };
+  }
+
+  /** One idle frame of Bust prewarm. No-op once the pass has finished. */
+  warmVignette0() {
+    if (!this._vignette0Warm || this._vignette0Warm.done) {
+      this._maybeShowEnter();
+      return this._vignette0Warm;
+    }
+    const state = stepVignette0Warm(this, this._vignette0Warm);
+    if (state?.done) {
+      this._primeRestDpr();
+      this._maybeShowEnter();
+    }
+    return state;
+  }
+
   /** Mark intro done once the spring pageload descent settles. */
   _tickIntroFromCameraRig() {
     if (this._introMotionComplete || !this.cameraRig) return;
     if (this._blackHoleActive) return;
 
-    // Aerial hold — absorb first-frame GPU compile before the drop starts.
+    if (this._descentPendingWarm) {
+      this.warmVignette0();
+      if (!this._vignette0Warm.done) return;
+      this._descentPendingWarm = false;
+      this.world.visible = true;
+      this._introSpringArmed = true;
+      this.cameraRig.armIntroDescent();
+    }
+
+    // Aerial hold — Bust warm replaces the cold first frame. The 240 ms
+    // floor still applies; the drop waits until warmVignette0 finishes.
     if (!this._introSpringArmed) {
+      this.warmVignette0();
       if (!this._introHoldStartedAt) this._introHoldStartedAt = performance.now();
-      if (performance.now() - this._introHoldStartedAt >= INTRO_SPRING_HOLD_MS) {
+      const held = performance.now() - this._introHoldStartedAt >= INTRO_SPRING_HOLD_MS;
+      if (held && this._vignette0Warm.done) {
         this._introSpringArmed = true;
         this.cameraRig.armIntroDescent();
       }
+      return;
+    }
+
+    if (this.reducedMotion && !this._vignette0Warm.done) {
+      this.warmVignette0();
       return;
     }
 
@@ -1790,23 +3111,17 @@ export class StageExperience {
       if (obj.isMesh && obj.layers.isEnabled(GPU_HOLD_LAYER)) held = true;
     });
     if (!held) return;
+    this._holdStableLightVariant();
     await warmMeshesChunked(root, this.renderer);
     try {
       await spanFrame("shader-compile", async () => {
-        compileHeldRoot(this.renderer, this.scene, this.camera, root);
-      });
-      await spanFrame("fog-depth-compile", async () => {
-        const restore = hideSceneExcept(this.scene, root);
-        try {
-          this.neon?.compileHeldFogDepth?.(this.renderer, this.scene, this.camera);
-        } finally {
-          restore();
-        }
+        await compileHeldRoot(this.renderer, this.scene, this.camera, root);
       });
     } catch (error) {
       console.warn("[StageExperience] Held compile failed:", error);
     }
     releaseRootToCamera(root);
+    this._revealPending = true;
     await this._yieldFrame();
   }
 
@@ -1920,21 +3235,10 @@ export class StageExperience {
           revealHidden: true
         })
       );
-      await this._compileThenShow(archaeology?.shelfRoot);
-      await this._compileThenShow(archaeology?.venusRoot);
-      await this._compileThenShow(archaeology?.antikytheraRoot);
-      await this._compileThenShow(archaeology?.lucyRoot);
-      await this._compileThenShow(archaeology?.lucyStandRoot);
-      await this._compileThenShow(archaeology?.trojanHorseRoot);
-      await this._compileThenShow(archaeology?.olmecHeadRoot);
-      await this._compileThenShow(archaeology?.oliveBoatRoot);
-      await this._compileThenShow(archaeology?.cuneiformRoot);
-      await this._compileThenShow(archaeology?.cuneiformEaselRoot);
-      await this._compileThenShow(archaeology?.ishtarGateRoot);
-      await this._compileThenShow(archaeology?.ptolemyRoot);
-      await this._compileThenShow(archaeology?.divjeBabeFluteRoot);
-      await this._compileThenShow(archaeology?.neanderthalRoot);
-      await this._compileThenShow(archaeology?.neanderthalStandRoot);
+      const archaeologyRoots = archaeology?.getMountedRoots?.({ compile: true }) ?? [];
+      for (const root of archaeologyRoots) {
+        await this._compileThenShow(root);
+      }
 
       stillHolding = Boolean(
         desktop?._holdForIntro ||
@@ -1978,16 +3282,33 @@ export class StageExperience {
       dt,
       allowNeon
     });
+    const stops = this.neon.stopLights;
+    if (stops) {
+      for (let i = 0; i < stops.length; i += 1) {
+        if (stops[i]?.light?.userData.flushShadow) {
+          stops[i].light.userData.flushShadow = false;
+          this._flushShadowBake = true;
+        }
+      }
+    }
     this._tickAccentLights(time, dt, s.index);
     this._tickContactShadows();
 
     const neonPos =
       this.neon?.stopLights?.[s.index]?.light?.position ?? null;
-    // Wet-floor CubeCamera only while settled — hops skip the 6-face probe.
+    // Wet-floor cube bakes during the hop, not on the held frame.
     if (!s.isSettled) {
       this.wetFloor?.setBubbleCenter?.(neonPos);
+      if (this.wetFloor?._bakePending) {
+        const baked = this.wetFloor.update?.(time, { probeWorld: neonPos, hideExtra: [] });
+        if (baked) {
+          this._frameCause = "wet-bake";
+          this._skipBeauty = true;
+        }
+      }
       return;
     }
+    if (this.wetFloor?._bakePending) return;
     const vig = this.vignettes?.[s.index]?.instance;
     const hideExtra = [];
     if (vig?.grassRoot) hideExtra.push(vig.grassRoot);
@@ -2071,8 +3392,83 @@ export class StageExperience {
     return state;
   }
 
+  /**
+   * Neon point lights and the POV spot always cast. Hops dim shadow.intensity
+   * instead of clearing castShadow, so NUM_*_LIGHT_SHADOWS stays put.
+   */
+  _markPre(name, t0) {
+    const ms = performance.now() - t0;
+    if (ms >= (this._prePartMs || 0)) {
+      this._prePartMs = ms;
+      this._prePart = name;
+    }
+    return performance.now();
+  }
+
+  _holdStableLightVariant() {
+    this._pinStageLightSlots();
+    const stops = this.neon?.stopLights || [];
+    for (let i = 0; i < stops.length; i += 1) {
+      const light = stops[i]?.light;
+      if (!light) continue;
+      light.castShadow = true;
+      if (light.shadow) light.shadow.autoUpdate = false;
+    }
+    if (this.spotLight) this.spotLight.castShadow = true;
+    const glow = this.stageLights?.glow;
+    const ball = this.stageLights?.scrollball;
+    if (glow) glow.castShadow = false;
+    if (ball) ball.castShadow = false;
+  }
+
+  /**
+   * Spill, glow, and the scrollball stay on the scene rig. A hidden vignette
+   * used to drop them out of the program key (settled stop 3 went to p5 r0).
+   */
+  _pinStageLightSlots() {
+    const rig = this.stageLights;
+    if (!rig?.group || !this.scene) return;
+    if (rig.group.parent !== this.scene) {
+      this._noteLightPin("reparent-group", rig.group.parent?.name || "none");
+      this.scene.add(rig.group);
+    }
+    if (rig.group.visible === false) {
+      this._noteLightPin("group-hidden");
+      rig.group.visible = true;
+    }
+    const lights = [rig.spill, rig.glow, rig.scrollball];
+    for (let i = 0; i < lights.length; i += 1) {
+      const light = lights[i];
+      if (!light) continue;
+      if (light.parent !== rig.group) {
+        this._noteLightPin("reparent-light", `${light.name} from ${light.parent?.name || "none"}`);
+        rig.group.add(light);
+      }
+      if (light.visible === false) {
+        this._noteLightPin("light-hidden", light.name);
+        light.visible = true;
+      }
+      if (this.camera && !light.layers.test(this.camera.layers)) {
+        this._noteLightPin(
+          "camera-miss",
+          `${light.name} light ${light.layers.mask} cam ${this.camera.layers.mask}`
+        );
+        light.layers.mask |= this.camera.layers.mask;
+      }
+    }
+  }
+
+  _noteLightPin(reason, detail) {
+    const key = detail ? `${reason}:${detail}` : reason;
+    if (!this._lightPinSeen) this._lightPinSeen = new Set();
+    if (this._lightPinSeen.has(key)) return;
+    this._lightPinSeen.add(key);
+    console.warn("[StageExperience] stage light slot repaired", key);
+  }
+
   /** CRT env capture — skipped if the held-window warm already ran. */
   _flushIntroDeferredWork() {
+    if (this.liveEnv?._livePmremLocked) return;
     const desktop = this.vignettes[1]?.instance;
     if (!desktop?.updateCrtGlassReflection) return;
     if (desktop._lastEnvRotY != null) return;
@@ -2097,24 +3493,11 @@ export class StageExperience {
 
   /** Fade GLB vignettes in after post-settle integration mounts them hidden. */
   _tickModelReveal(dt) {
+    const archaeology = this.vignettes[3]?.instance;
     const roots = [
       this.vignettes[1]?.instance?.pcRoot,
       this.vignettes[2]?.instance?.sidekickRoot,
-      this.vignettes[3]?.instance?.shelfRoot,
-      this.vignettes[3]?.instance?.venusRoot,
-      this.vignettes[3]?.instance?.antikytheraRoot,
-      this.vignettes[3]?.instance?.lucyRoot,
-      this.vignettes[3]?.instance?.lucyStandRoot,
-      this.vignettes[3]?.instance?.trojanHorseRoot,
-      this.vignettes[3]?.instance?.olmecHeadRoot,
-      this.vignettes[3]?.instance?.oliveBoatRoot,
-      this.vignettes[3]?.instance?.cuneiformRoot,
-      this.vignettes[3]?.instance?.cuneiformEaselRoot,
-      this.vignettes[3]?.instance?.ishtarGateRoot,
-      this.vignettes[3]?.instance?.ptolemyRoot,
-      this.vignettes[3]?.instance?.divjeBabeFluteRoot,
-      this.vignettes[3]?.instance?.neanderthalRoot,
-      this.vignettes[3]?.instance?.neanderthalStandRoot
+      ...(archaeology?.getMountedRoots?.({ fades: true }) ?? [])
     ].filter(Boolean);
     if (!roots.length) return;
 
@@ -2134,6 +3517,22 @@ export class StageExperience {
       if (opacity >= 1 && root.userData._revealStamped) continue;
       setGroupRenderOpacity(root, opacity);
       if (opacity >= 1) root.userData._revealStamped = true;
+    }
+    if (opacity >= 1 && archaeology && !this._archRevealLogged) {
+      this._archRevealLogged = true;
+      const settled = archaeology.getMountedRoots().map((root) => {
+        let held = 0;
+        let meshOpacity = null;
+        root.traverse((obj) => {
+          if (!obj.isMesh) return;
+          if (obj.layers.isEnabled(GPU_HOLD_LAYER)) held += 1;
+          const mat = Array.isArray(obj.material) ? obj.material[0] : obj.material;
+          if (meshOpacity == null && mat) meshOpacity = mat.opacity;
+        });
+        const name = root.userData.archaeologyMount?.name || root.name;
+        return `${name}:held=${held}:op=${meshOpacity}`;
+      });
+      console.log(`[Archaeology] reveal settled ${settled.length} ${settled.join(" ")}`);
     }
   }
 
@@ -2166,7 +3565,7 @@ export class StageExperience {
         group.position.x *= 0.95;
         group.position.z *= 0.95;
         const desktop = new DesktopVignette(group, {
-          mySpace: this.hud.getMySpaceScreen(),
+          mySpace: this._inWorker ? this._crtPlaceholder : this.hud.getMySpaceScreen(),
           scrollCapture: this.scrollCapture,
           parallaxDampZones: this.parallaxDampZones,
           vignetteIndex: index,
@@ -2177,7 +3576,8 @@ export class StageExperience {
           loadingManager: this.loadingManager,
           getCamera: () => this.camera,
           reducedMotion: this.reducedMotion,
-          onAligned: () => this._snapAllVignettesToFloor()
+          onAligned: () => this._snapAllVignettesToFloor(),
+          stageLights: this.stageLights
         });
         instances.push({ def, group, angle, stageDeg, instance: desktop });
       } else if (index === 2) {
@@ -2193,6 +3593,12 @@ export class StageExperience {
             this.cameraRig.zoomOut();
             this._syncCameraRigZoom();
           },
+          onScreenCommand: this._inWorker
+            ? (command, payload) => {
+                this._hostPost?.({ type: "sidekick", command, ...(payload || {}) });
+              }
+            : null,
+          onScreenReady: () => this._applyQueuedSidekickBitmap(),
           onAligned: () => {
             this._snapAllVignettesToFloor();
             // Only fit once the camera is on the Sidekick stop — otherwise
@@ -2200,7 +3606,8 @@ export class StageExperience {
             if (this.introComplete && this.cameraRig?.state?.index === 2) {
               this._fitSidekickRestPose(false);
             }
-          }
+          },
+          stageLights: this.stageLights
         });
         instances.push({ def, group, angle, stageDeg, instance: sidekick });
       } else if (index === 3) {
@@ -2246,6 +3653,16 @@ export class StageExperience {
   }
 
   _bindUi() {
+    if (this._inWorker) {
+      this.ui = {};
+      this._hostPost?.({
+        type: "stops",
+        stops: this.vignettes.map((vig) => ({ name: vig.def.name, desc: vig.def.desc }))
+      });
+      this._setCaption(0);
+      return;
+    }
+
     this.ui = {
       readout: document.getElementById("readout"),
       fps: document.getElementById("fps"),
@@ -2280,6 +3697,15 @@ export class StageExperience {
         dot.classList.toggle("active", i === index);
       });
     }
+    this._hostPost?.({
+      type: "stopChange",
+      data: {
+        stopIndex: index,
+        count: this.vignettes.length,
+        name: def.name,
+        desc: def.desc
+      }
+    });
   }
 
   _setActiveVignette(index) {
@@ -2303,10 +3729,10 @@ export class StageExperience {
       sidekick.invalidateRestPose?.();
     }
 
-    this.world.updateMatrixWorld(true);
-    const fitted = sidekick.fitRestHeroPose(this.camera);
+    this._rigLap("sidekick.worldMatrix", () => this.world.updateMatrixWorld(true));
+    const fitted = this._rigLap("sidekick.fitPose", () => sidekick.fitRestHeroPose(this.camera));
     if (fitted) {
-      sidekick.update?.(0);
+      this._rigLap("sidekick.fitUpdate", () => sidekick.update?.(0));
     }
     return fitted;
   }
@@ -2396,7 +3822,15 @@ export class StageExperience {
 
   _bindInput() {
     this._onWheel = (event) => {
-      if (this.locked || this.duoMode) {
+      if (this.locked) {
+        event.preventDefault();
+        return;
+      }
+      // Case study is a real scroller. preventDefault here cancels that scroll
+      // because this listener is non-passive on window. Leave the event alone
+      // when the pointer is over the sheet so the browser moves .duo-cs__scroll.
+      if (this.duoMode) {
+        if (this._wheelShouldScrollCaseStudy(event)) return;
         event.preventDefault();
         return;
       }
@@ -2444,9 +3878,16 @@ export class StageExperience {
       this.cameraRig.scrollAdvance.handleWheel(event);
     };
 
-    window.addEventListener("wheel", this._onWheel, { passive: false });
-
-    window.addEventListener("keydown", (event) => {
+    this._onKeyDown = (event) => {
+      if (event.key === "?" && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        const tag = event.target?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || event.target?.isContentEditable) return;
+        event.preventDefault();
+        const steps = [1.6, 2.3, 3.2];
+        const index = steps.findIndex((step) => Math.abs(step - this._pixelBudgetMp) < 0.05);
+        this.setPixelBudget(steps[(index + 1) % steps.length]);
+        return;
+      }
       if (event.key === "Escape") {
         if (this.duoCaseStudy?.isOpen) {
           this._duoCloseAll();
@@ -2470,7 +3911,13 @@ export class StageExperience {
       if (this.duoMode) return;
       if (event.key === "ArrowRight" || event.key === "ArrowDown") this.next();
       if (event.key === "ArrowLeft" || event.key === "ArrowUp") this.prev();
-    });
+    };
+
+    if (this._inWorker) return;
+
+    window.addEventListener("wheel", this._onWheel, { passive: false });
+
+    window.addEventListener("keydown", this._onKeyDown);
 
     this._touch = { x: null, y: null };
     window.addEventListener(
@@ -2530,7 +3977,181 @@ export class StageExperience {
   }
 
   _getCanvasRect() {
+    if (this._inWorker) {
+      const w = Math.max(1, this._cssWidth || 1);
+      const h = Math.max(1, this._cssHeight || 1);
+      return { left: 0, top: 0, width: w, height: h, right: w, bottom: h };
+    }
     return this.canvas.getBoundingClientRect();
+  }
+
+  _hostPointerEvent(msg) {
+    const event = this._hostEvent || (this._hostEvent = {
+      clientX: 0,
+      clientY: 0,
+      button: 0,
+      preventDefault() {},
+      stopImmediatePropagation() {},
+      target: null
+    });
+    event.clientX = msg.clientX ?? 0;
+    event.clientY = msg.clientY ?? 0;
+    event.button = msg.button ?? 0;
+    return event;
+  }
+
+  handleHostResize({ width, height, dpr }) {
+    this._cssWidth = width;
+    this._cssHeight = height;
+    if (Number.isFinite(dpr) && dpr > 0) {
+      this._fullPixelRatio = Math.min(dpr, this.isCoarse ? 1.5 : 1.75);
+      this.pixelRatio = this._fullPixelRatio * (this._renderScale || 1);
+      this.renderer?.setPixelRatio(this.pixelRatio);
+    }
+    this._onResize();
+  }
+
+  applyCrtBitmap(bitmap, state) {
+    this._crtPlaceholder?.applyBitmap?.(bitmap, state);
+  }
+
+  applySidekickBitmap(bitmap) {
+    if (
+      this._sidekickBitmap &&
+      this._sidekickBitmap !== bitmap &&
+      typeof ImageBitmap !== "undefined" &&
+      this._sidekickBitmap instanceof ImageBitmap
+    ) {
+      this._sidekickBitmap.close();
+    }
+    this._sidekickBitmap = bitmap;
+    this._applyQueuedSidekickBitmap();
+  }
+
+  _applyQueuedSidekickBitmap() {
+    const bitmap = this._sidekickBitmap;
+    const mesh = this.vignettes?.[2]?.instance?.screenMesh;
+    if (!bitmap || !mesh) return;
+    const material = Array.isArray(mesh.material)
+      ? mesh.material.find((mat) => mat) || null
+      : mesh.material;
+    if (!material) return;
+    if (!this._sidekickMap) {
+      this._sidekickMap = new THREE.Texture(bitmap);
+      this._sidekickMap.colorSpace = THREE.SRGBColorSpace;
+      this._sidekickMap.flipY = false;
+      this._sidekickMap.generateMipmaps = false;
+      this._sidekickMap.minFilter = THREE.LinearFilter;
+      this._sidekickMap.magFilter = THREE.LinearFilter;
+    }
+    const prev = this._sidekickMap.image;
+    this._sidekickMap.image = bitmap;
+    this._sidekickMap.needsUpdate = true;
+    material.map = this._sidekickMap;
+    material.emissiveMap = this._sidekickMap;
+    configureSidekickScreenMaterial(material);
+    ensureSidekickScreenMapLocked(mesh);
+    material.needsUpdate = true;
+    if (prev && prev !== bitmap && typeof ImageBitmap !== "undefined" && prev instanceof ImageBitmap) {
+      prev.close();
+    }
+  }
+
+  applyDuoBitmap(bitmap) {
+    const texture = this.duoFab?._mailScreen?.texture;
+    if (!texture) {
+      const prev = this._duoBitmapPending;
+      this._duoBitmapPending = bitmap;
+      if (prev && prev !== bitmap && typeof ImageBitmap !== "undefined" && prev instanceof ImageBitmap) {
+        prev.close();
+      }
+      return;
+    }
+    this._duoBitmapPending = null;
+    this._duoGlassReady = true;
+    const prev = texture.image;
+    texture.image = bitmap;
+    texture.needsUpdate = true;
+    if (prev && prev !== bitmap && typeof ImageBitmap !== "undefined" && prev instanceof ImageBitmap) {
+      prev.close();
+    }
+  }
+
+  handleHostDuo(msg) {
+    if (msg.action === "poseCaseStudy") {
+      this.duoFab?.openCaseStudy();
+      this.duoMode = true;
+      return;
+    }
+    if (msg.action === "close") {
+      this.duoFab?.closeToIdle();
+      this.duoMode = false;
+      return;
+    }
+    if (msg.action === "back") {
+      this.duoFab?.closeToMail();
+      this.duoMode = true;
+      return;
+    }
+    if (msg.action === "capture") this.duoFab?.captureMailScreen?.();
+  }
+
+  handleHostPointer(msg) {
+    const event = this._hostPointerEvent(msg);
+    this._updateHoverFromClient(event.clientX, event.clientY);
+    if (this.cameraRig && !this.reducedMotion) {
+      this.cameraRig.setPointer(msg.x || 0, msg.y || 0);
+    }
+    if (msg.inside === false) this.waterCursor?.setPointer?.(event.clientX, event.clientY, false);
+    else this.waterCursor?.setPointer?.(event.clientX, event.clientY, true);
+  }
+
+  handleHostWheel(msg) {
+    this._onWheel?.({
+      ...this._hostPointerEvent(msg),
+      deltaY: msg.deltaY || 0,
+      deltaMode: msg.deltaMode || 0
+    });
+  }
+
+  handleHostPointerDown(msg) {
+    const event = this._hostPointerEvent(msg);
+    this.waterCursor?.setPressed?.(true);
+    if (this._blackHoleActive && this._onBlackHolePointerDown) {
+      this._onBlackHolePointerDown(event);
+      return;
+    }
+    this._onPointerDown?.(event);
+  }
+
+  handleHostPointerUp() {
+    this.waterCursor?.setPressed?.(false);
+    this._onPointerUp?.();
+  }
+
+  handleHostClick(msg) {
+    this._onVignetteClick?.(this._hostPointerEvent(msg));
+  }
+
+  handleHostKey(msg) {
+    const event = {
+      key: msg.key,
+      shiftKey: Boolean(msg.shiftKey),
+      metaKey: Boolean(msg.metaKey),
+      ctrlKey: Boolean(msg.ctrlKey),
+      altKey: Boolean(msg.altKey),
+      preventDefault() {},
+      target: null
+    };
+    if (this._blackHoleActive && this._onBlackHoleKeyDown) {
+      this._onBlackHoleKeyDown(event);
+      return;
+    }
+    this._onKeyDown?.(event);
+  }
+
+  engageBlackHole() {
+    this._triggerBlackHoleSpiral();
   }
 
   /**
@@ -2563,6 +4184,26 @@ export class StageExperience {
       return true;
     }
     return false;
+  }
+
+  /**
+   * True when this wheel should move the open case-study sheet and not the ring.
+   * Wheels on the sticky nav (outside the scroller) are applied by hand.
+   * @param {WheelEvent} event
+   */
+  _wheelShouldScrollCaseStudy(event) {
+    if (!this.duoCaseStudy?.isOpen) return false;
+    const root = this.duoCaseStudy.root;
+    const scroller = root?.querySelector?.(".duo-cs__scroll");
+    const target = event.target;
+    if (!root || !scroller || !(target instanceof Node) || !root.contains(target)) {
+      return false;
+    }
+    if (!scroller.contains(target)) {
+      scroller.scrollTop += normalizeWheelDelta(event);
+      event.preventDefault();
+    }
+    return true;
   }
 
   /** Ease wheel authority when entering/leaving scroll-capture zones (parallax stays live). */
@@ -2611,7 +4252,7 @@ export class StageExperience {
         this.scrollCapture.clearPointer?.();
         this._screenHover = false;
         this._pcScreenHovered = false;
-        if (!this.waterCursor) this.canvas.style.cursor = "pointer";
+        if (!this.waterCursor && this.canvas.style) this.canvas.style.cursor = "pointer";
         this._setScrollCaptureBlendTarget(false);
         return null;
       }
@@ -2645,13 +4286,13 @@ export class StageExperience {
             : onSidekick || onArchaeology
               ? "pointer"
               : "default";
-        this.canvas.style.cursor = cursorMode === "default" ? "default" : cursorMode;
+        if (this.canvas.style) this.canvas.style.cursor = cursorMode === "default" ? "default" : cursorMode;
       }
     } else {
       this._screenHover = false;
       this._pcScreenHovered = false;
       if (!this.waterCursor) {
-        this.canvas.style.cursor = "default";
+        if (this.canvas.style) this.canvas.style.cursor = "default";
       }
     }
 
@@ -2767,6 +4408,14 @@ export class StageExperience {
         return;
       }
       const onDuo = this.duoFab.hitTest(event.clientX, event.clientY);
+      this._hostPost?.({
+        type: "mailTrace",
+        hit: onDuo,
+        x: event.clientX,
+        y: event.clientY,
+        live: Boolean(this.duoFab.isLive),
+        state: this.duoFab.state
+      });
       if (this.duoMail?.isOpen) {
         if (onDuo) {
           this._duoToggleMail();
@@ -2876,7 +4525,7 @@ export class StageExperience {
     this._screenHover = false;
     this._pcScreenHovered = false;
     this.parallaxDampZones?.setActive(null);
-    if (!this.waterCursor) {
+    if (!this.waterCursor && this.canvas.style) {
       this.canvas.style.cursor = "default";
     }
     this._setScrollCaptureBlendTarget(false);
@@ -2912,7 +4561,7 @@ export class StageExperience {
   _initBlackHoleIntro() {
     const skip =
       this.reducedMotion ||
-      new URLSearchParams(window.location.search).get("blackhole") === "0";
+      new URLSearchParams(this._inWorker ? this._search : window.location.search).get("blackhole") === "0";
     if (skip) return;
 
     this.blackHoleSeq = new BlackHoleCameraSequence(this.camera);
@@ -2920,13 +4569,17 @@ export class StageExperience {
     this.scene.add(this.blackHole.group);
     this.cameraRig.poseSuspended = true;
     this._blackHoleActive = true;
+    this._applyRenderScale();
+    this.post?.setSequenceAntialias?.(BLACK_HOLE_MSAA);
     this.world.visible = false;
     this._spotIntensitySaved = this.spotLight?.intensity ?? SPOT_INTENSITY;
     if (this.spotLight) {
       this.spotLight.intensity = 0;
-      this.spotLight.castShadow = false;
+      this.spotLight.castShadow = true;
+      if (this.spotLight.shadow) this.spotLight.shadow.intensity = 0;
     }
     document.body.classList.add("is-black-hole");
+    this._hostPost?.({ type: "dom", blackHole: true });
 
     this._onBlackHolePointerDown = (event) => {
       if (event.button != null && event.button !== 0) return;
@@ -2934,19 +4587,51 @@ export class StageExperience {
     };
     this._onBlackHoleKeyDown = (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+      if (
+        typeof HTMLInputElement !== "undefined" &&
+        (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)
+      ) {
         return;
       }
       event.preventDefault();
       this._triggerBlackHoleSpiral();
     };
-    window.addEventListener("pointerdown", this._onBlackHolePointerDown);
-    window.addEventListener("keydown", this._onBlackHoleKeyDown);
+    if (!this._inWorker) {
+      window.addEventListener("pointerdown", this._onBlackHolePointerDown);
+      window.addEventListener("keydown", this._onBlackHoleKeyDown);
+    }
+  }
+
+  _withoutGrassShadows(draw) {
+    const meshes = [];
+    const vignettes = this.vignettes || [];
+    for (let i = 0; i < vignettes.length; i += 1) {
+      const mesh = vignettes[i]?.instance?.grassEngine?.mesh;
+      if (!mesh?.castShadow) continue;
+      meshes.push(mesh);
+      mesh.castShadow = false;
+    }
+    try {
+      draw();
+    } finally {
+      for (let i = 0; i < meshes.length; i += 1) meshes[i].castShadow = true;
+    }
+  }
+
+  _maybeShowEnter() {
+    if (!this._enterArmed || this._enterShown || !this._blackHoleActive) return;
+    if (!this._vignette0Warm?.done) return;
+    const pending = this.chunkedTextures?.pending ?? 0;
+    if (pending > 0 && !this._uploadStop) return;
+    this._enterShown = true;
+    this._programBaseline = this.renderer.info.programs?.length ?? 0;
+    this._showBlackHoleEnter();
   }
 
   _showBlackHoleEnter() {
     if (!this._blackHoleActive) return;
     document.getElementById("bh-enter")?.removeAttribute("hidden");
+    this._hostPost?.({ type: "dom", enterVisible: true });
   }
 
   _triggerBlackHoleSpiral() {
@@ -2954,6 +4639,7 @@ export class StageExperience {
     if (this.blackHoleSeq?.phase !== BLACK_HOLE_PHASE.APPROACH) return;
     this.blackHoleSeq.triggerSpiral();
     document.getElementById("bh-enter")?.setAttribute("hidden", "");
+    this._hostPost?.({ type: "dom", enterVisible: false });
     this._unbindBlackHoleInput();
   }
 
@@ -2975,15 +4661,20 @@ export class StageExperience {
   _onBlackHoleSpiralComplete() {
     if (!this._blackHoleActive) return;
     this._blackHoleActive = false;
+    this._applyRenderScale();
+    this.post?.setRestAntialias?.();
     this._unbindBlackHoleInput();
     this.blackHole?.hide();
-    this.world.visible = true;
     if (this.spotLight) {
       this.spotLight.intensity = this._spotIntensitySaved ?? SPOT_INTENSITY;
-      this.spotLight.castShadow = (this._spotIntensitySaved ?? SPOT_INTENSITY) > 0;
+      this.spotLight.castShadow = true;
+      if (this.spotLight.shadow) this.spotLight.shadow.intensity = 1;
     }
+    const warmDone = Boolean(this._vignette0Warm?.done);
+    this.world.visible = warmDone;
     document.body.classList.remove("is-black-hole");
     document.getElementById("bh-enter")?.setAttribute("hidden", "");
+    this._hostPost?.({ type: "dom", blackHole: false, enterVisible: false });
 
     const rig = this.cameraRig;
     if (!rig) return;
@@ -3004,13 +4695,23 @@ export class StageExperience {
     s.isSettled = false;
     rig._introActive = true;
     rig.poseSuspended = false;
-    this._introSpringArmed = true;
-    rig.armIntroDescent();
+    if (this._vignette0Warm?.done) {
+      this._introSpringArmed = true;
+      rig.armIntroDescent();
+    } else {
+      this._descentPendingWarm = true;
+    }
   }
 
   _tickBlackHole(dt) {
     if (!this._blackHoleActive || !this.blackHoleSeq) return;
-    this.blackHoleSeq.update(dt, () => this._onBlackHoleSpiralComplete());
+    const seq = this.blackHoleSeq;
+    const approachIdle =
+      seq.phase === BLACK_HOLE_PHASE.APPROACH && (seq.restParallaxBlend?.() ?? 0) >= 0.98;
+    const finishDuringSpiral =
+      seq.phase === BLACK_HOLE_PHASE.SPIRAL && !this._vignette0Warm?.done;
+    if (approachIdle || finishDuringSpiral) this.warmVignette0();
+    seq.update(dt, () => this._onBlackHoleSpiralComplete());
     this._applyBlackHoleRestParallax(dt);
     this.blackHole?.update(dt);
   }
@@ -3054,8 +4755,44 @@ export class StageExperience {
     );
   }
 
+  /**
+   * Comet of temporary stars behind the blob. Only after the hold has
+   * settled, and only while the pointer is in the sky.
+   * @param {number} dt
+   * @param {number} time
+   */
+  _tickCursorStarTrail(dt, time) {
+    const trail = this.cursorStarTrail;
+    if (!trail) return;
+    const seq = this.blackHoleSeq;
+    const settled =
+      this._blackHoleActive &&
+      seq?.phase === BLACK_HOLE_PHASE.APPROACH &&
+      (seq.restParallaxBlend?.() ?? 0) >= 0.98;
+    const cursor = this.waterCursor;
+    const { w, h } = this._viewportCssSize();
+    updateCursorStarTrail(trail, this.camera, dt, {
+      active: settled && !this.blackHole?.pointerOverDisk,
+      x: cursor?._pos?.x,
+      y: cursor?._pos?.y,
+      vx: cursor?._velocity?.x ?? 0,
+      vy: cursor?._velocity?.y ?? 0,
+      width: w,
+      height: h,
+      pixelRatio: this.renderer?.getPixelRatio?.() ?? this.pixelRatio ?? 1,
+      presence: cursor?.uniforms?.uPresence?.value ?? 0,
+      time
+    });
+  }
+
   /** CSS viewport size — prefer documentElement so panel chrome doesn’t desync canvas. */
   _viewportCssSize() {
+    if (this._inWorker) {
+      return {
+        w: Math.max(1, this._cssWidth || 1),
+        h: Math.max(1, this._cssHeight || 1)
+      };
+    }
     const el = document.documentElement;
     const w = Math.max(1, el?.clientWidth || window.innerWidth || 1);
     const h = Math.max(1, el?.clientHeight || window.innerHeight || 1);
@@ -3064,6 +4801,7 @@ export class StageExperience {
 
   _onResize = () => {
     const { w, h } = this._viewportCssSize();
+    this.cameraRig?.setViewport(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     // false → keep CSS full-bleed (inline px from setSize was the right-edge gutter).
@@ -3071,6 +4809,7 @@ export class StageExperience {
     this.renderer.setViewport(0, 0, w, h);
     this.renderer.setScissorTest(false);
     this.post.setSize(w, h);
+    this._applyRenderScale();
     this.neon?.setSize?.(this.renderer);
     this.videoFog?.setSizeFromRenderer?.(this.renderer);
     const draw = new THREE.Vector2();
@@ -3088,11 +4827,15 @@ export class StageExperience {
   _applyVignetteMotion(t) {
     const focus = this.focusBlend;
     const transitioning = Boolean(this.cameraRig && !this.cameraRig.state.isSettled);
+    const names = ["bust", "desktop", "sidekick", "archaeology"];
 
     this.vignettes.forEach((vignette, index) => {
-      vignette.instance?.updateFocus?.(this.camera, index === this.current ? focus : 0, {
-        isActive: index === this.current,
-        transitioning
+      const label = names[index] || `v${index}`;
+      this._rigLap(`${label}.focus`, () => {
+        vignette.instance?.updateFocus?.(this.camera, index === this.current ? focus : 0, {
+          isActive: index === this.current,
+          transitioning
+        });
       });
     });
 
@@ -3101,14 +4844,17 @@ export class StageExperience {
     const active = this._getActiveInstance();
 
     if (active !== sidekick && active !== archaeology) {
-      active?.update?.(t);
+      const activeIndex = this.vignettes.findIndex((vignette) => vignette.instance === active);
+      const label = names[activeIndex] || "active";
+      this._rigLap(`${label}.update`, () => active?.update?.(t));
     }
 
     if (sidekick?._aligned) {
-      sidekick.update(t);
+      if (sidekick) sidekick._noteRig = (name, ms) => this._rigRecord(name, ms);
+      this._rigLap("sidekick.update", () => sidekick.update(t));
     }
     if (archaeology?._aligned) {
-      archaeology.update(t);
+      this._rigLap("archaeology.update", () => archaeology.update(t));
     }
   }
 
@@ -3122,10 +4868,67 @@ export class StageExperience {
     );
   }
 
+  /**
+   * Cursor depth of field. On only after the black-hole flight.
+   * The focal point is a raycast hit, never a depth-buffer readback.
+   * @param {number} dt
+   */
+  _tickCursorDof(dt) {
+    const pass = this.post?.dofPass;
+    const effect = this.post?.dofEffect;
+    if (!pass || !effect) return;
+    if (!CURSOR_DOF.enabled) {
+      pass.enabled = false;
+      return;
+    }
+    const onRing = !this._blackHoleActive && !this.reducedMotion;
+    if (!onRing) {
+      this._dofBokeh = 0;
+      effect.bokehScale = 0;
+      pass.enabled = false;
+      return;
+    }
+    const goal = CURSOR_DOF.bokehScale;
+    const k = 1 - Math.exp(-6 * Math.max(0, dt));
+    this._dofBokeh += (goal - this._dofBokeh) * k;
+    effect.bokehScale = this._dofBokeh;
+    pass.enabled = this._dofBokeh > 0.04;
+    const index = this.cameraRig?.state?.index ?? this.current ?? 0;
+    this.cursorDof.update(this.camera, this.pointer, dt, {
+      vignette: this.vignettes?.[index]?.group ?? null,
+      floor: this._wetFloorMesh ?? null
+    });
+  }
+
   _animate() {
     this.frameBudget?.begin();
+    const wall = performance.now();
+    const since = this._rafEnd ? wall - this._rafEnd : 0;
+    const tasks = this._gapTasks?.splice(0, this._gapTasks.length) || [];
     const dt = this.clock.getDelta();
     const t = this.clock.elapsedTime;
+    const frameMs = dt > 0 && dt < 2 ? dt * 1000 : 0;
+    if (frameMs > 20 && frameMs > (this._lastWorkMs || 0) + 20) {
+      const stallMs = Number(String(this._stallLabel || "").match(/(\d+)/)?.[1] || 0);
+      const stallFits = stallMs > 0 && stallMs >= frameMs * 0.5;
+      const label = tasks.length
+        ? `gap:${tasks.map((task) => `${task.name}:${task.ms}`).join(",")}`
+        : stallFits
+          ? this._stallLabel
+          : "gap:unaccounted";
+      this._lastCause = label;
+      this._lastGap = { ms: Math.round(since), tasks };
+    }
+    this._observeFloor(frameMs, dt);
+    const workT0 = performance.now();
+    this._prePartMs = 0;
+    this._prePart = "";
+    let preT = workT0;
+    this._holdStableLightVariant();
+    if (this._resizeSkipScene) {
+      this._resizeSkipScene = false;
+      this._applyRenderScale();
+    }
 
     const desktop = this.vignettes[1]?.instance;
     if (desktop?.pcRoot && desktop._pcSceneReady) {
@@ -3138,7 +4941,9 @@ export class StageExperience {
     const crtLit =
       desktop?.mySpace?.isPoweredOn ||
       desktop?.mySpace?.monitorLedOn;
-    if (crtLit || this._shouldRunIntroHeavyEffects()) {
+    if (desktop?.screenLightRig?.hold?.()) {
+      // Desktop content is hidden. Spill and glow stay in the rig at intensity 0.
+    } else if (crtLit || this._shouldRunIntroHeavyEffects()) {
       desktop?.screenLightRig?.update();
     }
 
@@ -3164,6 +4969,7 @@ export class StageExperience {
           : null
       );
     }
+    preT = this._markPre("crt", preT);
 
     this.animFns.forEach((fn) => fn(t));
 
@@ -3171,46 +4977,83 @@ export class StageExperience {
     this.cameraRig?.parallax?.setStrength?.(this.parallaxDampZones?.scale ?? 1);
     this._tickBlackHole(dt);
     this._tickBlackHoleCursorShear(dt);
+    this._tickCursorStarTrail(dt, t);
     this.cameraRig?.update(dt);
+    const skyDrop = this._introSkyDrop();
+    if (this.milkyWayDome) this.milkyWayDome.visible = true;
     if (this.starfield) {
+      this.starfield.visible = true;
+      const pixelRatio = this.renderer?.getPixelRatio?.() ?? this.pixelRatio ?? 1;
       updateStarfield(this.starfield, this.camera, t, {
         wrap: this._blackHoleActive,
-        pixelRatio: this.renderer?.getPixelRatio?.() ?? this.pixelRatio ?? 1
+        horizonFade: !this._blackHoleActive,
+        pixelRatio,
+        dropPitch: skyDrop.pitch,
+        dropAxis: skyDrop.axis,
+        worldDome: !this._blackHoleActive
       });
+      if (this.starfieldFlight) {
+        this.starfieldFlight.visible = this._blackHoleActive;
+        if (this._blackHoleActive) {
+          updateStarfield(this.starfieldFlight, this.camera, t, {
+            wrap: true,
+            pixelRatio
+          });
+        }
+      }
     }
     updateMilkyWayDome(
       this.milkyWayDome,
       this.camera,
       t,
       this._blackHoleActive ? this.blackHole?.group?.position : null,
-      this._blackHoleActive
+      this._blackHoleActive,
+      skyDrop.pitch,
+      skyDrop.axis,
+      !this._blackHoleActive
     );
     if (this.nebulaClouds) this.nebulaClouds.visible = this._blackHoleActive;
     updateNebulaCluster(this.nebulaClouds, this.camera, t);
-    this._tickIntroFromCameraRig();
-    this._syncCameraRigIndex();
-    this._syncCameraRigZoom();
-    this._aimPovSpotlight();
-    this.duoFab?.tick?.(dt, t);
-    this.duoMail?.tick?.(dt);
-    if (this.duoMail?.isOpen && this._lastPointer) {
-      this.duoMail.setPointerClient?.(this._lastPointer.x, this._lastPointer.y);
-    }
-
+    preT = this._markPre("sky", preT);
+    this._beginRigProbe();
+    if (this.duoFab) this.duoFab._noteRig = (name, ms) => this._rigRecord(name, ms);
+    this._rigLap("intro", () => this._tickIntroFromCameraRig());
+    this._rigLap("index", () => this._syncCameraRigIndex());
+    this._rigLap("zoom", () => this._syncCameraRigZoom());
+    this._rigLap("pov", () => this._aimPovSpotlight());
+    this._rigLap("duoFab", () => this.duoFab?.tick?.(dt, t));
+    this._rigLap("duoMail", () => {
+      this.duoMail?.tick?.(dt);
+      if (this.duoMail?.isOpen && this._lastPointer) {
+        this.duoMail.setPointerClient?.(this._lastPointer.x, this._lastPointer.y);
+      }
+    });
     if (this.introComplete) {
       this._applyVignetteMotion(t);
     }
+    this._lastRigSteps = (this._rigSteps || []).slice();
+    this._lastRigState = this._programState();
+    preT = this._markPre("rig", preT);
     this._tickModelReveal(dt);
+    preT = this._markPre("reveal", preT);
     this._tickPostGrainStrength(dt);
     this._tickNeon(t, dt);
+    preT = this._markPre("neon", preT);
     this._tickVolumetricFog(dt);
     this._tickVideoFog(dt);
+    preT = this._markPre("fog", preT);
     this._tickIntroBloomReturn(dt);
     this._syncInactiveVignetteLayers();
 
     // Motion DPR + adaptive governor (EMA frame ms → step-down ladder).
-    const frameMs = dt > 0 && dt < 1 ? dt * 1000 : this._lastFrameMs;
     this._lastFrameMs = frameMs;
+    if (this.introComplete && this.cameraRig?.state?.isSettled) {
+      this._settledWarmFrames = (this._settledWarmFrames ?? 0) + 1;
+    }
+    if (this.introComplete && this._landFrameMs.length < 3 && dt > 0 && dt < 1) {
+      this._landFrameMs.push(+frameMs.toFixed(2));
+    }
+    this._tickRestDpr(Boolean(this.cameraRig?.state?.isSettled), this.cameraRig?.state?.index ?? this.current ?? 0);
     this.perfGovernor?.tick?.(dt, {
       settled: Boolean(this.cameraRig?.state?.isSettled),
       fullDpr: this._fullPixelRatio,
@@ -3218,7 +5061,7 @@ export class StageExperience {
     });
     this._syncPerfGovernorSideEffects();
 
-    if (this.ui.readout) {
+    if (this.ui?.readout) {
       const deg = this._getDisplayStageDegrees();
       this.ui.readout.textContent = `STAGE ${deg.toFixed(1).padStart(5, "0")}°`;
     }
@@ -3228,76 +5071,28 @@ export class StageExperience {
       this._fpsEma += (instant - this._fpsEma) * Math.min(1, dt * 3);
     }
     this._fpsDomT += dt;
-    if (this.ui.fps && this._fpsDomT >= 0.25) {
+    if (this._fpsDomT >= 0.25 && (this.ui?.fps || this._inWorker)) {
       this._fpsDomT = 0;
-      this.ui.fps.textContent = `${Math.round(this._fpsEma)} FPS`;
-    }
-
-    // FogDepthCapture: full-scene depth only while edge-glitch occlusion needs it
-    // (fog parked behind STAGE_FOG_ENABLED — no every-frame tax when glitch idle).
-    const glitchCost = this._edgeGlitchCostActive();
-    let depthTex = null;
-    this.frameBudget?.start?.("fog-depth");
-    if (glitchCost || (STAGE_FOG_ENABLED && (this.volumetricFog || this.videoFog))) {
-      this.neon?.captureFogDepth?.(this.renderer, this.scene, this.camera);
-      depthTex = this.neon?.depthCapture?.depthTexture ?? null;
-    }
-    if (STAGE_FOG_ENABLED && this.volumetricFog && depthTex) {
-      this.volumetricFog.setSceneDepth(depthTex, {
-        packed: true
-      });
-      if (this.volumetricFog.enabled) {
-        const neonLights = this.neon.stopLights?.map((s) => s.light) ?? [];
-        const accentFog = this.accentLights?.getFogLights?.() ?? [];
-        this.volumetricFog.setLights([...neonLights, ...accentFog]);
-        const densTune = this.accentLights?.getFogDensityTune?.() ?? null;
-        this.volumetricFog.setNearTubeDensity?.(
-          densTune
-            ? {
-                boost: densTune.nearTubeDensityBoost,
-                radius: densTune.nearTubeDensityRadius
-              }
-            : null
-        );
-        const activeIndex = this.cameraRig?.state?.index ?? this.current ?? 0;
-        const activeNeon = this.neon.stopLights?.[activeIndex]?.light ?? null;
-        const arriveLevel = this.neon.getArriveLevel?.(activeIndex) ?? 0;
-        const vigGroup = this.vignettes?.[activeIndex]?.group;
-        const fogCenter = vigGroup?.position ?? activeNeon?.position ?? null;
-        this.volumetricFog.setVignetteFog?.({
-          center: fogCenter,
-          level: this.introComplete ? arriveLevel : 0,
-          radius: VIGNETTE_FOG_RADIUS,
-          feather: VIGNETTE_FOG_FEATHER
+      const fps = Math.round(this._fpsEma);
+      if (this.ui?.fps) this.ui.fps.textContent = `${fps} FPS`;
+      if (this._inWorker) {
+        const deg = this._getDisplayStageDegrees();
+        this._hostPost?.({
+          type: "hud",
+          fps,
+          readout: `STAGE ${deg.toFixed(1).padStart(5, "0")}°`
         });
       }
     }
-    if (STAGE_FOG_ENABLED && this.videoFog && depthTex && this._fogMode === "video") {
-      this.videoFog.setSceneDepth(depthTex, { packed: true });
-      this.videoFog.setSizeFromRenderer(this.renderer);
-      const activeIndex = this.cameraRig?.state?.index ?? this.current ?? 0;
-      const activeNeon = this.neon?.stopLights?.[activeIndex]?.light ?? null;
-      const arriveLevel = this.neon?.getArriveLevel?.(activeIndex) ?? 0;
-      const vigGroup = this.vignettes?.[activeIndex]?.group;
-      const neonWorld =
-        activeNeon?.position ?? vigGroup?.position ?? null;
-      const neonColor =
-        activeNeon?.color ?? this.neon?.entries?.[activeIndex]?.dominant ?? null;
-      this.videoFog.setVignetteFog({
-        activeIndex,
-        level: this.introComplete ? arriveLevel : 0,
-        neonWorld,
-        neonColor
-      });
-      this.videoFog.update(dt, { camera: this.camera });
-    }
-    this.frameBudget?.endSpan?.("fog-depth");
+
+    const glitchCost = this._edgeGlitchCostActive();
+    this.edgeGlitch?.setSceneDepth?.(null);
 
     // Edge SDF + glitch — settled + glitch stop + cursor-near (never governor-cut).
+    this._lastEdgeMs = 0;
     if (this.edgeGlitch) {
       const passU = this._edgeGlitchPass?.uniforms;
       if (glitchCost) {
-        if (depthTex) this.edgeGlitch.setSceneDepth?.(depthTex);
         const activeIndex = this.cameraRig?.state?.index ?? this.current ?? 0;
         const activeRoot = this._edgeGlitchRootForStop(activeIndex);
         const hasRoot = Array.isArray(activeRoot)
@@ -3312,29 +5107,90 @@ export class StageExperience {
           null;
         this.edgeGlitch.setNeonHue?.(neonHue);
         this.frameBudget?.start?.("edge-sdf");
+        const edgeT0 = performance.now();
         this.edgeGlitch.update({
           activeIndex,
           activeRoot,
           bustReady: hasRoot,
           time: t
         });
+        this._lastEdgeMs = performance.now() - edgeT0;
         this.frameBudget?.endSpan?.("edge-sdf");
       } else {
         if (passU) passU.uEnabled.value = 0;
         if (this.edgeGlitch._overlay) this.edgeGlitch._overlay.visible = false;
       }
     }
+    preT = this._markPre("edge", preT);
     this._tickWaterCursorRim();
 
+    this._tickCursorDof(dt);
+    if (
+      this._frameCause !== "compile" &&
+      this._chunkUploadsAllowed() &&
+      this.chunkedTextures?.pending
+    ) {
+      const uploadT0 = performance.now();
+      const uploaded = this.chunkedTextures.step(this.renderer);
+      const uploadMs = performance.now() - uploadT0;
+      if (uploadMs > (this._uploadPeakMs || 0)) this._uploadPeakMs = uploadMs;
+      if (uploaded) {
+        this._frameCause = `texture-${uploaded}`;
+        if (uploaded === "alloc") this._skipBeauty = true;
+      }
+    }
+    if (this._flushShadowBake) {
+      this._flushShadowBake = false;
+      this._frameCause = "shadow-bake";
+      const prevTarget = this.renderer.getRenderTarget();
+      this.renderer.setRenderTarget(this._bakeScratch);
+      this._withoutGrassShadows(() => this.renderer.render(this.scene, this.camera));
+      this.renderer.setRenderTarget(prevTarget);
+      this._skipBeauty = true;
+    }
+    this._markPre("tail", preT);
+    this._lastPreMs = performance.now() - workT0;
+    this._holdStableLightVariant();
+    this._noteLightCensus();
     this.frameBudget?.start?.("beauty");
-    this.post.render(this.scene, this.camera, t, {
-      grainStrength: this._postGrainStrength
-    });
+    this._snapshotGl();
+    const beautyT0 = performance.now();
+    const revealNow = Boolean(this._revealPending);
+    if (!this._skipBeauty) {
+      this.post.render(this.scene, this.camera, t, {
+        grainStrength: this._postGrainStrength
+      });
+    }
+    this._lastBeautyMs = performance.now() - beautyT0;
+    if (revealNow) {
+      this._revealPending = false;
+      this._stallLabel = `reveal-render:${Math.round(this._lastBeautyMs)}`;
+      this._frameCause = this._stallLabel;
+    } else if ((this.edgeGlitch?.sdf?.lastMaskMs || 0) >= 20 || (this.edgeGlitch?.sdf?.lastDepthMs || 0) >= 20) {
+      const maskMs = Math.round(this.edgeGlitch.sdf.lastMaskMs || 0);
+      const depthMs = Math.round(this.edgeGlitch.sdf.lastDepthMs || 0);
+      this._stallLabel = `pick-render:mask${maskMs}:depth${depthMs}`;
+      this._frameCause = this._stallLabel;
+    } else if (this._lastBeautyMs >= 50) {
+      this._stallLabel = `beauty-render:${Math.round(this._lastBeautyMs)}`;
+      this._frameCause = this._stallLabel;
+    }
+    this._lastGl = this._snapshotGl();
+    this._skipBeauty = false;
     this.frameBudget?.endSpan?.("beauty");
     // Duo HUD sits above the stage (own lights / camera); cursor stays on top.
+    const duoT0 = performance.now();
     this.duoFab?.render?.(this.renderer);
+    this._lastDuoMs = performance.now() - duoT0;
+    const waterT0 = performance.now();
     this.waterCursor?.render();
+    this._lastWaterMs = performance.now() - waterT0;
+    this._lastWorkMs = performance.now() - workT0;
+    this._lastCause = this._frameCause;
+    this._frameCause = "render";
+    this._publishFloor(dt);
     this.frameBudget?.end(dt);
+    this._rafEnd = performance.now();
     requestAnimationFrame(this._animate);
   }
 }

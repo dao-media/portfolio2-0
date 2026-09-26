@@ -56,6 +56,7 @@ export function buildStageFloor(maps = {}) {
   );
   mesh.name = "stage-floor-apron";
   mesh.rotation.x = -Math.PI / 2;
+  mesh.visible = false;
   mesh.receiveShadow = true;
   mesh.castShadow = false;
   // Layer 3 only — not lit by POV spot (layer 0). Neon enables layer 3.
