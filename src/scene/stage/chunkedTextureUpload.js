@@ -42,6 +42,12 @@ function imageSize(image) {
   return { w, h };
 }
 
+function glWrap(gl, mode) {
+  if (mode === THREE.ClampToEdgeWrapping) return gl.CLAMP_TO_EDGE;
+  if (mode === THREE.MirroredRepeatWrapping) return gl.MIRRORED_REPEAT;
+  return gl.REPEAT;
+}
+
 export function isChunkCandidate(texture) {
   if (!texture?.isTexture || texture.isDataTexture || texture.isRenderTargetTexture) return false;
   if (texture.userData.__chunkClaimed || texture.userData.__chunkDone) return false;
@@ -138,6 +144,52 @@ export class ChunkedTextureQueue {
 
   get pending() {
     return this.jobs.length;
+  }
+
+  /**
+   * Re-apply only the GL sampler wrap mode for a texture this queue already
+   * owns. Called instead of letting three's real initTexture touch it again
+   * (see the caller in StageExperience's renderer.initTexture override):
+   * texture.image is still the 1×1 placeholder forever, so three's own path
+   * would treat any later touch (typically a `needsUpdate = true` from
+   * unrelated material-setup code, e.g. pcProductionMaterials.js configuring
+   * wrap/colorSpace/filters after this queue already finished the upload) as
+   * "re-upload a real 1×1 image" — reallocating the GL object via
+   * texStorage2D immutable storage and reverting a finished texture back to
+   * a flat placeholder (or hitting "Texture is immutable" if a later step()
+   * strip still expected the old, resizable object). Wrap mode is the only
+   * sampler state a caller plausibly still needs to change post-hoc; it
+   * needs no re-upload, so apply it directly instead of dropping it.
+   * @param {THREE.Texture} texture
+   * @param {THREE.WebGLRenderer} renderer
+   */
+  syncParams(texture, renderer) {
+    const gl = renderer.getContext();
+    const props = renderer.properties.get(texture);
+    const glTex = props?.__webglTexture;
+    if (!glTex) return;
+    gl.bindTexture(gl.TEXTURE_2D, glTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrap(gl, texture.wrapS));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrap(gl, texture.wrapT));
+  }
+
+  /** Textures whose mip chain generation was deferred to a settled frame. */
+  get mipmapPending() {
+    return this._mipmapQueue?.length ?? 0;
+  }
+
+  /**
+   * Drain one deferred mipmap job. Call only on an already-settled frame —
+   * generateMipmap on a 4096² texture can itself cost several ms (see the
+   * calibration in {@link _finalizeMipmap}).
+   * @param {THREE.WebGLRenderer} renderer
+   * @returns {boolean} true if a job was drained this call
+   */
+  stepMipmap(renderer) {
+    const entry = this._mipmapQueue?.shift();
+    if (!entry) return false;
+    this._runGenerateMipmap(renderer, entry.texture, entry.maxLevel);
+    return true;
   }
 
   /**
@@ -249,13 +301,72 @@ export class ChunkedTextureQueue {
     if (props?.__webglTexture) {
       gl.bindTexture(gl.TEXTURE_2D, props.__webglTexture);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL, 0);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, 0);
+      // Mip generation + the MIN_FILTER switch happen in _finalizeMipmap,
+      // inline or deferred — the texture is mipmap-incomplete (undefined
+      // sampling under a mipmap filter) until generateMipmap actually runs,
+      // so LINEAR is the correct filter to leave bound until then.
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       props.__version = job.texture.version;
     }
     job.texture.userData.__chunkDone = true;
     job.texture.userData.__chunkSource = null;
+    const maxLevel = Math.max(0, Math.floor(Math.log2(Math.max(job.w, job.h, 1))));
     this.jobs.shift();
+    this._finalizeMipmap(renderer, job.texture, maxLevel);
+  }
+
+  /**
+   * Route the finished texture's mip generation either inline (measuring the
+   * cost) or, once that measured cost crosses the calibration threshold, to
+   * the deferred queue so it runs on a settled frame instead.
+   * @param {THREE.WebGLRenderer} renderer
+   * @param {THREE.Texture} texture
+   * @param {number} maxLevel
+   */
+  _finalizeMipmap(renderer, texture, maxLevel) {
+    if (this._deferMipmaps) {
+      (this._mipmapQueue || (this._mipmapQueue = [])).push({ texture, maxLevel });
+      return;
+    }
+    const ms = this._runGenerateMipmap(renderer, texture, maxLevel);
+    if (this._mipmapCalibrationMs == null) {
+      this._mipmapCalibrationMs = ms;
+      // 8ms budget — see debugMipmapCalibration(). Once one texture's
+      // generateMipmap crosses it, every later one defers; a single frame
+      // can afford one over-budget generateMipmap but not several.
+      this._deferMipmaps = ms > 8;
+    }
+  }
+
+  /**
+   * @param {THREE.WebGLRenderer} renderer
+   * @param {THREE.Texture} texture
+   * @param {number} maxLevel
+   * @returns {number} ms spent in gl.generateMipmap
+   */
+  _runGenerateMipmap(renderer, texture, maxLevel) {
+    const gl = renderer.getContext();
+    const props = renderer.properties.get(texture);
+    const glTex = props?.__webglTexture;
+    if (!glTex) return 0;
+    gl.bindTexture(gl.TEXTURE_2D, glTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, maxLevel);
+    const t0 = performance.now();
+    gl.generateMipmap(gl.TEXTURE_2D);
+    const ms = performance.now() - t0;
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    const anisoExt = renderer.extensions?.get?.("EXT_texture_filter_anisotropic");
+    if (anisoExt) {
+      const maxAniso = renderer.capabilities?.getMaxAnisotropy?.() ?? 1;
+      const aniso = Math.min(texture.anisotropy || 1, maxAniso);
+      gl.texParameterf(gl.TEXTURE_2D, anisoExt.TEXTURE_MAX_ANISOTROPY_EXT, aniso);
+    }
+    if (!this._mipmapCostLog) this._mipmapCostLog = [];
+    if (this._mipmapCostLog.length < 64) {
+      this._mipmapCostLog.push({ uuid: texture.uuid, ms: Math.round(ms * 100) / 100 });
+    }
+    return ms;
   }
 }

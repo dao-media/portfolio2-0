@@ -158,7 +158,7 @@ export function stepVignette0Warm(stage, state) {
     }
     const steps = state._liveSteps || [];
     if (state._liveAt >= steps.length) {
-      state.phase = "light";
+      state.phase = "extra-textures";
       return state;
     }
     const step = steps[state._liveAt];
@@ -211,6 +211,38 @@ export function stepVignette0Warm(stage, state) {
     else if (step.kind === "tier") warmTier(stage, step.notch);
     else if (step.kind === "restore") restoreSequenceSize(stage);
     state._liveAt += 1;
+    return state;
+  }
+
+  if (state.phase === "extra-textures") {
+    // PC/Sidekick/Archaeology are fetched with (or right alongside) the bust,
+    // but their roots often aren't mounted into their vignette group yet when
+    // the "textures" phase above first scanned — collectTextures only sees
+    // what's mounted at the moment it runs. By now the "live" phase's many
+    // steps have spent most of the intro, so a fresh re-scan here catches
+    // large textures mounted since, while the chunk queue can still drain
+    // them (_chunkUploadsAllowed() closes once the black-hole flight ends).
+    // Anything still missed (queue never called _chunkUploadsAllowed here
+    // in time) falls to the late-claim safety net in the main render loop.
+    if (!state._extraTextureList) {
+      state._extraTextureList = collectTextures(stage);
+      state._extraTextureAt = 0;
+    }
+    const n = Math.max(1, VIGNETTE0_WARM_TEXTURES_PER_FRAME | 0);
+    const renderer = stage.renderer;
+    for (let i = 0; i < n && state._extraTextureAt < state._extraTextureList.length; i += 1) {
+      const tex = state._extraTextureList[state._extraTextureAt];
+      state._extraTextureAt += 1;
+      if (!renderer || !tex?.isTexture) continue;
+      withInactiveLayer(stage.camera, () => {
+        try {
+          renderer.initTexture(tex);
+        } catch (error) {
+          console.warn("[warmVignette0] extra texture upload failed:", error);
+        }
+      });
+    }
+    if (state._extraTextureAt >= state._extraTextureList.length) state.phase = "light";
     return state;
   }
 

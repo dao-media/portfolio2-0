@@ -1180,7 +1180,8 @@ export class StageExperience {
               w,
               h,
               chunkClaimed: wasClaimed,
-              chunkDone: Boolean(tex.userData.__chunkDone)
+              chunkDone: Boolean(tex.userData.__chunkDone),
+              uuid: tex.uuid
             });
           }
         }
@@ -1188,6 +1189,23 @@ export class StageExperience {
     };
     for (const vig of this.vignettes || []) visit(vig?.name || "(unnamed)", vig?.group);
     return rows;
+  }
+
+  /**
+   * DEV — the generateMipmap calibration state: the first measured cost (ms,
+   * whichever texture finished its chunk upload first), whether later
+   * generateMipmap calls are deferred to settled frames because of it, the
+   * per-texture cost log (cross-reference `uuid` against debugChunkInventory
+   * to name a row), and how many are still queued for a settled frame.
+   */
+  debugMipmapCalibration() {
+    const q = this.chunkedTextures;
+    return {
+      calibrationMs: q?._mipmapCalibrationMs ?? null,
+      deferring: Boolean(q?._deferMipmaps),
+      pending: q?.mipmapPending ?? 0,
+      costLog: q?._mipmapCostLog ?? []
+    };
   }
 
   /**
@@ -1234,7 +1252,7 @@ export class StageExperience {
    * whether the chunk-uploaded texture actually holds real image data or
    * something else (garbage, all-zero, all-one, a single flat color).
    */
-  debugReadTexturePixels(materialName, slot = "map") {
+  debugReadTexturePixels(materialName, slot = "map", level = 0) {
     let tex = null;
     const visit = (root) => {
       root?.traverse?.((obj) => {
@@ -1257,20 +1275,20 @@ export class StageExperience {
     const fb = gl.createFramebuffer();
     const prevFb = gl.getParameter(gl.FRAMEBUFFER_BINDING);
     gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, glTex, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, glTex, level);
     const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-    const result = { fbStatus: status, fbComplete: status === gl.FRAMEBUFFER_COMPLETE, samples: [] };
+    const result = { fbStatus: status, fbComplete: status === gl.FRAMEBUFFER_COMPLETE, level, samples: [] };
     if (result.fbComplete) {
-      const w = tex.userData.__chunkClaimed ? undefined : null; // not needed; sample by NDC-ish fractions
-      // Sample 5 points without knowing exact GL-side dims: read at fixed
-      // small offsets from (0,0) — valid for any texture ≥8px, which every
-      // candidate here is.
+      // Sample points shrink with the mip level so they stay in-bounds for
+      // a small mip (e.g. level 8 of a 4096² chain is 16×16).
+      const shift = Math.max(0, level | 0);
+      const scale = (n) => Math.max(0, n >> shift);
       const points = [
         [0, 0],
-        [4, 4],
-        [16, 16],
-        [64, 64],
-        [200, 200]
+        [scale(4), scale(4)],
+        [scale(16), scale(16)],
+        [scale(64), scale(64)],
+        [scale(200), scale(200)]
       ];
       const px = new Uint8Array(4);
       for (const [x, y] of points) {
@@ -2389,6 +2407,17 @@ export class StageExperience {
     const orig = renderer.initTexture.bind(renderer);
     renderer.initTexture = (texture) => {
       if (this.chunkedTextures.claim(texture, renderer, orig)) return;
+      if (texture?.userData?.__chunkClaimed) {
+        // Already ours (pending or finished) — texture.image is permanently
+        // the 1×1 placeholder, so any later call here (typically material
+        // setup elsewhere bumping needsUpdate to apply wrap/colorSpace/filter
+        // — not a real content change) must never reach three's real upload
+        // path: it would treat that placeholder as genuine 1×1 content and
+        // reallocate the GL object, corrupting or reverting a finished
+        // texture. Only the wrap mode is worth re-applying post-hoc.
+        this.chunkedTextures.syncParams(texture, renderer);
+        return;
+      }
       return orig(texture);
     };
   }
@@ -5689,6 +5718,45 @@ export class StageExperience {
       if (uploaded) {
         this._frameCause = `texture-${uploaded}`;
         if (uploaded === "alloc") this._skipBeauty = true;
+      }
+    } else if (
+      this._frameCause !== "compile" &&
+      !this._chunkUploadsAllowed() &&
+      this.chunkedTextures?.pending
+    ) {
+      // Safety net for a texture claimed after the intro's drain window
+      // closed (warmMeshesChunked, run post-intro for PC/Sidekick/
+      // Archaeology) — the primary fix now claims those during warm too, but
+      // this catches whatever still arrives late. Only on an already-settled,
+      // non-hop, non-reveal frame, with a small time budget — never steals
+      // from a hop or reveal frame's budget, and does nothing on this frame
+      // if the previous one was already over the recover floor.
+      const prevFrameMs = this._lastFrameMs || 0;
+      const notHop = this._programState().motion !== "hop";
+      const notRevealing = this._modelRevealOpacity == null || this._modelRevealOpacity >= 1;
+      if (prevFrameMs <= FLOOR_RECOVER_MS && notHop && notRevealing) {
+        const lateBudgetMs = 4;
+        const uploadT0 = performance.now();
+        let lastResult = null;
+        while (performance.now() - uploadT0 < lateBudgetMs && this.chunkedTextures.pending) {
+          lastResult = this.chunkedTextures.step(this.renderer);
+          if (!lastResult) break;
+          if (lastResult === "alloc") this._skipBeauty = true;
+        }
+        const uploadMs = performance.now() - uploadT0;
+        if (uploadMs > (this._uploadPeakMs || 0)) this._uploadPeakMs = uploadMs;
+        if (lastResult) this._frameCause = `texture-late-${lastResult}`;
+      }
+    }
+    if (this._frameCause !== "compile" && this.chunkedTextures?.mipmapPending) {
+      // Deferred mipmap generation (see chunkedTextureUpload.js's calibration
+      // — only engaged once a generateMipmap call measured over budget).
+      // Same settled/non-hop/non-reveal gating as the late-claim safety net.
+      const prevFrameMs = this._lastFrameMs || 0;
+      const notHop = this._programState().motion !== "hop";
+      const notRevealing = this._modelRevealOpacity == null || this._modelRevealOpacity >= 1;
+      if (prevFrameMs <= FLOOR_RECOVER_MS && notHop && notRevealing) {
+        this.chunkedTextures.stepMipmap(this.renderer);
       }
     }
     if (this._flushShadowBake) {
