@@ -1169,6 +1169,7 @@ export class StageExperience {
             const h = wasClaimed ? tex.userData.__chunkH ?? 0 : src?.height || src?.videoHeight || 0;
             if (!wasClaimed && w < edge && h < edge) continue;
             seen.add(tex);
+            const wouldBeSrgb = tex.colorSpace === THREE.SRGBColorSpace;
             rows.push({
               vignette: vignetteName,
               mesh: obj.name || "(unnamed)",
@@ -1178,7 +1179,17 @@ export class StageExperience {
               h,
               chunkClaimed: wasClaimed,
               chunkDone: Boolean(tex.userData.__chunkDone),
-              uuid: tex.uuid
+              uuid: tex.uuid,
+              colorSpace: tex.colorSpace,
+              allocatedFormat: tex.userData.__chunkInternalFormat ?? null,
+              expectedFormat: wouldBeSrgb ? "SRGB8_ALPHA8" : "RGBA8",
+              formatMismatch: wasClaimed
+                ? tex.userData.__chunkInternalFormat != null &&
+                  tex.userData.__chunkInternalFormat !== (wouldBeSrgb ? "SRGB8_ALPHA8" : "RGBA8")
+                : null,
+              minFilter: tex.minFilter,
+              magFilter: tex.magFilter,
+              anisotropy: tex.anisotropy
             });
           }
         }
@@ -4457,6 +4468,44 @@ export class StageExperience {
     if (!this.cameraRig.state.isSettled) return;
     this._prepareForVignetteTransition(this.current);
     this.cameraRig.advance(Math.sign(steps));
+    this._prioritizeChunkQueueForVignette(this.cameraRig.state.index);
+  }
+
+  /**
+   * A hop can land on a vignette whose own large textures were claimed only
+   * moments ago (post-intro PC/Sidekick/Archaeology integration) and are
+   * still queued behind whatever else the chunk queue was already draining.
+   * Move that vignette's textures to the front so the hop-frame budget in
+   * the render loop actually spends on them first.
+   * @param {number} index
+   */
+  _prioritizeChunkQueueForVignette(index) {
+    const group = this.vignettes?.[index]?.group;
+    if (!group || !this.chunkedTextures?.pending) return;
+    const keys = [
+      "map",
+      "normalMap",
+      "roughnessMap",
+      "metalnessMap",
+      "aoMap",
+      "emissiveMap",
+      "alphaMap",
+      "bumpMap",
+      "displacementMap"
+    ];
+    const textures = new Set();
+    group.traverse((obj) => {
+      if (!obj.isMesh || !obj.material) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const mat of mats) {
+        if (!mat) continue;
+        for (const key of keys) {
+          const tex = mat[key];
+          if (tex?.isTexture) textures.add(tex);
+        }
+      }
+    });
+    this.chunkedTextures.prioritize(textures);
   }
 
   next = (options) => this.advance(1, options);
@@ -5787,9 +5836,9 @@ export class StageExperience {
       // from a hop or reveal frame's budget, and does nothing on this frame
       // if the previous one was already over the recover floor.
       const prevFrameMs = this._lastFrameMs || 0;
-      const notHop = this._programState().motion !== "hop";
+      const isHop = this._programState().motion === "hop";
       const notRevealing = this._modelRevealOpacity == null || this._modelRevealOpacity >= 1;
-      if (prevFrameMs <= FLOOR_RECOVER_MS && notHop && notRevealing) {
+      if (prevFrameMs <= FLOOR_RECOVER_MS && !isHop && notRevealing) {
         const lateBudgetMs = 4;
         const uploadT0 = performance.now();
         let lastResult = null;
@@ -5801,6 +5850,28 @@ export class StageExperience {
         const uploadMs = performance.now() - uploadT0;
         if (uploadMs > (this._uploadPeakMs || 0)) this._uploadPeakMs = uploadMs;
         if (lastResult) this._frameCause = `texture-late-${lastResult}`;
+      } else if (isHop) {
+        // A hop can land on a vignette whose own large textures were only
+        // just claimed (post-intro PC/Sidekick/Archaeology integration) and
+        // are still mid-drain — measured up to ~8s to finish unattended, long
+        // enough that a user landing on that stop sees flat placeholder gray
+        // the whole time. _prioritizeChunkQueueForVignette (called from
+        // advance()) already moved the destination's own jobs to the front
+        // of the queue; spend a small budget here, even mid-hop, so those
+        // specific jobs actually progress instead of waiting for the hop to
+        // finish and the frame to "settle" (which most of this queue is
+        // gated on everywhere else).
+        const hopBudgetMs = 1.5;
+        const uploadT0 = performance.now();
+        let lastResult = null;
+        while (performance.now() - uploadT0 < hopBudgetMs && this.chunkedTextures.pending) {
+          lastResult = this.chunkedTextures.step(this.renderer);
+          if (!lastResult) break;
+          if (lastResult === "alloc") this._skipBeauty = true;
+        }
+        const uploadMs = performance.now() - uploadT0;
+        if (uploadMs > (this._uploadPeakMs || 0)) this._uploadPeakMs = uploadMs;
+        if (lastResult) this._frameCause = `texture-hop-${lastResult}`;
       }
     }
     if (this._frameCause !== "compile" && this.chunkedTextures?.mipmapPending) {

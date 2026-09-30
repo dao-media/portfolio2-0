@@ -144,6 +144,25 @@ function getMaterialClearcoat(matName) {
   return MATERIAL_CLEARCOAT[resolveMaterialName(matName)] ?? { clearcoat: 0, clearcoatRoughness: 0.5 };
 }
 
+/**
+ * Color maps are sRGB; normal/roughness/metalness/ORM maps carry raw data and
+ * must stay linear. `configurePcTexture` / `applyEmissiveMaterial` used to be
+ * the only place that set this — long after `warmPcTexturesOnGpu` had already
+ * called `renderer.initTexture` on the same cached texture. For anything
+ * `CHUNK_TEXTURE_EDGE`-or-larger, the chunk queue reads `texture.colorSpace`
+ * once, at claim time, to pick the GL internal format (`SRGB8_ALPHA8` vs
+ * `RGBA8`) — with colorSpace still unset then, every chunked color map
+ * allocated as linear and rendered washed out/darkened forever after (three's
+ * sampler never did the sRGB→linear decode). Setting it here, before the
+ * texture ever reaches the GPU, is what actually fixes that; the later calls
+ * are now redundant but harmless.
+ * @param {string} filename
+ * @returns {THREE.ColorSpace}
+ */
+function colorSpaceForFile(filename) {
+  return FILE_COLOR_SPACE.get(filename) ?? THREE.NoColorSpace;
+}
+
 function loadTextureFile(filename) {
   if (textureCache.has(filename)) return textureCache.get(filename);
 
@@ -153,6 +172,7 @@ function loadTextureFile(filename) {
       `${TEXTURE_DIR}${filename}`,
       (tex) => {
         tex.flipY = false;
+        tex.colorSpace = colorSpaceForFile(filename);
         resolve(tex);
       },
       undefined,
@@ -164,14 +184,23 @@ function loadTextureFile(filename) {
   return promise;
 }
 
+/** filename -> colorSpace, built once from the same tables {@link preloadPcTextures} walks. */
+const FILE_COLOR_SPACE = new Map();
+
 export function preloadPcTextures() {
   if (texturesReady) return Promise.resolve();
 
   const files = new Set();
   Object.values(MATERIAL_TEXTURE_SETS).forEach((set) => {
-    Object.values(set).forEach((file) => files.add(file));
+    Object.entries(set).forEach(([slot, file]) => {
+      files.add(file);
+      FILE_COLOR_SPACE.set(file, slot === "map" ? THREE.SRGBColorSpace : THREE.NoColorSpace);
+    });
   });
-  Object.values(EMISSIVE_CONFIG).forEach((cfg) => files.add(cfg.map));
+  Object.values(EMISSIVE_CONFIG).forEach((cfg) => {
+    files.add(cfg.map);
+    FILE_COLOR_SPACE.set(cfg.map, THREE.SRGBColorSpace);
+  });
 
   return Promise.all(
     [...files].map((file) =>

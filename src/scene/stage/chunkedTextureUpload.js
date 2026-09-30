@@ -48,6 +48,32 @@ function glWrap(gl, mode) {
   return gl.REPEAT;
 }
 
+function glFilter(gl, mode) {
+  switch (mode) {
+    case THREE.NearestFilter:
+      return gl.NEAREST;
+    case THREE.NearestMipmapNearestFilter:
+      return gl.NEAREST_MIPMAP_NEAREST;
+    case THREE.NearestMipmapLinearFilter:
+      return gl.NEAREST_MIPMAP_LINEAR;
+    case THREE.LinearMipmapNearestFilter:
+      return gl.LINEAR_MIPMAP_NEAREST;
+    case THREE.LinearMipmapLinearFilter:
+      return gl.LINEAR_MIPMAP_LINEAR;
+    default:
+      return gl.LINEAR;
+  }
+}
+
+function isMipmapFilter(mode) {
+  return (
+    mode === THREE.NearestMipmapNearestFilter ||
+    mode === THREE.NearestMipmapLinearFilter ||
+    mode === THREE.LinearMipmapNearestFilter ||
+    mode === THREE.LinearMipmapLinearFilter
+  );
+}
+
 export function isChunkCandidate(texture) {
   if (!texture?.isTexture || texture.isDataTexture || texture.isRenderTargetTexture) return false;
   if (texture.userData.__chunkClaimed || texture.userData.__chunkDone) return false;
@@ -77,6 +103,11 @@ export class ChunkedTextureQueue {
     const { w, h } = imageSize(source);
     texture.userData.__chunkClaimed = true;
     texture.userData.__chunkSource = source;
+    // Recorded so syncParams can detect a colorSpace change after the fact
+    // (should not happen for anything that sets colorSpace before its first
+    // claim, per pcProductionMaterials.js's fix — this is the safety net for
+    // whatever doesn't).
+    texture.userData.__chunkColorSpace = texture.colorSpace;
     // __chunkSource is cleared in _finish(); keep the real dimensions around
     // under a name debug tooling can still read after the job completes.
     texture.userData.__chunkW = w;
@@ -115,6 +146,10 @@ export class ChunkedTextureQueue {
       if (idx >= 0) this.jobs.splice(idx, 1);
     };
     texture.addEventListener("dispose", onDispose);
+    // restartForColorSpace needs to remove this exact listener before
+    // re-claiming, or the stale closure deletes the NEW texture on a later
+    // real dispose.
+    texture.userData.__chunkDisposeHandler = onDispose;
     // Callers like warmMeshesChunked treat a texture as GPU-resident once
     // `renderer.properties.get(tex.source).__version === tex.source.version`
     // — a check three's own upload path satisfies itself. We bypass that
@@ -147,6 +182,24 @@ export class ChunkedTextureQueue {
   }
 
   /**
+   * Move any pending job whose texture is in `textures` to the front of the
+   * queue, in place, preserving relative order within each group. Called on
+   * hop so the destination vignette's own textures — possibly claimed only
+   * moments ago by its own post-intro integration — drain first instead of
+   * waiting behind whatever else was already queued.
+   * @param {Set<THREE.Texture>} textures
+   */
+  prioritize(textures) {
+    if (!textures?.size || this.jobs.length < 2) return;
+    const front = [];
+    const rest = [];
+    for (const job of this.jobs) {
+      (textures.has(job.texture) ? front : rest).push(job);
+    }
+    if (front.length) this.jobs = front.concat(rest);
+  }
+
+  /**
    * Re-apply only the GL sampler wrap mode for a texture this queue already
    * owns. Called instead of letting three's real initTexture touch it again
    * (see the caller in StageExperience's renderer.initTexture override):
@@ -164,6 +217,14 @@ export class ChunkedTextureQueue {
    * @param {THREE.WebGLRenderer} renderer
    */
   syncParams(texture, renderer) {
+    // A colorSpace change can't be applied to an already-allocated GL
+    // texture — the internal format (SRGB8_ALPHA8 vs RGBA8) is fixed at
+    // allocation. Restart the whole job rather than silently keep sampling
+    // through the wrong format.
+    if (texture.userData.__chunkColorSpace !== undefined && texture.userData.__chunkColorSpace !== texture.colorSpace) {
+      this.restartForColorSpace(texture, renderer);
+      return;
+    }
     const gl = renderer.getContext();
     const props = renderer.properties.get(texture);
     const glTex = props?.__webglTexture;
@@ -171,6 +232,66 @@ export class ChunkedTextureQueue {
     gl.bindTexture(gl.TEXTURE_2D, glTex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrap(gl, texture.wrapS));
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrap(gl, texture.wrapT));
+    // Filters: safe to apply a mipmap-mode MIN filter only once mips actually
+    // exist (__chunkDone through _finalizeMipmap) — before that the texture
+    // is mipmap-incomplete and would sample undefined. If mips aren't ready
+    // yet, _runGenerateMipmap reads texture.minFilter itself when it finally
+    // runs, so the caller's request still lands, just later.
+    const canUseMipFilter = Boolean(texture.userData.__chunkDone) && !this._mipmapQueue?.some((j) => j.texture === texture);
+    const minMode = isMipmapFilter(texture.minFilter) && !canUseMipFilter ? THREE.LinearFilter : texture.minFilter;
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, glFilter(gl, minMode));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, glFilter(gl, texture.magFilter));
+    const anisoExt = renderer.extensions?.get?.("EXT_texture_filter_anisotropic");
+    if (anisoExt) {
+      const maxAniso = renderer.capabilities?.getMaxAnisotropy?.() ?? 1;
+      const aniso = Math.min(texture.anisotropy || 1, maxAniso);
+      gl.texParameterf(gl.TEXTURE_2D, anisoExt.TEXTURE_MAX_ANISOTROPY_EXT, aniso);
+    }
+  }
+
+  /**
+   * A texture already claimed by this queue had its colorSpace changed after
+   * the fact — the GL internal format allocated at claim time no longer
+   * matches. If the job is still pending, its original source bitmap is
+   * still known: delete the stale GL object, drop the job, and re-claim from
+   * scratch with the corrected colorSpace. If the job already finished,
+   * `_finish()` already dropped the only reference to the decoded source
+   * bitmap — there is nothing left to re-chunk from, so this only warns.
+   * pcProductionMaterials.js settles colorSpace before the first claim
+   * specifically so this path is never exercised in practice; it exists as a
+   * safety net, not the primary fix.
+   * @param {THREE.Texture} texture
+   * @param {THREE.WebGLRenderer} renderer
+   */
+  restartForColorSpace(texture, renderer) {
+    const gl = renderer.getContext();
+    const job = this.jobs.find((j) => j.texture === texture);
+    const oldDispose = texture.userData.__chunkDisposeHandler;
+    if (oldDispose) {
+      texture.removeEventListener("dispose", oldDispose);
+      texture.userData.__chunkDisposeHandler = null;
+    }
+    const props = renderer.properties.get(texture);
+    if (props?.__webglTexture) gl.deleteTexture(props.__webglTexture);
+    renderer.properties.remove(texture);
+    if (!job) {
+      console.warn(
+        "[chunkedTextureUpload] colorSpace changed on an already-finished chunked texture " +
+          `(${texture.uuid}); its source bitmap is gone, so it can't be re-chunked. ` +
+          "It will keep sampling through the wrong internal format until reloaded."
+      );
+      texture.userData.__chunkClaimed = false;
+      texture.userData.__chunkDone = false;
+      return;
+    }
+    const idx = this.jobs.indexOf(job);
+    if (idx >= 0) this.jobs.splice(idx, 1);
+    texture.userData.__chunkClaimed = false;
+    texture.userData.__chunkDone = false;
+    // claim() reads texture.image as the source to chunk from; restore the
+    // real bitmap this job already had before re-claiming.
+    texture.image = job.source;
+    this.claim(texture, renderer);
   }
 
   /** Textures whose mip chain generation was deferred to a settled frame. */
@@ -223,6 +344,10 @@ export class ChunkedTextureQueue {
       job.allocated = true;
       job.glTex = glTex;
       job.internal = internal;
+      // Kept on the texture (not just the job, which is discarded at finish)
+      // so debug tooling can report what format actually got allocated vs.
+      // what texture.colorSpace asks for right now.
+      job.texture.userData.__chunkInternalFormat = internal === gl.SRGB8_ALPHA8 ? "SRGB8_ALPHA8" : "RGBA8";
       return "alloc";
     }
 
@@ -329,8 +454,15 @@ export class ChunkedTextureQueue {
       (this._mipmapQueue || (this._mipmapQueue = [])).push({ texture, maxLevel });
       return;
     }
-    const ms = this._runGenerateMipmap(renderer, texture, maxLevel);
-    if (this._mipmapCalibrationMs == null) {
+    // performance.now() around a bare gl.generateMipmap() only times how long
+    // it took to *queue* the command — WebGL calls are asynchronous, so that
+    // can read near-zero while the driver is still chewing on it. The
+    // calibration run (and only that one — gl.finish() is a real pipeline
+    // stall) brackets with gl.finish() so the measured number is actual GPU
+    // completion time, not queue-submission time.
+    const calibrating = this._mipmapCalibrationMs == null;
+    const ms = this._runGenerateMipmap(renderer, texture, maxLevel, calibrating);
+    if (calibrating) {
       this._mipmapCalibrationMs = ms;
       // 8ms budget — see debugMipmapCalibration(). Once one texture's
       // generateMipmap crosses it, every later one defers; a single frame
@@ -343,20 +475,31 @@ export class ChunkedTextureQueue {
    * @param {THREE.WebGLRenderer} renderer
    * @param {THREE.Texture} texture
    * @param {number} maxLevel
+   * @param {boolean} [precise] bracket with gl.finish() for real GPU-completion
+   *   time instead of queue-submission time. A genuine pipeline stall — only
+   *   the one-time calibration run should ever pass true.
    * @returns {number} ms spent in gl.generateMipmap
    */
-  _runGenerateMipmap(renderer, texture, maxLevel) {
+  _runGenerateMipmap(renderer, texture, maxLevel, precise = false) {
     const gl = renderer.getContext();
     const props = renderer.properties.get(texture);
     const glTex = props?.__webglTexture;
     if (!glTex) return 0;
     gl.bindTexture(gl.TEXTURE_2D, glTex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, maxLevel);
+    if (precise) gl.finish();
     const t0 = performance.now();
     gl.generateMipmap(gl.TEXTURE_2D);
+    if (precise) gl.finish();
     const ms = performance.now() - t0;
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    // Honor whatever filter the texture asks for now (configurePcTexture-
+    // style callers may have already run, or may still be pending — either
+    // way this is the last GL-parameter write for this texture until
+    // syncParams touches it again). Default to the mipmap-aware filter three
+    // itself defaults new textures to, not a hardcoded guess.
+    const minMode = texture.minFilter ?? THREE.LinearMipmapLinearFilter;
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, glFilter(gl, minMode));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, glFilter(gl, texture.magFilter ?? THREE.LinearFilter));
     const anisoExt = renderer.extensions?.get?.("EXT_texture_filter_anisotropic");
     if (anisoExt) {
       const maxAniso = renderer.capabilities?.getMaxAnisotropy?.() ?? 1;

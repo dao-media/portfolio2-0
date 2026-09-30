@@ -6,6 +6,19 @@ const GL_KEYS = [
   "__webglFramebuffer",
   "__webglMultisampledFramebuffer",
   "__webglDepthbuffer",
+  // The multisampled framebuffer's OWN depth renderbuffer — a separate GL
+  // object from __webglDepthbuffer (which belongs to the resolved
+  // framebuffer). WebGLTextures.js's setupRenderTarget creates this one via
+  // renderbufferStorageMultisample, sized to the target's CURRENT
+  // width/height, and attaches it only to __webglMultisampledFramebuffer.
+  // Leaving it out of GL_KEYS meant every pooled resize/restore left it
+  // stale relative to whichever framebuffer pair got stashed or restored —
+  // eventually landing a __webglMultisampledFramebuffer (read side of
+  // three's internal MSAA resolve blit) and a __webglDepthbuffer (write
+  // side) that pointed at the same underlying image, which is exactly
+  // "GL_INVALID_OPERATION: Read and write depth stencil attachments cannot
+  // be the same image."
+  "__webglDepthRenderbuffer",
   "__webglColorRenderbuffer",
   "__webglTexture",
   "__boundDepthTexture",
@@ -32,7 +45,7 @@ export function installComposerSizePool(renderer, composer) {
     };
     proto.__floorSizePool = true;
   }
-  patchSampleSwap(composer, renderer);
+  patchSampleSwap(composer);
 }
 
 function poolFor(rt) {
@@ -141,12 +154,21 @@ function swapTargetSize(rt, width, height, depth, renderer) {
 }
 
 /**
- * The multisampling setter disposes both beauty targets. Stash the GL
- * objects under the old sample count and restore them on the way back.
+ * The multisampling setter used to stash the GL objects under the old sample
+ * count and restore them on the way back — the same pooling trick as
+ * swapTargetSize, and vulnerable to the same gap: it never tracked
+ * __webglDepthRenderbuffer (the multisampled framebuffer's own depth
+ * renderbuffer, separate from __webglDepthbuffer on the resolved
+ * framebuffer), which is what actually produced
+ * "GL_INVALID_OPERATION: Read and write depth stencil attachments cannot be
+ * the same image." during three's own resolve blit. This now matches
+ * `postprocessing`'s own native multisampling setter — set `.samples`, then
+ * `.dispose()` both buffers so three's normal setupRenderTarget path
+ * recreates the multisampled framebuffer and its depth renderbuffer
+ * together, consistently, instead of a partial pooled restore.
  * @param {import("postprocessing").EffectComposer} composer
- * @param {THREE.WebGLRenderer} renderer
  */
-function patchSampleSwap(composer, renderer) {
+function patchSampleSwap(composer) {
   if (composer.__floorSampleSwap) return;
   composer.__floorSampleSwap = true;
   Object.defineProperty(composer, "multisampling", {
@@ -157,26 +179,24 @@ function patchSampleSwap(composer, renderer) {
     set(value) {
       const prev = this.inputBuffer.samples;
       if (prev === value) return;
-      stash(renderer, this.inputBuffer, prev);
-      stash(renderer, this.outputBuffer, prev);
       this.inputBuffer.samples = value;
       this.outputBuffer.samples = value;
-      restoreSamples(renderer, this.inputBuffer, value);
-      restoreSamples(renderer, this.outputBuffer, value);
+      this.inputBuffer.dispose();
+      this.outputBuffer.dispose();
+      // setMultisampling() (PostPass.js) calls composer.setSize() right after
+      // this setter to force reallocation at the new sample count — which
+      // re-enters swapTargetSize's pooled setSize for these SAME two
+      // targets. A stale pool entry from an earlier cycle at this exact
+      // size+samples would restore GL object ids that dispose() just deleted
+      // a moment ago. Drop each target's own pool so that reallocation is
+      // always a clean miss → three creates fresh objects, never a restore
+      // of just-freed ones.
+      clearPool(this.inputBuffer);
+      clearPool(this.outputBuffer);
     }
   });
 }
 
-function restoreSamples(renderer, rt, samples) {
-  const hit = poolFor(rt).get(sizeKey(rt, rt.width, rt.height, samples));
-  if (hit) {
-    applyHit(renderer, rt, hit);
-    markMiss(rt, false);
-    return;
-  }
-  const { rt: rtBag, tex, depth } = bags(renderer, rt);
-  clearGl(rtBag);
-  clearGl(tex);
-  clearGl(depth);
-  markMiss(rt, true);
+function clearPool(rt) {
+  rt.userData?._sizePool?.clear();
 }
