@@ -164,8 +164,9 @@ export function makeNeonLantern(def) {
             m.side = THREE.DoubleSide;
             root.userData.neonGlassMats.push(m);
           } else {
-            if ("metalness" in m) m.metalness = Math.min(m.metalness ?? 0.4, 0.55);
-            if ("roughness" in m) m.roughness = Math.max(m.roughness ?? 0.5, 0.55);
+            // metalness/roughness come from METAL_ALLOWLIST["lantern"] in
+            // materialIntentSSOT.js now — createGltfLoader applies it before
+            // this traversal ever sees the material.
             if ("envMapIntensity" in m) m.envMapIntensity = 0.4;
             fire.mat.userData.neonBodyMat = m;
           }

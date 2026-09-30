@@ -67,6 +67,15 @@ self.onmessage = (event) => {
   else if (msg.type === "duo") stage.handleHostDuo(msg);
   else if (msg.type === "pixelBudget") stage.setPixelBudget(msg.megapixels);
   else if (msg.type === "floorReset") stage.resetFloorStats();
+  else if (msg.type === "debugCall") {
+    let result;
+    try {
+      result = stage[msg.method]?.(...(msg.args || []));
+    } catch (error) {
+      result = { error: error?.message || String(error) };
+    }
+    post({ type: "debugResult", id: msg.id, result });
+  }
   const ms = performance.now() - t0;
   if (ms >= 20) stage._noteGap?.(`message:${msg.type}`, ms);
 };

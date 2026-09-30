@@ -163,6 +163,8 @@ export class SidekickScrollballLed {
     this.material = material;
     this.core = options.core ?? null;
     this.light = options.light ?? null;
+    this._localOffset = options.localOffset ?? new THREE.Vector3();
+    this._sceneLight = Boolean(options.sceneLight);
     this.reducedMotion = options.reducedMotion ?? false;
     /** @type {{ until: number, pulses: number[] } | null} */
     this._alert = null;
@@ -215,15 +217,24 @@ export class SidekickScrollballLed {
     core.position.copy(mesh.geometry.boundingSphere?.center ?? new THREE.Vector3());
     mesh.add(core);
 
-    const light = new THREE.PointLight(GLOW_COLOR.getHex(), LIGHT_IDLE, radius * 6, 2);
-    light.name = "scrollballLedLight";
-    light.position.copy(core.position);
-    mesh.add(light);
+    const stageLight = options.light ?? null;
+    const light = stageLight ?? new THREE.PointLight(GLOW_COLOR.getHex(), LIGHT_IDLE, radius * 6, 2);
+    light.name = stageLight ? light.name : "scrollballLedLight";
+    light.color.setHex(GLOW_COLOR.getHex());
+    light.distance = radius * 6;
+    light.decay = 2;
+    light.castShadow = false;
+    if (!stageLight) {
+      light.position.copy(core.position);
+      mesh.add(light);
+    }
 
     return new SidekickScrollballLed(mesh, resin, {
       ...options,
       core,
-      light
+      light,
+      localOffset: core.position.clone(),
+      sceneLight: Boolean(stageLight)
     });
   }
 
@@ -244,6 +255,23 @@ export class SidekickScrollballLed {
       const wait = until - now + 30;
       window.setTimeout(resolve, Math.max(wait, gapMs + pulseMs));
     });
+  }
+
+  /** Keep the stage-level slot on the ball. Hidden content writes intensity 0. */
+  _syncSceneLight(intensity) {
+    const light = this.light;
+    if (!light || !this._sceneLight) return;
+    this.mesh.updateWorldMatrix(true, false);
+    light.position.copy(this._localOffset).applyMatrix4(this.mesh.matrixWorld);
+    let node = this.mesh;
+    while (node) {
+      if (node.visible === false) {
+        light.intensity = 0;
+        return;
+      }
+      node = node.parent;
+    }
+    light.intensity = intensity;
   }
 
   /** @param {number} time Scene elapsed seconds */
@@ -333,8 +361,8 @@ export class SidekickScrollballLed {
       this.core.material.opacity = 0.7 + pulse * 0.28;
     }
 
-    if (this.light) {
-      this.light.intensity = levels.idleLight + pulse * (levels.peakLight - levels.idleLight);
-    }
+    const intensity = levels.idleLight + pulse * (levels.peakLight - levels.idleLight);
+    if (this._sceneLight) this._syncSceneLight(intensity);
+    else if (this.light) this.light.intensity = intensity;
   }
 }

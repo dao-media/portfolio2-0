@@ -241,7 +241,9 @@ export class DuoProjectsScreen {
     }
     this._applyPulseEnvelope();
 
+    const paintT0 = this._noteRig ? performance.now() : 0;
     this._paint(glitch);
+    if (this._noteRig) this._noteRig("duoFab.projectsPaint", performance.now() - paintT0);
   }
 
   /** @param {number} dt */
@@ -403,6 +405,63 @@ export class DuoProjectsScreen {
   }
 
   /**
+   * Shadow-blurred PROJECTS glyphs, drawn once. Later frames blit this bitmap.
+   */
+  _ensureLabelCache() {
+    const ready = this._labelFontReady();
+    if (this._labelCanvas && (this._labelFontLocked || !ready)) return;
+    const canvas = this._labelCanvas ?? document.createElement("canvas");
+    canvas.width = this.width;
+    canvas.height = this.height;
+    const ctx = canvas.getContext("2d", { alpha: true });
+    ctx.clearRect(0, 0, this.width, this.height);
+    this._drawProjects(ctx, this.width, this.height, 0, 0, 1);
+    this._labelCanvas = canvas;
+    this._labelFontLocked = ready;
+    this._staticReady = false;
+    if (!this._plateCanvas) {
+      const plate = document.createElement("canvas");
+      plate.width = this.width;
+      plate.height = this.height;
+      this._plateCanvas = plate;
+      this._plateCtx = plate.getContext("2d", { alpha: true });
+    }
+  }
+
+  _labelFontReady() {
+    try {
+      const fonts = document.fonts;
+      if (!fonts?.check) return true;
+      const fontPx = Math.round(this.height * DUO_PROJECTS_FONT);
+      return fonts.check(`800 ${fontPx}px "IBM Plex Sans"`);
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {number} w
+   * @param {number} h
+   * @param {number} textA
+   */
+  _fillAura(ctx, w, h, textA) {
+    const aura = ctx.createRadialGradient(
+      w * 0.5,
+      h * 0.5,
+      w * 0.04,
+      w * 0.5,
+      h * 0.5,
+      w * 0.4
+    );
+    aura.addColorStop(0, `rgba(140, 230, 255, ${0.22 * textA})`);
+    aura.addColorStop(0.55, `rgba(80, 190, 255, ${0.08 * textA})`);
+    aura.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = aura;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  /**
    * @param {number} glitch 0–1
    */
   _paint(glitch) {
@@ -410,34 +469,31 @@ export class DuoProjectsScreen {
     const w = this.width;
     const h = this.height;
     if (!ctx) return;
-
-    ctx.clearRect(0, 0, w, h);
+    this._ensureLabelCache();
 
     const textA = Math.max(0, Math.min(1, this._textOpacity ?? 1));
-    if (textA > 0.01 || glitch > 0.02) {
-      const aura = ctx.createRadialGradient(
-        w * 0.5,
-        h * 0.5,
-        w * 0.04,
-        w * 0.5,
-        h * 0.5,
-        w * 0.4
-      );
-      aura.addColorStop(0, `rgba(140, 230, 255, ${0.22 * textA})`);
-      aura.addColorStop(0.55, `rgba(80, 190, 255, ${0.08 * textA})`);
-      aura.addColorStop(1, "rgba(0, 0, 0, 0)");
-      ctx.fillStyle = aura;
-      ctx.fillRect(0, 0, w, h);
+    const glitching = glitch > 0.02;
+    if (!glitching && textA >= 0.999 && this._staticReady) return;
 
-      if (textA > 0.01) {
-        this._drawProjects(ctx, w, h, 0, 0, textA);
-      }
+    const dest = glitching ? this._plateCtx : ctx;
+    dest.setTransform(1, 0, 0, 1, 0, 0);
+    dest.globalAlpha = 1;
+    dest.globalCompositeOperation = "source-over";
+    dest.clearRect(0, 0, w, h);
 
-      if (glitch > 0.02) {
-        this._drawGlitch(ctx, w, h, glitch, textA);
+    if (textA > 0.01 || glitching) {
+      this._fillAura(dest, w, h, textA);
+      if (textA > 0.01 && this._labelCanvas) {
+        dest.save();
+        dest.globalAlpha = textA;
+        dest.drawImage(this._labelCanvas, 0, 0);
+        dest.restore();
       }
     }
 
+    if (glitching) this._drawGlitch(ctx, w, h, glitch, textA);
+
+    this._staticReady = !glitching && textA >= 0.999;
     this.texture.needsUpdate = true;
     this._dirty = false;
   }
@@ -539,34 +595,49 @@ export class DuoProjectsScreen {
    * @param {number} [textAlpha=1]
    */
   _drawGlitch(ctx, w, h, amount, textAlpha = 1) {
+    const plate = this._plateCtx;
+    const src = this._plateCanvas;
+    const label = this._labelCanvas;
     const amp = amount * w * 0.06;
     const seed = this._sliceSeed + this._glitchT * 23;
     const ta = Math.max(0, Math.min(1, textAlpha));
 
-    // RGB channel ghosts (offset glyphs).
-    if (ta > 0.02) {
-      ctx.save();
-      ctx.globalCompositeOperation = "screen";
-      ctx.globalAlpha = 0.55 * amount * ta;
-      this._drawProjects(ctx, w, h, amp, 0, 1);
-      ctx.globalAlpha = 0.4 * amount * ta;
-      this._drawProjects(ctx, w, h, -amp * 0.9, amp * 0.12, 1);
-      ctx.restore();
+    // RGB channel ghosts — blit the cached glyphs, no second shadowBlur pass.
+    if (ta > 0.02 && plate && label) {
+      plate.save();
+      plate.globalCompositeOperation = "screen";
+      plate.globalAlpha = 0.55 * amount * ta;
+      plate.drawImage(label, amp, 0);
+      plate.globalAlpha = 0.4 * amount * ta;
+      plate.drawImage(label, -amp * 0.9, amp * 0.12);
+      plate.restore();
     }
 
-    // Horizontal slice tears.
-    const slices = 7;
-    for (let i = 0; i < slices; i++) {
-      const n = Math.sin(seed * (1.7 + i * 0.37)) * 0.5 + 0.5;
-      const y = Math.floor(n * h * 0.7 + h * 0.12);
-      const hh = Math.max(2, Math.floor(2 + amount * 14 * (0.35 + n)));
-      const dx = Math.sin(seed * (2.4 + i)) * amp * 2.8;
-      try {
-        const img = ctx.getImageData(0, y, w, hh);
-        ctx.putImageData(img, Math.round(dx), y);
-      } catch {
-        // ignore
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0, 0, w, h);
+    if (src) ctx.drawImage(src, 0, 0);
+
+    // Horizontal slice tears. `copy` replaces dest pixels, including clear
+    // alpha, the way putImageData did — without a GPU readback.
+    if (src) {
+      ctx.save();
+      ctx.globalCompositeOperation = "copy";
+      for (let i = 0; i < 7; i++) {
+        const n = Math.sin(seed * (1.7 + i * 0.37)) * 0.5 + 0.5;
+        const y = Math.floor(n * h * 0.7 + h * 0.12);
+        const hh = Math.max(2, Math.floor(2 + amount * 14 * (0.35 + n)));
+        const dx = Math.round(Math.sin(seed * (2.4 + i)) * amp * 2.8);
+        if (dx >= 0) {
+          const sw = w - dx;
+          if (sw > 0) ctx.drawImage(src, 0, y, sw, hh, dx, y, sw, hh);
+        } else {
+          const sw = w + dx;
+          if (sw > 0) ctx.drawImage(src, -dx, y, sw, hh, 0, y, sw, hh);
+        }
       }
+      ctx.restore();
     }
 
     // Scan tear bars.
@@ -605,6 +676,9 @@ export class DuoProjectsScreen {
     this.pulseTexture = null;
     this.canvas = null;
     this.ctx = null;
+    this._labelCanvas = null;
+    this._plateCanvas = null;
+    this._plateCtx = null;
     this.washCanvas = null;
     this.washCtx = null;
     this.pulseCanvas = null;

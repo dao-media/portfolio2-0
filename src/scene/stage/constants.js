@@ -5,6 +5,48 @@ export const STAGE_RADIUS = 18;
 /** Seamless floor, backdrop, and canvas clear color. */
 export const STAGE_BG = 0x070709;
 
+/**
+ * Legacy fraction. Rest resolution is `REST_PIXEL_BUDGET_MP`, not this multiplier.
+ * Shift+? cycles the megapixel budget. Shift+P opens the live tuner.
+ */
+export const REST_DPR = 0.85;
+/**
+ * Rest drawing-buffer cap. Pixel ratio is `sqrt(budget / cssWidth / cssHeight)`,
+ * and never above the device cap. A 3440-wide monitor lands near ~0.74;
+ * a small window can still run at the device cap. Shift+P dials this live.
+ */
+export const REST_PIXEL_BUDGET_MP = 2.3;
+/** A frame at or above this is already through the 24 fps floor. */
+export const FLOOR_FRAME_MS = 42;
+/** Drop one megapixel notch on the next frame when a frame reaches this. */
+export const FLOOR_DROP_MS = 35;
+/** Stay under this for FLOOR_RECOVER_SEC before easing one notch back up. */
+export const FLOOR_RECOVER_MS = 26;
+export const FLOOR_RECOVER_SEC = 1;
+/**
+ * Lowest rest budget. On a 3440×1232 view this is about a 0.4 pixel ratio,
+ * the ratio that ran ~94 fps in the fill test.
+ */
+export const FLOOR_MIN_MP = 0.7;
+/** Coarse steps. Drop walks down; recover walks up. Never below FLOOR_MIN_MP. */
+export const FLOOR_MP_NOTCHES = Object.freeze([0.7, 1.0, 1.3, 1.6, 1.9, 2.3]);
+/** Textures at or above this edge are strip-uploaded, never one texImage2D. */
+export const CHUNK_TEXTURE_EDGE = 2048;
+/** Rows of a large mip-0 uploaded in one frame. */
+export const CHUNK_TEXTURE_ROWS = 128;
+/**
+ * Black-hole sequence fraction of the device cap. The governor's 0.7 step
+ * does not apply while that sequence owns the camera.
+ */
+export const BLACK_HOLE_DPR = 1;
+/** Composer MSAA while the sequence owns the camera. */
+export const BLACK_HOLE_MSAA = 8;
+/**
+ * Unused on the ring. Rest AA is SMAA (`PostPass`). MSAA stays on the
+ * black-hole sequence only (`BLACK_HOLE_MSAA`).
+ */
+export const STAGE_MSAA = 4;
+
 /** Camera sits this far past the look point on +Z — keeps vignette framing when radius changes. */
 const CAM_BACKOFF = 8.6 * 1.04;
 export const FT_TO_M = 0.3048;
@@ -40,16 +82,17 @@ export const STAGE_LABEL_RADIUS = STAGE_RADIUS * (11.8 / 9);
 /** Fixed world point the POV spotlight always hits — vignettes rotate through this pool. */
 export const SPOT_TARGET = LOOK.clone();
 
-export const AMBIENT_INTENSITY = 0.12;
+/** Flat fill. Env does this job now — Shift+E starts here. Not a finished bake. */
+export const AMBIENT_INTENSITY = 0.03;
 export const HEMI_INTENSITY = 0.08;
 /** Unused fill slot — keep **0** (ambient/hemi are the soft fill). */
 export const FILL_INTENSITY = 0;
 export const EXPOSURE = 1.18;
 /**
  * Neutral RoomEnvironment IBL on `scene.environment`.
- * Keep **0** this pass — testing ambient/hemi fill only (not IBL).
+ * Starting point for Shift+E. Not a finished bake — the tuner logs each change.
  */
-export const STAGE_ENV_INTENSITY = 0;
+export const STAGE_ENV_INTENSITY = 0.6;
 
 /** 10 ft above the viewer's head — spotlight origin. */
 export const SPOT_HEIGHT_FT = 10;
@@ -164,10 +207,9 @@ export const STAGE_FOG_MODE = /** @type {"video" | "volumetric" | "off"} */ (
   "off"
 );
 /**
- * Master fog switch. `false` = do not construct VolumetricFogPass / VideoFogSystem;
- * composer has no fog pass; fog tick bodies early-return. All fog *files* stay on
- * disk — set `true` (+ `STAGE_FOG_MODE`) to restore. Bloom return after intro is
- * independent of this flag (see `_tickIntroBloomReturn`).
+ * Master fog switch. Renderers live in `src/fog-aside` and are not imported by
+ * the stage. The frame loop does not run FogDepthCapture, volumetric march, or
+ * video-fog sheets. `false` stays so probes and the tuner keep reporting fog off.
  */
 export const STAGE_FOG_ENABLED = false;
 
@@ -258,6 +300,25 @@ export const NEON_BLOOM = {
   resolutionScale: 0.5
 };
 
+/**
+ * Cursor depth of field on the vignette ring.
+ * Parked: `enabled` false keeps the pass out of the frame. The raycast and the
+ * bokeh passes both stay idle. Flip `enabled` to bring it back on the ring.
+ * Focus comes from a raycast, not a depth readback.
+ */
+export const CURSOR_DOF = {
+  /** false = pass disabled. The bokeh chain was costing the frame budget. */
+  enabled: false,
+  /** World-unit band that stays sharp around the cursor hit. */
+  focusRange: 1.6,
+  /** Bokeh disc size. The stop is a shallow plane, so this has to be high to read. */
+  bokehScale: 5,
+  /** Bokeh buffers at half the composer. The circle-of-confusion mask stays full res. */
+  resolutionScale: 0.5,
+  /** How fast the focal point chases the cursor hit (1/s). */
+  follow: 8
+};
+
 /** Baked fog atlas — removed with ring/haze (kept export only if debug tools import). */
 export const FOG_ATLAS = {
   N: 64,
@@ -299,6 +360,14 @@ export const INTRO_HANDOFF_MS = 680;
 export const INTRO_PARALLAX_HANDOFF_FOLLOW = 0.14;
 /** Brief pause at aerial POV so first-frame GPU compile doesn't hitch the drop. */
 export const INTRO_SPRING_HOLD_MS = 240;
+/**
+ * Bust prewarm during the black-hole hold (and the skip-path aerial hold).
+ * One mesh compile, then one texture upload, per frame so the flight stays smooth.
+ */
+export const VIGNETTE0_WARM_MESHES_PER_FRAME = 1;
+export const VIGNETTE0_WARM_TEXTURES_PER_FRAME = 1;
+/** Give up waiting for the Bust GLB so a failed load cannot freeze the drop. */
+export const VIGNETTE0_WARM_MOUNT_WAIT_MS = 12000;
 /**
  * Post-land delays — keep the ease-out / settle frames free of GPU upload and
  * cursor init. Deferred GLB fetch starts in `_initLoadGate`, not here.

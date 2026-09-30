@@ -22,6 +22,7 @@ uniform float uGrassTime;
 uniform float uWindStrength;
 uniform float uWindSpeed;
 uniform float uWindNoiseScale;
+uniform float uWindDetail;
 uniform float uBladeStiffness;
 uniform vec3 uWindDir;
 attribute vec4 aBlade;
@@ -53,8 +54,11 @@ float tip = pow(max(uv.y, 0.0), max(uBladeStiffness, 0.5));
 float t = uGrassTime * uWindSpeed * (0.55 + aPhase.y) + aPhase.x;
 // Low-frequency gust only — high-freq noise shimmered under neon (no MSAA).
 float gust = sin(t) * 0.55 + sin(t * 0.31 + aPhase.x) * 0.45;
-vec2 nUv = (instanceMatrix[3].xz) * uWindNoiseScale + vec2(t * 0.08, t * 0.06);
-float n = grassNoise(nUv) * 2.0 - 1.0;
+float n = 0.0;
+if (uWindDetail > 0.5) {
+  vec2 nUv = (instanceMatrix[3].xz) * uWindNoiseScale + vec2(t * 0.08, t * 0.06);
+  n = grassNoise(nUv) * 2.0 - 1.0;
+}
 vec3 wdir = normalize(vec3(uWindDir.x, 0.0, uWindDir.z));
 transformed += wdir * (uWindStrength * tip * (0.62 + 0.32 * gust + 0.1 * n));
 transformed.x += aBlade.z * tip * 0.03;
@@ -71,9 +75,10 @@ export function createGrassMaterial(opts = {}) {
     color: tipColor.clone(),
     roughness: 1,
     metalness: 0,
-    side: THREE.DoubleSide,
+    side: THREE.FrontSide,
     envMapIntensity: 0,
-    depthWrite: true,
+    depthWrite: false,
+    depthFunc: THREE.EqualDepth,
     dithering: true,
     polygonOffset: true,
     polygonOffsetFactor: 1,
@@ -86,6 +91,7 @@ export function createGrassMaterial(opts = {}) {
     uWindStrength: { value: GRASS_WIND_STRENGTH },
     uWindSpeed: { value: GRASS_WIND_SPEED },
     uWindNoiseScale: { value: GRASS_WIND_NOISE_SCALE },
+    uWindDetail: { value: 1 },
     uBladeStiffness: { value: GRASS_BLADE_STIFFNESS },
     uWindDir: { value: new THREE.Vector3(0.7, 0, 0.3).normalize() },
     uGrassTip: { value: tipColor.clone() },
@@ -174,11 +180,39 @@ material.specularColor = vec3(0.0);
       );
   };
 
-  mat.customProgramCacheKey = () => "grass-wind:v5-natural";
+  mat.customProgramCacheKey = () => "grass-wind:v7-prepass";
+
+  const prepass = new THREE.MeshBasicMaterial({
+    colorWrite: false,
+    depthWrite: true,
+    depthTest: true,
+    depthFunc: THREE.LessEqualDepth,
+    side: THREE.FrontSide,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1
+  });
+  prepass.userData.__grassWind = true;
+  prepass.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, mat.userData.grassUniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+${WIND_GLSL}`
+      )
+      .replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+${WIND_VERTEX_BODY}`
+      );
+  };
+  prepass.customProgramCacheKey = () => "grass-prepass:v1";
+  mat.userData.prepassMaterial = prepass;
 
   const depthMat = new THREE.MeshDepthMaterial({
     depthPacking: THREE.RGBADepthPacking,
-    side: THREE.DoubleSide
+    side: THREE.FrontSide
   });
   depthMat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, mat.userData.grassUniforms);
@@ -194,12 +228,12 @@ ${WIND_GLSL}`
 ${WIND_VERTEX_BODY}`
       );
   };
-  depthMat.customProgramCacheKey = () => "grass-wind-depth:v5-natural";
+  depthMat.customProgramCacheKey = () => "grass-wind-depth:v6-rest";
   mat.userData.depthMaterial = depthMat;
 
   // PointLight shadows use MeshDistanceMaterial (cube map), not depth packing.
   const distMat = new THREE.MeshDistanceMaterial({
-    side: THREE.DoubleSide
+    side: THREE.FrontSide
   });
   distMat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, mat.userData.grassUniforms);
@@ -215,11 +249,10 @@ ${WIND_GLSL}`
 ${WIND_VERTEX_BODY}`
       );
   };
-  distMat.customProgramCacheKey = () => "grass-wind-distance:v1";
+  distMat.customProgramCacheKey = () => "grass-wind-distance:v6-rest";
   mat.userData.distanceMaterial = distMat;
 
-  // Beauty pass also casts; keep shadowSide consistent with DoubleSide blades.
-  mat.shadowSide = THREE.DoubleSide;
+  mat.shadowSide = THREE.FrontSide;
 
   return mat;
 }

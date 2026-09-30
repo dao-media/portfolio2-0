@@ -1,18 +1,25 @@
 import * as THREE from "three";
 import {
   BloomEffect,
+  DepthOfFieldEffect,
   EffectComposer,
   EffectPass,
-  KernelSize
+  KernelSize,
+  SMAAEffect,
+  SMAAPreset
 } from "postprocessing";
-import { NEON_BLOOM } from "./constants.js";
+import { BLACK_HOLE_MSAA, CURSOR_DOF, NEON_BLOOM } from "./constants.js";
+import { installComposerSizePool } from "./composerSizePool.js";
 import { FilmGrainEffect } from "./FilmGrainEffect.js";
 import { PortalAwareRenderPass } from "../vignettes/PortalAwareRenderPass.js";
 
 /**
  * One live composer: PortalAwareRenderPass → volumetric fog → (optional)
- * EdgeGlitchPass → bloom → (optional) film grain. Grain defaults to **0**.
- * Grain stays last so it is not bloomed. Do not add a second composer.
+ * EdgeGlitchPass → SMAA → cursor depth of field → bloom → (optional) film grain.
+ * Rest AA is SMAA (multisampling 0). The black-hole sequence disables SMAA
+ * and turns on MSAA. Grain defaults to **0** and stays last so it is not bloomed.
+ * Depth of field stays disabled while CURSOR_DOF.enabled is false.
+ * Do not add a second composer.
  */
 export class PostPass {
   /**
@@ -71,6 +78,24 @@ export class PostPass {
       kernelSize: KernelSize.LARGE
     });
     this.bloomPass = new EffectPass(camera, this.bloomEffect);
+    // Focus distance is overwritten each frame from the cursor hit when
+    // CURSOR_DOF.enabled is true. The pass stays off while that flag is false.
+    this.dofEffect = new DepthOfFieldEffect(camera, {
+      focusDistance: 12,
+      focusRange: CURSOR_DOF.focusRange,
+      bokehScale: CURSOR_DOF.bokehScale,
+      resolutionScale: CURSOR_DOF.resolutionScale
+    });
+    this.dofPass = new EffectPass(camera, this.dofEffect);
+    this.dofPass.enabled = false;
+    this._aaMode = "smaa";
+    this.smaaEffect = new SMAAEffect({ preset: SMAAPreset.HIGH });
+    this.smaaPass = new EffectPass(camera, this.smaaEffect);
+    this.smaaPass.enabled = false;
+    this.smaaEffect.addEventListener("load", () => {
+      this._adoptSmaaBitmaps();
+      if (this._aaMode === "smaa") this.smaaPass.enabled = true;
+    });
     this.grainEffect = new FilmGrainEffect({ grain });
     this.grainPass = new EffectPass(camera, this.grainEffect);
 
@@ -78,14 +103,71 @@ export class PostPass {
     if (this.volumetricPass) {
       this.composer.addPass(this.volumetricPass);
     }
-    // fog → EdgeGlitch → bloom → grain (silhouette tears before bloom)
+    // fog → EdgeGlitch → SMAA → depth of field → bloom → grain
     if (this.edgeGlitchPass) {
       this.composer.addPass(this.edgeGlitchPass);
     }
+    this.composer.addPass(this.smaaPass);
+    this.composer.addPass(this.dofPass);
     this.composer.addPass(this.bloomPass);
     this.composer.addPass(this.grainPass);
 
-    this.setSize(window.innerWidth, window.innerHeight);
+    this.setSize(options.width || 1, options.height || 1);
+    this._syncDepthBlit();
+    installComposerSizePool(this.renderer, this.composer);
+  }
+
+  /** Composer buffer width after the last draw-size swap. */
+  get drawWidth() {
+    return this.composer?.inputBuffer?.width || 0;
+  }
+
+  /** Composer buffer height after the last draw-size swap. */
+  get drawHeight() {
+    return this.composer?.inputBuffer?.height || 0;
+  }
+
+  /**
+   * The worker Image stand-in is not a valid texImage2D source. SMAA's lookup
+   * textures point at that stand-in; the decoded ImageBitmap hangs off `.bitmap`.
+   */
+  _adoptSmaaBitmaps() {
+    const weights = this.smaaEffect?.weightsMaterial;
+    for (const texture of [weights?.searchTexture, weights?.areaTexture]) {
+      const bitmap = texture?.image?.bitmap;
+      if (!(bitmap instanceof ImageBitmap)) continue;
+      texture.image = bitmap;
+      texture.needsUpdate = true;
+    }
+  }
+
+  /** Rest: SMAA, no multisampling. */
+  setRestAntialias() {
+    this._aaMode = "smaa";
+    const samples = this.setMultisampling(0);
+    this._adoptSmaaBitmaps();
+    this.smaaPass.enabled = Boolean(this.smaaEffect?.weightsMaterial?.searchTexture);
+    return samples;
+  }
+
+  /**
+   * Black-hole sequence: MSAA, SMAA off. Fill-bound rest frames do not pay both.
+   * @param {number} [samples]
+   */
+  setSequenceAntialias(samples = BLACK_HOLE_MSAA) {
+    this._aaMode = "msaa";
+    this.smaaPass.enabled = false;
+    return this.setMultisampling(samples);
+  }
+
+  /**
+   * Multisampled depth cannot be blitted into the composer's single-sample
+   * depth texture (GL_INVALID_OPERATION every frame). SMAA reads that texture
+   * only while samples are 0. Skip the blit while MSAA is on.
+   */
+  _syncDepthBlit() {
+    if (!this.renderPass) return;
+    this.renderPass.needsDepthBlit = !(this.composer.multisampling > 0);
   }
 
   /**
@@ -131,6 +213,32 @@ export class PostPass {
   }
 
   /**
+   * Composer-internal draw size. The canvas pixel ratio stays put.
+   * A size that was allocated during warm swaps GL targets instead of
+   * reallocating. @returns {boolean} true when this size was not pooled yet.
+   * @param {number} dw
+   * @param {number} dh
+   */
+  setDrawSize(dw, dh) {
+    const width = Math.max(1, Math.floor(dw));
+    const height = Math.max(1, Math.floor(dh));
+    const input = this.composer?.inputBuffer;
+    const output = this.composer?.outputBuffer;
+    if (!input || !output) return false;
+    if (input.width === width && input.height === height && !input.userData?._poolMiss) {
+      return false;
+    }
+    input.setSize(width, height);
+    output.setSize(width, height);
+    this.composer.depthRenderTarget?.setSize?.(width, height);
+    const passes = this.composer.passes || [];
+    for (let i = 0; i < passes.length; i += 1) passes[i].setSize?.(width, height);
+    this._drawW = width;
+    this._drawH = height;
+    return Boolean(input.userData?._poolMiss || output.userData?._poolMiss);
+  }
+
+  /**
    * Wire Archaeology Giza portal for the beauty stencil subpass.
    * @param {{ renderPortalSubpass?: Function } | null} portal
    */
@@ -150,6 +258,34 @@ export class PostPass {
   /** @returns {number} */
   getBloomIntensity() {
     return this.bloomEffect?.intensity ?? 0;
+  }
+
+  /**
+   * Swap composer MSAA. Disposes the beauty targets once, then reallocates
+   * them before the next presented frame. Not a per-frame call.
+   * @param {number} samples
+   * @returns {number} samples actually set (clamped to GL_MAX_SAMPLES)
+   */
+  setMultisampling(samples) {
+    const gl = this.renderer.getContext();
+    const max = gl?.getParameter?.(gl.MAX_SAMPLES) ?? samples;
+    const next = Math.max(0, Math.min(Math.round(samples) || 0, max));
+    if (this.composer.multisampling === next) return next;
+
+    const cssW = Math.max(1, this._width || 1);
+    const cssH = Math.max(1, this._height || 1);
+    this.composer.multisampling = next;
+    this._width = 0;
+    this._height = 0;
+    this._drawW = 0;
+    this._drawH = 0;
+    this.setSize(cssW, cssH);
+    // Allocate the new sample count now. The samples setter only disposes.
+    this.renderer.setRenderTarget(this.composer.inputBuffer);
+    this.renderer.setRenderTarget(this.composer.outputBuffer);
+    this.renderer.setRenderTarget(null);
+    this._syncDepthBlit();
+    return next;
   }
 
   /**
@@ -181,7 +317,7 @@ export class PostPass {
   warm() {
     if (!this._scene) return;
     // Ensure RTs are real before the throwaway draw (§9/§20 — no compile hitch later).
-    this.setSize(this._width || window.innerWidth, this._height || window.innerHeight);
+    this.setSize(this._width || 1, this._height || 1);
     this.volumetricPass?.ensureSizeFromRenderer?.(this.renderer);
 
     const vol = this.volumetricPass;
@@ -201,6 +337,7 @@ export class PostPass {
   dispose() {
     this.composer.dispose();
     this.bloomEffect.dispose();
+    this.dofEffect?.dispose?.();
     // edgeTubeGlitchEffect is owned by EdgeGlitchSystem
     this.grainEffect.dispose();
     this.volumetricPass?.dispose?.();

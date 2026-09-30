@@ -664,6 +664,8 @@ export class ArchaeologyVignette {
     this.divjeBabeFluteRoot = null;
     this.neanderthalRoot = null;
     this.neanderthalStandRoot = null;
+    /** Mounted prop roots. Consumers filter this; they do not keep their own lists. */
+    this._mountedRoots = [];
     this.isOpen = false;
     this._aligned = false;
     this._modelLoadStarted = false;
@@ -855,6 +857,43 @@ export class ArchaeologyVignette {
     this._modelLoadSettled = true;
   }
 
+  /**
+   * The only way a prop root enters hide, fade, scroll capture, compile, or edge glitch.
+   * @param {THREE.Object3D} root
+   * @param {string} name
+   * @param {{ edgeGlitchZoom?: boolean, edgeGlitchRest?: boolean }} [flags]
+   */
+  _mountRoot(root, name, flags = {}) {
+    if (!root) return;
+    const prior = root.userData.archaeologyMount;
+    if (prior && this._mountedRoots.includes(root)) return;
+    root.userData.archaeologyMount = {
+      name,
+      fades: true,
+      scroll: true,
+      compile: true,
+      edgeGlitchZoom: flags.edgeGlitchZoom !== false,
+      edgeGlitchRest: Boolean(flags.edgeGlitchRest)
+    };
+    this._mountedRoots.push(root);
+  }
+
+  /**
+   * @param {{ fades?: boolean, scroll?: boolean, compile?: boolean, edgeGlitchZoom?: boolean, edgeGlitchRest?: boolean }} [filter]
+   * @returns {THREE.Object3D[]}
+   */
+  getMountedRoots(filter) {
+    if (!filter) return this._mountedRoots.slice();
+    return this._mountedRoots.filter((root) => {
+      const tag = root.userData.archaeologyMount;
+      if (!tag) return false;
+      for (const key of Object.keys(filter)) {
+        if (tag[key] !== filter[key]) return false;
+      }
+      return true;
+    });
+  }
+
   async _commitModels({ yieldFrame = async () => {}, revealHidden = false } = {}) {
     if (!this.shelfRoot && !this._pendingShelf) return;
 
@@ -868,6 +907,10 @@ export class ArchaeologyVignette {
       this.shelfRoot.name = "shelving-unit-root";
       stripShelfFloor(this.shelfRoot);
       this.group.add(this.shelfRoot);
+      this._mountRoot(this.shelfRoot, "shelf", {
+        edgeGlitchZoom: false,
+        edgeGlitchRest: true
+      });
       holdRootOffCamera(this.shelfRoot);
       this.shelfRoot.rotation.y = SHELF_YAW;
       const shelfScale = archaeologyShelfScale();
@@ -892,6 +935,7 @@ export class ArchaeologyVignette {
       this._pendingVenus = null;
       this.venusRoot.name = "venus-willendorf-root";
       this.group.add(this.venusRoot);
+      this._mountRoot(this.venusRoot, "venus");
       holdRootOffCamera(this.venusRoot);
       this.venusRoot.traverse((obj) => polishMesh(obj, { forceLit: true }));
       seatPropOnShelf(this.venusRoot, this.shelfRoot, {
@@ -901,6 +945,7 @@ export class ArchaeologyVignette {
         back: -PROP_BACK_INSET_M * propScale,
         yaw: THREE.MathUtils.degToRad(18)
       });
+      this.onPropMounted?.(this.venusRoot);
     } else {
       this._pendingVenus = null;
     }
@@ -910,6 +955,7 @@ export class ArchaeologyVignette {
       this._pendingOliveBoat = null;
       this.oliveBoatRoot.name = "olive-wood-boat-root";
       this.group.add(this.oliveBoatRoot);
+      this._mountRoot(this.oliveBoatRoot, "olive-boat");
       holdRootOffCamera(this.oliveBoatRoot);
       this.oliveBoatRoot.traverse((obj) => polishMesh(obj, { forceLit: true }));
       seatPropOnShelf(this.oliveBoatRoot, this.shelfRoot, {
@@ -920,6 +966,7 @@ export class ArchaeologyVignette {
         // Length along the shelf board (native long axis is local Z).
         yaw: THREE.MathUtils.degToRad(78)
       });
+      this.onPropMounted?.(this.oliveBoatRoot);
     } else {
       this._pendingOliveBoat = null;
     }
@@ -930,6 +977,7 @@ export class ArchaeologyVignette {
       this.cuneiformRoot.name = "cuneiform-tablet-root";
       stripShelfFloor(this.cuneiformRoot);
       this.group.add(this.cuneiformRoot);
+      this._mountRoot(this.cuneiformRoot, "cuneiform");
       holdRootOffCamera(this.cuneiformRoot);
       this.cuneiformRoot.traverse((obj) => polishMesh(obj, { forceLit: true }));
 
@@ -941,6 +989,7 @@ export class ArchaeologyVignette {
 
       this.cuneiformEaselRoot = createCuneiformEaselStand(easelH, tabletH * 0.7);
       this.group.add(this.cuneiformEaselRoot);
+      this._mountRoot(this.cuneiformEaselRoot, "cuneiform-easel");
       holdRootOffCamera(this.cuneiformEaselRoot);
       // Face easel toward camera (same yaw stack as tablet).
       seatLucyStandOnShelf(this.cuneiformEaselRoot, this.shelfRoot, {
@@ -959,6 +1008,8 @@ export class ArchaeologyVignette {
         yaw: CUNEIFORM_YAW,
         tipTablet: true
       });
+      this.onPropMounted?.(this.cuneiformRoot);
+      this.onPropMounted?.(this.cuneiformEaselRoot);
     } else {
       this._pendingCuneiform = null;
     }
@@ -970,6 +1021,7 @@ export class ArchaeologyVignette {
       this.ishtarGateRoot.name = "ishtar-gate-root";
       stripShelfFloor(this.ishtarGateRoot);
       this.group.add(this.ishtarGateRoot);
+      this._mountRoot(this.ishtarGateRoot, "ishtar");
       holdRootOffCamera(this.ishtarGateRoot);
       this.ishtarGateRoot.traverse((obj) => polishMesh(obj, { forceLit: true }));
       seatPropOnShelf(this.ishtarGateRoot, this.shelfRoot, {
@@ -987,6 +1039,7 @@ export class ArchaeologyVignette {
       this._pendingTrojanHorse = null;
       this.trojanHorseRoot.name = "trojan-horse-root";
       this.group.add(this.trojanHorseRoot);
+      this._mountRoot(this.trojanHorseRoot, "trojan-horse");
       holdRootOffCamera(this.trojanHorseRoot);
       this.trojanHorseRoot.traverse((obj) => polishMesh(obj, { forceLit: true }));
       seatPropOnShelf(this.trojanHorseRoot, this.shelfRoot, {
@@ -997,6 +1050,7 @@ export class ArchaeologyVignette {
         yaw: TROJAN_YAW,
         tipStand: true
       });
+      this.onPropMounted?.(this.trojanHorseRoot);
     } else {
       this._pendingTrojanHorse = null;
     }
@@ -1007,6 +1061,7 @@ export class ArchaeologyVignette {
       this.olmecHeadRoot.name = "olmec-head-root";
       stripShelfFloor(this.olmecHeadRoot);
       this.group.add(this.olmecHeadRoot);
+      this._mountRoot(this.olmecHeadRoot, "olmec");
       holdRootOffCamera(this.olmecHeadRoot);
       this.olmecHeadRoot.traverse((obj) => polishMesh(obj, { forceLit: true }));
       seatPropOnShelf(this.olmecHeadRoot, this.shelfRoot, {
@@ -1016,6 +1071,7 @@ export class ArchaeologyVignette {
         back: PROP_BACK_OLMEC_M * propScale,
         yaw: OLMEC_YAW
       });
+      this.onPropMounted?.(this.olmecHeadRoot);
     } else {
       this._pendingOlmecHead = null;
     }
@@ -1030,6 +1086,7 @@ export class ArchaeologyVignette {
       this.neanderthalRoot.name = "neanderthal-root";
       stripShelfFloor(this.neanderthalRoot);
       this.group.add(this.neanderthalRoot);
+      this._mountRoot(this.neanderthalRoot, "neanderthal");
       holdRootOffCamera(this.neanderthalRoot);
       this.neanderthalRoot.traverse((obj) => polishMesh(obj, { forceLit: true }));
 
@@ -1044,6 +1101,7 @@ export class ArchaeologyVignette {
       this.neanderthalStandRoot = createLucyPawnStand(standH);
       this.neanderthalStandRoot.name = "neanderthal-stand-root";
       this.group.add(this.neanderthalStandRoot);
+      this._mountRoot(this.neanderthalStandRoot, "neanderthal-stand");
       holdRootOffCamera(this.neanderthalStandRoot);
       seatLucyStandOnShelf(this.neanderthalStandRoot, this.shelfRoot, {
         deckY,
@@ -1068,6 +1126,7 @@ export class ArchaeologyVignette {
       this.divjeBabeFluteRoot.name = "divje-babe-flute-root";
       stripShelfFloor(this.divjeBabeFluteRoot);
       this.group.add(this.divjeBabeFluteRoot);
+      this._mountRoot(this.divjeBabeFluteRoot, "flute");
       holdRootOffCamera(this.divjeBabeFluteRoot);
       this.divjeBabeFluteRoot.traverse((obj) => polishMesh(obj, { forceLit: true }));
       seatPropOnShelf(this.divjeBabeFluteRoot, this.shelfRoot, {
@@ -1087,6 +1146,7 @@ export class ArchaeologyVignette {
       this.lucyRoot.name = "lucy-root";
       stripShelfFloor(this.lucyRoot);
       this.group.add(this.lucyRoot);
+      this._mountRoot(this.lucyRoot, "lucy");
       holdRootOffCamera(this.lucyRoot);
       this.lucyRoot.traverse((obj) => polishMesh(obj, { forceLit: true }));
 
@@ -1097,6 +1157,7 @@ export class ArchaeologyVignette {
 
       this.lucyStandRoot = createLucyPawnStand(standH);
       this.group.add(this.lucyStandRoot);
+      this._mountRoot(this.lucyStandRoot, "lucy-stand");
       holdRootOffCamera(this.lucyStandRoot);
       seatLucyStandOnShelf(this.lucyStandRoot, this.shelfRoot, {
         deckY,
@@ -1129,6 +1190,7 @@ export class ArchaeologyVignette {
       } else {
         stripShelfFloor(this.ptolemyRoot);
         this.group.add(this.ptolemyRoot);
+        this._mountRoot(this.ptolemyRoot, "ptolemy");
         holdRootOffCamera(this.ptolemyRoot);
         this.ptolemyRoot.traverse((obj) => polishMesh(obj, { forceLit: true }));
         seatPropOnShelf(this.ptolemyRoot, this.shelfRoot, {
@@ -1148,22 +1210,19 @@ export class ArchaeologyVignette {
     this._registerScrollCapture();
 
     if (revealHidden) {
-      if (this.shelfRoot) hideGroupForReveal(this.shelfRoot);
-      if (this.venusRoot) hideGroupForReveal(this.venusRoot);
-      if (this.antikytheraRoot) hideGroupForReveal(this.antikytheraRoot);
-      if (this.trojanHorseRoot) hideGroupForReveal(this.trojanHorseRoot);
-      if (this.olmecHeadRoot) hideGroupForReveal(this.olmecHeadRoot);
-      if (this.oliveBoatRoot) hideGroupForReveal(this.oliveBoatRoot);
-      if (this.cuneiformRoot) hideGroupForReveal(this.cuneiformRoot);
-      if (this.cuneiformEaselRoot) hideGroupForReveal(this.cuneiformEaselRoot);
-      if (this.ishtarGateRoot) hideGroupForReveal(this.ishtarGateRoot);
-      if (this.lucyRoot) hideGroupForReveal(this.lucyRoot);
-      if (this.lucyStandRoot) hideGroupForReveal(this.lucyStandRoot);
-      if (this.ptolemyRoot) hideGroupForReveal(this.ptolemyRoot);
-      if (this.divjeBabeFluteRoot) hideGroupForReveal(this.divjeBabeFluteRoot);
-      if (this.neanderthalRoot) hideGroupForReveal(this.neanderthalRoot);
-      if (this.neanderthalStandRoot) hideGroupForReveal(this.neanderthalStandRoot);
+      for (const root of this.getMountedRoots({ fades: true })) {
+        hideGroupForReveal(root);
+      }
     }
+
+    const nameOf = (root) => root.userData.archaeologyMount?.name || root.name;
+    const mounted = this.getMountedRoots();
+    const zoom = this.getMountedRoots({ edgeGlitchZoom: true }).map(nameOf).join(",");
+    const rest = this.getMountedRoots({ edgeGlitchRest: true }).map(nameOf).join(",");
+    const scrollCount = this.scrollCapture?.meshTargets?.get?.("archaeology")?.meshes?.length ?? 0;
+    console.log(
+      `[Archaeology] reveal registry ${mounted.length} ${mounted.map(nameOf).join(",")} zoom=${zoom} rest=${rest} scroll=${scrollCount}`
+    );
 
     this._aligned = true;
     this.onAligned?.();
@@ -1171,23 +1230,7 @@ export class ArchaeologyVignette {
 
   _registerScrollCapture() {
     if (!this.scrollCapture) return;
-    const meshes = [
-      this.shelfRoot,
-      this.venusRoot,
-      this.antikytheraRoot,
-      this.trojanHorseRoot,
-      this.olmecHeadRoot,
-      this.oliveBoatRoot,
-      this.cuneiformRoot,
-      this.cuneiformEaselRoot,
-      this.ishtarGateRoot,
-      this.lucyRoot,
-      this.lucyStandRoot,
-      this.ptolemyRoot,
-      this.divjeBabeFluteRoot,
-      this.neanderthalRoot,
-      this.neanderthalStandRoot
-    ].filter(Boolean);
+    const meshes = this.getMountedRoots({ scroll: true });
     if (!meshes.length) return;
     this.scrollCapture.registerMesh(SCROLL_CAPTURE_MESH_IDS.archaeology, {
       vignetteIndex: this.vignetteIndex,
@@ -1205,24 +1248,9 @@ export class ArchaeologyVignette {
    */
   getEdgeGlitchRoots({ zoomed = false, neonTube = null } = {}) {
     if (zoomed) {
-      return [
-        this.venusRoot,
-        this.antikytheraRoot,
-        this.trojanHorseRoot,
-        this.olmecHeadRoot,
-        this.oliveBoatRoot,
-        this.cuneiformRoot,
-        this.cuneiformEaselRoot,
-        this.ishtarGateRoot,
-        this.lucyRoot,
-        this.lucyStandRoot,
-        this.ptolemyRoot,
-        this.divjeBabeFluteRoot,
-        this.neanderthalRoot,
-        this.neanderthalStandRoot
-      ].filter(Boolean);
+      return this.getMountedRoots({ edgeGlitchZoom: true });
     }
-    return [neonTube, this.shelfRoot].filter(Boolean);
+    return [neonTube, ...this.getMountedRoots({ edgeGlitchRest: true })].filter(Boolean);
   }
 
   /**

@@ -19,6 +19,96 @@ const DUO_CAPTURE_W = Math.round(DUO_CAPTURE_H * DUO_MAIL_ASPECT);
 export function startStageHost(canvas, options = {}) {
   const pageLog = [];
   let pageTrigger = "boot";
+  const loafLog = [];
+  window.__loaf = loafLog;
+  window.__longTasks = [];
+  window.__eventTasks = [];
+  window.__harness = [];
+
+  function pushCapped(list, row, cap) {
+    list.push(row);
+    if (list.length > cap) list.shift();
+  }
+
+  function scriptRows(entry) {
+    const scripts = entry.scripts || [];
+    const rows = [];
+    for (let i = 0; i < scripts.length; i += 1) {
+      const script = scripts[i];
+      rows.push({
+        sourceURL: script.sourceURL || "",
+        sourceFunctionName: script.sourceFunctionName || "",
+        invoker: script.invoker || "",
+        invokerType: script.invokerType || "",
+        duration: Math.round(script.duration || 0),
+        forcedStyleAndLayoutDuration: Math.round(script.forcedStyleAndLayoutDuration || 0)
+      });
+    }
+    return rows;
+  }
+
+  try {
+    const loafObserver = new PerformanceObserver((list) => {
+      const frames = list.getEntries();
+      for (let i = 0; i < frames.length; i += 1) {
+        const entry = frames[i];
+        if (entry.duration < 100) continue;
+        pushCapped(loafLog, {
+          startTime: Math.round(entry.startTime),
+          duration: Math.round(entry.duration),
+          blockingDuration: Math.round(entry.blockingDuration || 0),
+          renderStart: Math.round(entry.renderStart || 0),
+          styleAndLayoutStart: Math.round(entry.styleAndLayoutStart || 0),
+          scripts: scriptRows(entry),
+          visibility: document.visibilityState
+        }, 40);
+      }
+    });
+    loafObserver.observe({ type: "long-animation-frame", buffered: true });
+  } catch {
+    window.__loafError = "long-animation-frame unsupported";
+  }
+
+  try {
+    const longTaskObserver = new PerformanceObserver((list) => {
+      const tasks = list.getEntries();
+      for (let i = 0; i < tasks.length; i += 1) {
+        const entry = tasks[i];
+        pushCapped(window.__longTasks, {
+          startTime: Math.round(entry.startTime),
+          duration: Math.round(entry.duration),
+          name: entry.name || "",
+          visibility: document.visibilityState
+        }, 40);
+      }
+    });
+    longTaskObserver.observe({ type: "longtask", buffered: true });
+  } catch {
+    window.__longTaskError = "longtask unsupported";
+  }
+
+  try {
+    const eventObserver = new PerformanceObserver((list) => {
+      const events = list.getEntries();
+      for (let i = 0; i < events.length; i += 1) {
+        const entry = events[i];
+        const target = entry.target;
+        pushCapped(window.__eventTasks, {
+          startTime: Math.round(entry.startTime),
+          duration: Math.round(entry.duration),
+          name: entry.name || "",
+          processingStart: Math.round(entry.processingStart || 0),
+          processingEnd: Math.round(entry.processingEnd || 0),
+          processing: Math.round((entry.processingEnd || 0) - (entry.processingStart || 0)),
+          target: target?.id || target?.className || target?.tagName || "",
+          visibility: document.visibilityState
+        }, 80);
+      }
+    });
+    eventObserver.observe({ type: "event", buffered: true, durationThreshold: 16 });
+  } catch {
+    window.__eventError = "event timing unsupported";
+  }
 
   function noteMainGap(name, ms, extra) {
     if (!(ms >= 20)) return;
@@ -265,12 +355,24 @@ export function startStageHost(canvas, options = {}) {
         kind: "raf"
       });
       if (!window.__pageStall || gap > window.__pageStall.ms) {
+        const gapEnd = now;
+        const gapStart = now - gap;
+        const harnessHit = [];
+        const harness = window.__harness || [];
+        for (let h = 0; h < harness.length; h += 1) {
+          const span = harness[h];
+          if (span.end >= gapStart && span.start <= gapEnd) harnessHit.push(span.kind);
+        }
         window.__pageStall = {
           ms: Math.round(gap),
           label,
           trigger: pageTrigger,
           sum: Math.round(sum),
-          during: pageDuring.slice(-12)
+          during: pageDuring.slice(-12),
+          t: Math.round(gapEnd),
+          start: Math.round(gapStart),
+          visibility: document.visibilityState,
+          harness: harnessHit
         };
       }
     }
@@ -329,6 +431,14 @@ export function startStageHost(canvas, options = {}) {
   });
 
   window.__stageCmd = (msg) => worker.postMessage(msg);
+  let debugCallSeq = 0;
+  const debugCallPending = new Map();
+  window.__stageDebug = (method, ...args) =>
+    new Promise((resolve) => {
+      const id = (debugCallSeq += 1);
+      debugCallPending.set(id, resolve);
+      worker.postMessage({ type: "debugCall", id, method, args });
+    });
   window.__resetFloor = () => worker.postMessage({ type: "floorReset" });
 
   window.addEventListener("keydown", (event) => {
@@ -734,6 +844,13 @@ export function startStageHost(canvas, options = {}) {
 
     if (msg.type === "error") {
       console.error("[stage.worker]", msg.message);
+    }
+    if (msg.type === "debugResult") {
+      const resolve = debugCallPending.get(msg.id);
+      if (resolve) {
+        debugCallPending.delete(msg.id);
+        resolve(msg.result);
+      }
     }
     noteMainGap(`host:${msg.type}`, performance.now() - msgT0, { kind: "message" });
   };

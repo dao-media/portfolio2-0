@@ -35,7 +35,15 @@ export class WaterCursor {
   /**
    * @param {{ renderer: THREE.WebGLRenderer, ticker: { add: Function, remove: Function }, config?: Partial<typeof DEFAULT_WATER_CURSOR_CONFIG> }} options
    */
-  constructor({ renderer, ticker, config = {} }) {
+  constructor({
+    renderer,
+    ticker,
+    config = {},
+    headless = false,
+    width = 0,
+    height = 0,
+    reducedMotion = null
+  }) {
     if (!renderer?.domElement) {
       throw new Error("[WaterCursor] A WebGLRenderer with domElement is required.");
     }
@@ -48,7 +56,10 @@ export class WaterCursor {
     this.cfg = sanitizeWaterCursorConfig(config);
     this.version = WATER_CURSOR_VERSION;
 
-    this.reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    this.reducedMotion =
+      typeof reducedMotion === "boolean"
+        ? reducedMotion
+        : window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.deformEnabled =
       !this.reducedMotion || !this.cfg.reducedMotionPlain;
 
@@ -72,6 +83,7 @@ export class WaterCursor {
     this._stretch = 0;
     /** Disk spiral shear. Null clears it. Strength stays under 1. */
     this._diskShear = null;
+    this._diskYank = 0;
 
     this._stretchSpring = new Spring(this.cfg.springStiffness, this.cfg.springDamping);
     this._waveSpring = new Spring(this.cfg.waveStiffness, this.cfg.waveDamping);
@@ -103,6 +115,9 @@ export class WaterCursor {
       uAngle: { value: 0 },
       uGravity: { value: 0 },
       uCurve: { value: 0 },
+      uHoleHide: { value: 0 },
+      uHoleUv: { value: new THREE.Vector2(0.5, 0.5) },
+      uHoleRad: { value: 0 },
       uTailBias: { value: this.cfg.tailBias },
       uPressScale: { value: 1 },
       uRimPress: { value: 1 },
@@ -210,6 +225,8 @@ export class WaterCursor {
     /** Last presence show target (viewport ∧ !chrome). */
     this._presenceTargetShow = false;
 
+    this._headless = Boolean(headless);
+
     this._onPointerMove = this._onPointerMove.bind(this);
     this._onDocumentLeave = this._onDocumentLeave.bind(this);
     this._onDocumentEnter = this._onDocumentEnter.bind(this);
@@ -218,16 +235,19 @@ export class WaterCursor {
     this._onVisibilityChange = this._onVisibilityChange.bind(this);
     this._tick = this._tick.bind(this);
 
-    window.addEventListener("pointermove", this._onPointerMove, { passive: true });
-    document.documentElement.addEventListener("mouseleave", this._onDocumentLeave);
-    document.documentElement.addEventListener("mouseenter", this._onDocumentEnter);
-    window.addEventListener("pointerdown", this._onPointerDown, { passive: true });
-    window.addEventListener("pointerup", this._onPointerUp, { passive: true });
-    document.addEventListener("visibilitychange", this._onVisibilityChange);
+    if (!this._headless) {
+      window.addEventListener("pointermove", this._onPointerMove, { passive: true });
+      document.documentElement.addEventListener("mouseleave", this._onDocumentLeave);
+      document.documentElement.addEventListener("mouseenter", this._onDocumentEnter);
+      window.addEventListener("pointerdown", this._onPointerDown, { passive: true });
+      window.addEventListener("pointerup", this._onPointerUp, { passive: true });
+      document.addEventListener("visibilitychange", this._onVisibilityChange);
+    }
 
     this.ticker.add(this._tick);
 
-    this.resize(window.innerWidth, window.innerHeight);
+    if (width > 0 && height > 0) this.resize(width, height);
+    else this.resize(window.innerWidth || 1, window.innerHeight || 1);
     this._applyHiddenNativeCursor();
     this._initialized = true;
   }
@@ -237,10 +257,10 @@ export class WaterCursor {
    * @returns {WaterCursor | null}
    */
   static tryCreate(options) {
-    const fine = window.matchMedia("(pointer: fine)").matches;
+    const fine = options.pointerFine ?? window.matchMedia("(pointer: fine)").matches;
     if (!fine) return null;
 
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduced = options.reducedMotion ?? window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const cfg = sanitizeWaterCursorConfig(options.config ?? {});
     if (reduced && cfg.reducedMotionSkip) return null;
 
@@ -527,13 +547,34 @@ export class WaterCursor {
   }
 
   _applyHiddenNativeCursor() {
-    document.body.style.cursor = "none";
-    this.renderer.domElement.style.cursor = "none";
+    if (document.body?.style) document.body.style.cursor = "none";
+    if (this.renderer.domElement?.style) this.renderer.domElement.style.cursor = "none";
   }
 
   _restoreNativeCursor() {
-    document.body.style.cursor = "";
-    this.renderer.domElement.style.cursor = "";
+    if (document.body?.style) document.body.style.cursor = "";
+    if (this.renderer.domElement?.style) this.renderer.domElement.style.cursor = "";
+  }
+
+  /**
+   * CSS-pixel pointer in the same space as `resize` (canvas-local in the worker).
+   * @param {number} x
+   * @param {number} y
+   * @param {boolean} [inside]
+   */
+  setPointer(x, y, inside = true) {
+    if (this._disposed) return;
+    if (!inside || !Number.isFinite(x) || !Number.isFinite(y)) {
+      this._syncViewportPresence(false);
+      return;
+    }
+    if (!this._hasPointerSample) {
+      this.appearAt(x, y);
+      return;
+    }
+    this._pointer.x = x;
+    this._pointer.y = y;
+    this._syncViewportPresence(this._isPointerInViewport(x, y));
   }
 
   /**
@@ -684,7 +725,8 @@ export class WaterCursor {
       this._diskShear &&
       Number.isFinite(this._diskShear.guideX) &&
       Number.isFinite(this._diskShear.guideY);
-    const followRate = guided ? 18 : this.cfg.followRate;
+    if (this._diskYank > 0) this._diskYank = Math.max(0, this._diskYank - dt);
+    const followRate = this._diskYank > 0 ? 32 : guided ? 16 : this.cfg.followRate;
     const targetX = guided ? this._diskShear.guideX : this._pointer.x;
     const targetY = guided ? this._diskShear.guideY : this._pointer.y;
 
@@ -711,10 +753,10 @@ export class WaterCursor {
 
       const speedPx = this._velocity.length();
       const speed = Math.min(speedPx / this.cfg.maxSpeed, 1);
-      const onFlow = (this._diskShear?.strength ?? 0) > 0 && speedPx < this.cfg.directionSpeedThreshold;
+      const captured = (this._diskShear?.strength ?? 0) > 0;
       const shapedSpeed = Math.pow(Math.max(speed, 0), this.cfg.speedResponseExponent);
 
-      this._stretchSpring.target = onFlow
+      this._stretchSpring.target = captured
         ? Math.max(this.cfg.maxStretch * shapedSpeed, 0.34)
         : this.cfg.maxStretch * shapedSpeed;
       this._stretchSpring.update(dt);
@@ -742,25 +784,43 @@ export class WaterCursor {
     this.uniforms.uAngle.value = this._angle;
     this.uniforms.uGravity.value = this.deformEnabled ? (this._diskShear?.strength ?? 0) : 0;
     this.uniforms.uCurve.value = this.deformEnabled ? (this._diskShear?.curve ?? 0) : 0;
+    const shear = this._diskShear;
+    const quad = this._quadPx;
+    if (shear && shear.behind > 0 && quad > 1 && Number.isFinite(shear.holeX)) {
+      this.uniforms.uHoleHide.value = shear.behind;
+      this.uniforms.uHoleUv.value.set(
+        0.5 + (shear.holeX - this._pos.x) / quad,
+        0.5 + (shear.holeY - this._pos.y) / quad
+      );
+      this.uniforms.uHoleRad.value = shear.holeRad / quad;
+    } else {
+      this.uniforms.uHoleHide.value = 0;
+    }
     this.uniforms.uRimPress.value = 1;
     this.mesh.position.set(this._pos.x, this._pos.y, 0);
   }
 
   /**
-   * Accretion-disk spiral. Strength under 1 so the pointer still leads.
+   * Captured disk orbit. Null returns the blob to the pointer.
    * @param {{ strength: number, angle: number } | null} shear
    */
   setDiskShear(shear) {
     if (!shear || !(shear.strength > 0) || !Number.isFinite(shear.angle)) {
+      if (this._diskShear) this._diskYank = 0.22;
       this._diskShear = null;
       return;
     }
+    this._diskYank = 0;
     this._diskShear = {
       strength: Math.min(shear.strength, 0.92),
       angle: shear.angle,
       guideX: shear.guideX,
       guideY: shear.guideY,
-      curve: Number.isFinite(shear.curve) ? shear.curve : 0
+      curve: Number.isFinite(shear.curve) ? shear.curve : 0,
+      behind: Number.isFinite(shear.behind) ? shear.behind : 0,
+      holeX: shear.holeX,
+      holeY: shear.holeY,
+      holeRad: Number.isFinite(shear.holeRad) ? shear.holeRad : 0
     };
   }
 

@@ -103,6 +103,15 @@ export class SidekickSmsScreen {
     return Boolean(this._flipTween);
   }
 
+  /** Fired after the LCD atlas pixels change. */
+  setFrameHandler(fn) {
+    this._frameHandler = fn;
+  }
+
+  _emitFrame() {
+    this._frameHandler?.();
+  }
+
   async init() {
     const [frame, splash] = await Promise.all([
       loadImage(SIDEKICK_FRAME_URL),
@@ -206,6 +215,7 @@ export class SidekickSmsScreen {
     ctx.drawImage(this._frameImage, 0, 0, size, size);
 
     this.texture.needsUpdate = true;
+    this._emitFrame();
   }
 
   _bakeSplashAtlas() {
@@ -241,6 +251,7 @@ export class SidekickSmsScreen {
     }
     this.ctx.drawImage(this._splashAtlas, 0, 0);
     this.texture.needsUpdate = true;
+    this._emitFrame();
   }
 
   async _ensureForm() {

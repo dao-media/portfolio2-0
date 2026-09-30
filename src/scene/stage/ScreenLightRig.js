@@ -1,18 +1,17 @@
 // Content-agnostic "screen in a dark room" light spill for Three.js.
-// Samples the average color of whatever texture is on the screen and
-// drives a RectAreaLight (forward spill) + PointLight (bezel backglow).
+// The screen image is a 2D canvas before it becomes a texture. The spill
+// tint is the average of that canvas — never a WebGL readback.
 //
 // Requires three >= r150. RectAreaLight only lights MeshStandard/PhysicalMaterial.
 
 import * as THREE from "three";
-import { tagFrame } from "./frameBudget.js";
 import { RectAreaLightUniformsLib } from "three/examples/jsm/lights/RectAreaLightUniformsLib.js";
 
 let _rectAreaInit = false;
 
 export class ScreenLightRig {
   /**
-   * @param {THREE.WebGLRenderer} renderer
+   * @param {THREE.WebGLRenderer} _renderer unused — kept so callers stay stable
    * @param {{
    *   screenTexture: THREE.Texture,
    *   screenWidth?: number,
@@ -27,7 +26,7 @@ export class ScreenLightRig {
    *   flipForward?: boolean
    * }} options
    */
-  constructor(renderer, options = {}) {
+  constructor(_renderer, options = {}) {
     const {
       screenTexture,
       screenWidth = 0.4,
@@ -39,7 +38,9 @@ export class ScreenLightRig {
       saturationBoost = 1.35,
       forwardOffset = 0.02,
       glowDepth = 0.15,
-      flipForward = false
+      flipForward = false,
+      spill = null,
+      glow = null
     } = options;
 
     if (!_rectAreaInit) {
@@ -47,7 +48,6 @@ export class ScreenLightRig {
       _rectAreaInit = true;
     }
 
-    this.renderer = renderer;
     this.texture = screenTexture;
     this.sampleInterval = sampleInterval;
     this.smoothing = smoothing;
@@ -61,30 +61,45 @@ export class ScreenLightRig {
     this._power = 0;
     this._powerTarget = 0;
 
-    this._rt = new THREE.WebGLRenderTarget(1, 1, {
-      minFilter: THREE.LinearFilter,
-      magFilter: THREE.LinearFilter,
-      generateMipmaps: false
-    });
-    this._pixel = new Uint8Array(4);
-
-    this._blitScene = new THREE.Scene();
-    this._blitCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    this._blitMat = new THREE.MeshBasicMaterial({ map: screenTexture });
-    this._blitScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this._blitMat));
+    const sample = document.createElement("canvas");
+    sample.width = 1;
+    sample.height = 1;
+    this._sampleCanvas = sample;
+    this._sampleCtx = sample.getContext("2d", { willReadFrequently: true });
 
     this.group = new THREE.Group();
+    this._ownedLights = !(spill && glow);
+    this._spillAnchor = new THREE.Object3D();
+    this._spillAnchor.name = "screen-spill-anchor";
+    this._spillAnchor.position.set(0, 0, forwardOffset);
+    this._spillAnchor.lookAt(0, 0, flipForward ? -1 : 1);
+    this._glowAnchor = new THREE.Object3D();
+    this._glowAnchor.name = "screen-glow-anchor";
+    this._glowAnchor.position.set(0, 0, -Math.abs(glowDepth));
 
-    this.spill = new THREE.RectAreaLight(0xffffff, 0, screenWidth, screenHeight);
-    this.spill.position.set(0, 0, forwardOffset);
-    this.spill.lookAt(0, 0, flipForward ? -1 : 1);
-    this.group.add(this.spill);
-
-    this.glow = new THREE.PointLight(0xffffff, 0, screenWidth * 7.5, 1.85);
-    this.glow.position.set(0, 0, -Math.abs(glowDepth));
-    this.group.add(this.glow);
+    if (this._ownedLights) {
+      this.spill = new THREE.RectAreaLight(0xffffff, 0, screenWidth, screenHeight);
+      this.spill.position.copy(this._spillAnchor.position);
+      this.spill.quaternion.copy(this._spillAnchor.quaternion);
+      this.group.add(this.spill);
+      this.glow = new THREE.PointLight(0xffffff, 0, screenWidth * 7.5, 1.85);
+      this.glow.position.copy(this._glowAnchor.position);
+      this.group.add(this.glow);
+    } else {
+      this.spill = spill;
+      this.glow = glow;
+      this.spill.width = screenWidth;
+      this.spill.height = screenHeight;
+      this.glow.distance = screenWidth * 7.5;
+      this.spill.intensity = 0;
+      this.glow.intensity = 0;
+      this.glow.castShadow = false;
+    }
 
     this._frame = 0;
+    this._lastSampleFrame = -1000;
+    this._sampledVersion = -1;
+    this._hasSample = false;
     this._targetColor = new THREE.Color(0x000000);
     this._targetLuma = 0;
     this._hsl = { h: 0, s: 0, l: 0 };
@@ -94,7 +109,6 @@ export class ScreenLightRig {
   setTexture(texture) {
     if (!texture) return;
     this.texture = texture;
-    this._blitMat.map = texture;
   }
 
   /** Scale spill/glow caps — e.g. pull back when the monitor fills the frame. */
@@ -114,8 +128,50 @@ export class ScreenLightRig {
     this._powerTarget = THREE.MathUtils.clamp(power, 0, 1);
   }
 
+  /**
+   * Screen mesh owns the pose anchors. The lights stay on the stage rig.
+   * @param {THREE.Object3D} screenMesh
+   */
+  bindAnchor(screenMesh) {
+    this.anchor = screenMesh;
+    screenMesh.add(this._spillAnchor);
+    screenMesh.add(this._glowAnchor);
+    this.syncPose();
+  }
+
+  /** Copy anchor world pose onto the scene-level lights. */
+  syncPose() {
+    if (this._ownedLights || !this.anchor) return;
+    this._spillAnchor.updateWorldMatrix(true, false);
+    this.spill.position.setFromMatrixPosition(this._spillAnchor.matrixWorld);
+    this.spill.quaternion.setFromRotationMatrix(this._spillAnchor.matrixWorld);
+    this._glowAnchor.updateWorldMatrix(true, false);
+    this.glow.position.setFromMatrixPosition(this._glowAnchor.matrixWorld);
+    this.glow.quaternion.setFromRotationMatrix(this._glowAnchor.matrixWorld);
+  }
+
+  /**
+   * Hidden vignette content used to drop these lights out of the program key.
+   * Keep them in the graph and write intensity 0 instead.
+   * @returns {boolean} true when the lights are held at 0
+   */
+  hold() {
+    this.syncPose();
+    let node = this.anchor;
+    while (node) {
+      if (node.visible === false) {
+        this.spill.intensity = 0;
+        this.glow.intensity = 0;
+        return true;
+      }
+      node = node.parent;
+    }
+    return false;
+  }
+
   /** Call once per frame from your render loop. */
   update() {
+    if (this.hold()) return;
     this._power += (this._powerTarget - this._power) * 0.08;
     if (this._power < 0.002 && this._powerTarget < 0.002) {
       this.spill.intensity *= 0.85;
@@ -126,7 +182,14 @@ export class ScreenLightRig {
     }
 
     this._frame++;
-    if (this._frame % this.sampleInterval === 0) this._sample();
+    const version = this.texture?.version ?? 0;
+    const stale = !this._hasSample || version !== this._sampledVersion;
+    if (stale && this._frame - this._lastSampleFrame >= this.sampleInterval) {
+      this._sample();
+      this._sampledVersion = version;
+      this._lastSampleFrame = this._frame;
+      this._hasSample = true;
+    }
 
     this.spill.color.lerp(this._targetColor, this.smoothing);
     this.glow.color.copy(this.spill.color);
@@ -138,22 +201,24 @@ export class ScreenLightRig {
     this.glow.intensity += (targetGlow - this.glow.intensity) * this.smoothing;
   }
 
+  /**
+   * Average the source canvas into one pixel. The image is the same
+   * canvas the CanvasTexture uploads — this does not touch WebGL.
+   */
   _sample() {
-    const r = this.renderer;
-    const prevRT = r.getRenderTarget();
+    const source = this.texture?.image;
+    const ctx = this._sampleCtx;
+    if (!ctx || !source || !source.width || !source.height) return;
 
-    this._blitMat.map = this.texture;
-    r.setRenderTarget(this._rt);
-    r.render(this._blitScene, this._blitCam);
-    tagFrame("rt-readback");
-    r.readRenderTargetPixels(this._rt, 0, 0, 1, 1, this._pixel);
-    r.setRenderTarget(prevRT);
-
-    const [pr, pg, pb] = this._pixel;
-    const c = this._targetColor.setRGB(pr / 255, pg / 255, pb / 255);
+    ctx.drawImage(source, 0, 0, 1, 1);
+    const data = ctx.getImageData(0, 0, 1, 1).data;
+    const pr = data[0] / 255;
+    const pg = data[1] / 255;
+    const pb = data[2] / 255;
+    const c = this._targetColor.setRGB(pr, pg, pb);
 
     this._targetLuma = THREE.MathUtils.clamp(
-      0.2126 * (pr / 255) + 0.7152 * (pg / 255) + 0.0722 * (pb / 255),
+      0.2126 * pr + 0.7152 * pg + 0.0722 * pb,
       0,
       0.78
     );
@@ -172,8 +237,15 @@ export class ScreenLightRig {
   }
 
   dispose() {
-    this._rt.dispose();
-    this._blitMat.dispose();
-    this.group.removeFromParent();
+    this._sampleCanvas = null;
+    this._sampleCtx = null;
+    this._spillAnchor.removeFromParent();
+    this._glowAnchor.removeFromParent();
+    this.anchor = null;
+    if (this._ownedLights) this.group.removeFromParent();
+    else {
+      this.spill.intensity = 0;
+      this.glow.intensity = 0;
+    }
   }
 }

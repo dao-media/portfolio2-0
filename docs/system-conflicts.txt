@@ -1,6 +1,46 @@
 Portfolio 2.0 — System Conflict Report
 ======================================
-Updated 13 Sep 2026 · read-only synthesis · no code changes in this pass.
+Updated 26 Sep 2026 · read-only synthesis · no code changes in this note.
+
+
+LIVE DELTA (26 Sep)
+-------------------
+60 s hop + pointer sweep, 3440×1232, black hole on. Chrome debug port 9344.
+
+C23  P1  OPEN   Page rAF gap still owns the floor. Hover posts are gated on
+     hit-id change. 60 s stress: maxMs 1572, cause page-raf stall, label none,
+     trigger pointer, sum 0. Sampled page heap: worker.onmessage 2245 KB
+     (was 2695), flushBitmaps 667 KB, flushPointer 561 KB.
+
+C24  P1  OPEN   programs 98 (was 117). Portal subpass is not the key:
+     archaeology.portal stays null. Held-root compile now uses an offscreen
+     target so it does not add the ACES variant. Remaining hop 0→3 row is
+     77 programs. wet-concrete-floor key delta is specularMapUv 7>5 and
+     thicknessMapUv 1>0 (warm to live). Census on that row read p5 r0.
+
+C25  P2  LIVE   Open Duo bottom edge is Ry(π) in _bakeOpenIsoQuat, applied
+     before DUO_ISO_OPEN_TIP 0.22. That half-turn spins insight UVs.
+     duoMailScreen texture.rotation stays π. Setting it to 0 flips the glass.
+     Architect said 0; reviewer kept π.
+
+C26  P3  FIXED  Light counts are fixed slots (createStageLightRig). castShadow
+     stays on. Census is one key at every stop, hop, Duo state, and black hole.
+
+C27  P3  FIXED  PROJECTS paint blits a cached label. Glitch slices are
+     drawImage copy. Peak paint 8.2 ms. No getImageData on that canvas.
+
+C15  P3  FIXED  Archaeology prop roots are one registry.
+     ArchaeologyVignette.getMountedRoots() feeds hide, fade, scroll capture,
+     compile, and edge glitch. Shelf is rest-glitch only; finds are zoom-glitch.
+     An unregistered prop is absent from all five. Neanderthal stand registers
+     with the skull.
+
+Do not treat page-raf:stall as a worker rig bug. Do not add or remove lights
+to chase C24. Do not set Mail texture.rotation to 0.
+
+
+LIVE DELTA (13 Sep) — historical; lighting has moved on
+-------------------------------------------------------
 
 Sources: code-explorer inventory, code-architect ownership map, code-reviewer
 residual risks (incl. Option 2 neon shell); live deltas through 13 Sep

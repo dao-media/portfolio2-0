@@ -424,21 +424,16 @@ export class ArchPortal {
     toEgyptMat(this._pyramids, null, 0xe0c090, true);
     this.portalWorld.add(this._pyramids);
 
-    const sun = new THREE.DirectionalLight(0xffe6c0, 3.4);
-    sun.name = "arch-portal-sun";
-    sun.position.set(5, 8, 2);
-    this.portalWorld.add(sun);
-    this.portalWorld.add(sun.target);
-    sun.target.position.set(0, 1.0, 3.5);
-    const fill = new THREE.DirectionalLight(0x9ec8ff, 1.1);
-    fill.name = "arch-portal-fill";
-    fill.position.set(-3, 4, 5);
-    this.portalWorld.add(fill);
-    this.portalWorld.add(fill.target);
-    fill.target.position.set(0, 1.0, 3.5);
-    const amb = new THREE.AmbientLight(0xffd8a8, 0.7);
-    amb.name = "arch-portal-amb";
-    this.portalWorld.add(amb);
+    const sun = this.mainScene.getObjectByName("arch-portal-sun");
+    const fill = this.mainScene.getObjectByName("arch-portal-fill");
+    const amb = this.mainScene.getObjectByName("arch-portal-amb");
+    if (sun) sun.position.set(5, 8, 2);
+    if (sun?.target) sun.target.position.set(0, 1.0, 3.5);
+    if (fill) fill.position.set(-3, 4, 5);
+    if (fill?.target) fill.target.position.set(0, 1.0, 3.5);
+    this._portalSun = sun;
+    this._portalFill = fill;
+    this._portalAmb = amb;
 
     this._ready = true;
   }
@@ -548,6 +543,10 @@ export class ArchPortal {
   _setPortalVisible(visible) {
     this.portalWorld.visible = visible;
     if (this.backplate) this.backplate.visible = !visible;
+    for (const light of [this._portalSun, this._portalFill, this._portalAmb]) {
+      if (!light) continue;
+      light.intensity = visible ? light.userData.portalIntensity ?? light.intensity : 0;
+    }
   }
 
   /**

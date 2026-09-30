@@ -90,10 +90,14 @@ import {
  * @param {number} damping
  * @param {number} dt
  */
+const _springOut = [0, 0];
+
 function springStep(pos, vel, target, stiffness, damping, dt) {
   const accel = stiffness * (target - pos) - damping * vel;
   const nextVel = vel + accel * dt;
-  return [pos + nextVel * dt, nextVel];
+  _springOut[0] = pos + nextVel * dt;
+  _springOut[1] = nextVel;
+  return _springOut;
 }
 
 function easeInOutCubic(t) {
@@ -141,17 +145,60 @@ const _V = new THREE.Vector3();
 const _V2 = new THREE.Vector3();
 const _V3 = new THREE.Vector3();
 const _M = new THREE.Matrix4();
+const _CENTER = new THREE.Vector3();
+const _FACE = new THREE.Vector3();
+const _FACE_Q = new THREE.Quaternion();
+const _NORMAL = new THREE.Vector3();
+const _quadOrder = [0, 1, 2, 3];
 
 /**
  * Label 4 projected points as TL, TR, BR, BL in client space.
  * @param {[number, number][]} pts
  * @returns {[number, number][]}
  */
-function orderClientQuad(pts) {
-  const sorted = pts.slice().sort((a, b) => a[1] - b[1] || a[0] - b[0]);
-  const top = sorted.slice(0, 2).sort((a, b) => a[0] - b[0]);
-  const bot = sorted.slice(2, 4).sort((a, b) => a[0] - b[0]);
-  return [top[0], top[1], bot[1], bot[0]];
+/** All 4 points within `eps` px on both axes — a perspective quad is not a rect. */
+function cornersWithin(a, b, eps) {
+  for (let i = 0; i < 4; i += 1) {
+    if (Math.abs(a[i][0] - b[i][0]) >= eps || Math.abs(a[i][1] - b[i][1]) >= eps) return false;
+  }
+  return true;
+}
+
+function orderClientQuadInto(pts, out) {
+  _quadOrder[0] = 0;
+  _quadOrder[1] = 1;
+  _quadOrder[2] = 2;
+  _quadOrder[3] = 3;
+  for (let i = 1; i < 4; i += 1) {
+    const key = _quadOrder[i];
+    let j = i - 1;
+    while (j >= 0) {
+      const other = _quadOrder[j];
+      const dy = pts[other][1] - pts[key][1];
+      const greater = dy > 0 || (dy === 0 && pts[other][0] > pts[key][0]);
+      if (!greater) break;
+      _quadOrder[j + 1] = other;
+      j -= 1;
+    }
+    _quadOrder[j + 1] = key;
+  }
+  const topA = _quadOrder[0];
+  const topB = _quadOrder[1];
+  const botA = _quadOrder[2];
+  const botB = _quadOrder[3];
+  const tl = pts[topA][0] <= pts[topB][0] ? topA : topB;
+  const tr = tl === topA ? topB : topA;
+  const bl = pts[botA][0] <= pts[botB][0] ? botA : botB;
+  const br = bl === botA ? botB : botA;
+  out[0][0] = pts[tl][0];
+  out[0][1] = pts[tl][1];
+  out[1][0] = pts[tr][0];
+  out[1][1] = pts[tr][1];
+  out[2][0] = pts[br][0];
+  out[2][1] = pts[br][1];
+  out[3][0] = pts[bl][0];
+  out[3][1] = pts[bl][1];
+  return out;
 }
 
 /**
@@ -184,6 +231,8 @@ export class DuoFabSystem {
     this.onHoverChange = deps.onHoverChange ?? null;
     this.getScreenRect = deps.getScreenRect ?? null;
     this.getMailShell = deps.getMailShell ?? null;
+    this.onCaptureRequest = deps.onCaptureRequest ?? null;
+    this._reducedMotionOverride = deps.reducedMotion;
 
     this.hudScene = new THREE.Scene();
     this.hudScene.name = "duo-hud-scene";
@@ -395,13 +444,13 @@ export class DuoFabSystem {
     ];
 
     this._syncReducedMotion();
-    if (typeof window !== "undefined" && window.matchMedia) {
+    if (typeof window !== "undefined" && window.matchMedia && this._reducedMotionOverride == null) {
       this._mq = window.matchMedia("(prefers-reduced-motion: reduce)");
       this._onMq = () => this._syncReducedMotion();
       this._mq.addEventListener?.("change", this._onMq);
     }
 
-    this.setSize(window.innerWidth || 1, window.innerHeight || 1);
+    this.setSize(deps.width || window.innerWidth || 1, deps.height || window.innerHeight || 1);
     this._applySeat(0);
   }
 
@@ -431,10 +480,13 @@ export class DuoFabSystem {
   }
 
   _syncReducedMotion() {
-    this._reducedMotion = Boolean(
-      typeof window !== "undefined" &&
-        window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches
-    );
+    this._reducedMotion =
+      typeof this._reducedMotionOverride === "boolean"
+        ? this._reducedMotionOverride
+        : Boolean(
+            typeof window !== "undefined" &&
+              window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches
+          );
     this._projects?.setReducedMotion?.(this._reducedMotion);
   }
 
@@ -520,7 +572,7 @@ export class DuoFabSystem {
    * Fix: with iso/spin identity and fold open, measure insight plane axes in
    * pivot space, then bake the quaternion that maps
    *   normal → HUD +Y (project UP),
-   *   bottom → HUD +Z (toward camera),
+   *   short edge → HUD +Z, then Ry(π) so the hardware bottom is the near edge,
    *   right  → HUD +X,
    * plus a small tip (`DUO_ISO_OPEN_TIP`) so the top edge recedes.
    * No GLB re-export needed — directionality is solved at load from the mesh.
@@ -576,7 +628,7 @@ export class DuoFabSystem {
       new THREE.Vector3(0, 0, 1)
     );
 
-    let bestQ = null;
+    let bestFlat = null;
     let bestScore = -Infinity;
     let bestSigns = null;
 
@@ -593,8 +645,9 @@ export class DuoFabSystem {
         _M.makeBasis(right, normal, bottom);
         const currentInv = _M.clone().invert();
         const isoMat = desired.clone().multiply(currentInv);
-        const q = new THREE.Quaternion().setFromRotationMatrix(isoMat);
-        // Tip in parent space after flatten: top edge recedes.
+        const flat = new THREE.Quaternion().setFromRotationMatrix(isoMat);
+        const q = flat.clone();
+        // Score includes the tip so the same candidate still wins.
         q.premultiply(tipQ);
 
         const n2 = normal.clone().applyQuaternion(q);
@@ -603,18 +656,26 @@ export class DuoFabSystem {
         const score = n2.y * 3 + b2.z * 2 + r2.x;
         if (score > bestScore) {
           bestScore = score;
-          bestQ = q;
+          bestFlat = flat;
           bestSigns = { flipN, flipB, n2: n2.toArray(), b2: b2.toArray(), r2: r2.toArray() };
         }
       }
     }
 
-    if (bestQ) {
-      this._isoOpenQuat.copy(bestQ);
+    if (bestFlat) {
+      // PCA "bottom" is an unsigned short axis. The winning sign parks the
+      // hardware top on +Z (near). Ry(π) around the flattened normal swaps
+      // that for the hardware bottom before the tip, so the tilt stays.
+      const halfTurn = new THREE.Quaternion().setFromAxisAngle(_AXIS_Y, Math.PI);
+      const baked = bestFlat.clone();
+      baked.premultiply(halfTurn);
+      baked.premultiply(tipQ);
+      this._isoOpenQuat.copy(baked);
       this._openIsoBaked = true;
       this._openIsoDebug = {
         score: +bestScore.toFixed(3),
         tip: DUO_ISO_OPEN_TIP,
+        halfTurn: Math.PI,
         signs: bestSigns,
         restNormal: axes.normal.toArray(),
         restBottom: axes.bottom.toArray()
@@ -795,8 +856,9 @@ export class DuoFabSystem {
   }
 
   /**
-   * PCA-ish screen frame in pivot-local space (iso parent), fold already open.
-   * long ≈ left/right, mid ≈ bottom/top, thin × → normal.
+   * Screen frame in pivot-local space (iso parent), fold already open.
+   * Plane normal from the corner span, then in-plane PCA: major = long edge,
+   * minor = short edge (`bottom`). Signs are chosen in the bake.
    * @param {THREE.Object3D} mesh
    * @returns {{ normal: THREE.Vector3, bottom: THREE.Vector3 } | null}
    */
@@ -884,8 +946,45 @@ export class DuoFabSystem {
     if (normal.lengthSq() < 1e-10) return null;
     normal.normalize();
 
-    // midAxis ≈ top/bottom direction; sign chosen in bake loop.
-    return { normal, bottom: midAxis };
+    // The farthest point from the centroid is a corner, so longAxis × midAxis
+    // is a diagonal. Mapping that diagonal to +Z rotates the open phone in
+    // the screen plane and off the tip axis at the same time. PCA on the
+    // plane: major = long edge (right → +X), minor = short edge (bottom → +Z).
+    const tangent =
+      Math.abs(normal.dot(_AXIS_Y)) < 0.9
+        ? new THREE.Vector3().crossVectors(_AXIS_Y, normal).normalize()
+        : new THREE.Vector3().crossVectors(_AXIS_X, normal).normalize();
+    const bitangent = new THREE.Vector3().crossVectors(normal, tangent).normalize();
+    let cxx = 0;
+    let cyy = 0;
+    let cxy = 0;
+    for (const p of pts) {
+      const rel = p.clone().sub(centroid);
+      const x = rel.dot(tangent);
+      const y = rel.dot(bitangent);
+      cxx += x * x;
+      cyy += y * y;
+      cxy += x * y;
+    }
+    const trace = cxx + cyy;
+    const det = cxx * cyy - cxy * cxy;
+    const disc = Math.sqrt(Math.max(0, (trace * trace) / 4 - det));
+    const majorL = trace / 2 + disc;
+    let vx = 1;
+    let vy = 0;
+    if (Math.abs(cxy) > 1e-8) {
+      vx = cxy;
+      vy = majorL - cxx;
+    } else if (cyy > cxx) {
+      vx = 0;
+      vy = 1;
+    }
+    const major = tangent.clone().multiplyScalar(vx).addScaledVector(bitangent, vy);
+    if (major.lengthSq() < 1e-10) return null;
+    major.normalize();
+    const minor = new THREE.Vector3().crossVectors(normal, major).normalize();
+
+    return { normal, bottom: minor };
   }
 
   /**
@@ -1771,6 +1870,7 @@ export class DuoFabSystem {
    */
   _refreshSkin() {
     if (!this._foldAction || !this._mixer) return;
+    const t0 = this._noteRig ? performance.now() : 0;
     const t = THREE.MathUtils.lerp(
       DUO_FOLD_TIME_CLOSED,
       DUO_FOLD_TIME_OPEN,
@@ -1780,6 +1880,7 @@ export class DuoFabSystem {
     this._foldAction.paused = true;
     this._mixer.update(0);
     this.armature?.updateMatrixWorld(true);
+    if (this._noteRig) this._noteRig("duoFab.refreshSkin", performance.now() - t0);
   }
 
   /**
@@ -1995,6 +2096,26 @@ export class DuoFabSystem {
    * All layers share the insight face basis and step out along its normal.
    * @param {boolean} open
    */
+  _placeHolo(mesh, t, scale, opacity, map, opts) {
+    if (!mesh) return;
+    const frame = this._holoFrame;
+    if (!frame) return;
+    const fade = opts?.ignoreClear ? 1 : frame.clearMul;
+    mesh.position
+      .copy(frame.center)
+      .addScaledVector(frame.normal, DUO_HOLO_SHEET_OFFSET + frame.faceSpan * t);
+    mesh.quaternion.copy(frame.faceQuat);
+    mesh.scale.set(frame.washW * scale, frame.washH * scale, 1);
+    mesh.visible = true;
+    const mat = mesh.material;
+    if (!mat) return;
+    mat.opacity = opacity * frame.entrance * fade;
+    if (map && mat.map !== map) {
+      mat.map = map;
+      mat.needsUpdate = true;
+    }
+  }
+
   _syncHoloSheet(open) {
     if (!this._holoSheet) return;
     const insight = this.insightScreens[0];
@@ -2006,10 +2127,12 @@ export class DuoFabSystem {
     this._holoOpen = true;
     this.root.updateMatrixWorld(true);
 
-    // Prefer skinned verts — setFromObject often collapses Attached screens.
-    const center = new THREE.Vector3();
-    const faceSize = new THREE.Vector3();
-    if (!this._measureInsightFace(insight, center, faceSize)) {
+    const center = _CENTER;
+    const faceSize = _FACE;
+    const faceT0 = this._noteRig ? performance.now() : 0;
+    const measured = this._measureInsightFace(insight, center, faceSize);
+    if (this._noteRig) this._noteRig("duoFab.measureFace", performance.now() - faceT0);
+    if (!measured) {
       this._tmpBox.setFromObject(insight);
       if (this._tmpBox.isEmpty()) {
         this._holoSheet.visible = false;
@@ -2019,13 +2142,23 @@ export class DuoFabSystem {
       this._tmpBox.getSize(faceSize);
     }
 
-    const dims = [
-      { a: "x", v: faceSize.x },
-      { a: "y", v: faceSize.y },
-      { a: "z", v: faceSize.z }
-    ].sort((a, b) => b.v - a.v);
-    const faceW = Math.max(1e-4, dims[0].v);
-    const faceH = Math.max(1e-4, dims[1].v);
+    const x = faceSize.x;
+    const y = faceSize.y;
+    const z = faceSize.z;
+    let faceW;
+    let faceH;
+    if (x >= y && x >= z) {
+      faceW = x;
+      faceH = Math.max(y, z);
+    } else if (y >= x && y >= z) {
+      faceW = y;
+      faceH = Math.max(x, z);
+    } else {
+      faceW = z;
+      faceH = Math.max(x, y);
+    }
+    faceW = Math.max(1e-4, faceW);
+    faceH = Math.max(1e-4, faceH);
     const faceSpan = Math.max(faceW, faceH);
 
     insight.getWorldQuaternion(_Q);
@@ -2039,7 +2172,7 @@ export class DuoFabSystem {
     _V3.crossVectors(_V2, normal).normalize();
     _V2.crossVectors(normal, _V3).normalize();
     _M.makeBasis(_V3, _V2, normal);
-    const faceQuat = new THREE.Quaternion().setFromRotationMatrix(_M);
+    const faceQuat = _FACE_Q.setFromRotationMatrix(_M);
 
     const entrance = this._entranceOpacity ?? 1;
     const clearMul = Math.max(
@@ -2049,20 +2182,15 @@ export class DuoFabSystem {
     const washW = faceW * DUO_HOLO_SHEET_WIDTH;
     const washH = faceH * DUO_HOLO_SHEET_WIDTH;
 
-    const place = (mesh, t, scale, opacity, map, opts = {}) => {
-      if (!mesh) return;
-      const fade = opts.ignoreClear ? 1 : clearMul;
-      mesh.position.copy(center).addScaledVector(normal, DUO_HOLO_SHEET_OFFSET + faceSpan * t);
-      mesh.quaternion.copy(faceQuat);
-      mesh.scale.set(washW * scale, washH * scale, 1);
-      mesh.visible = true;
-      const mat = mesh.material;
-      if (mat) {
-        mat.opacity = opacity * entrance * fade;
-        if (map) mat.map = map;
-        mat.needsUpdate = true;
-      }
-    };
+    const frame = this._holoFrame || (this._holoFrame = {});
+    frame.center = center;
+    frame.normal = normal;
+    frame.faceQuat = faceQuat;
+    frame.faceSpan = faceSpan;
+    frame.washW = washW;
+    frame.washH = washH;
+    frame.entrance = entrance;
+    frame.clearMul = clearMul;
 
     const washMap = this._projects?.washTexture ?? null;
     const labelMap = this._projects?.texture ?? null;
@@ -2074,7 +2202,7 @@ export class DuoFabSystem {
     // While projecting Mail, keep wash thin so the on-glass UI stays readable.
     const washScale = mailProjecting ? DUO_HOLO_MAIL_WASH_SCALE : 1;
 
-    place(this._holoWash, 0, 1, DUO_HOLO_WASH_OPACITY * washScale, washMap);
+    this._placeHolo(this._holoWash, 0, 1, DUO_HOLO_WASH_OPACITY * washScale, washMap);
 
     for (let i = 0; i < this._holoSlabs.length; i++) {
       const spec = DUO_HOLO_STACK[i];
@@ -2083,7 +2211,7 @@ export class DuoFabSystem {
         !mailProjecting && pulseAmt > 0.02
           ? Math.max(0, 1 - Math.abs(spec.t - pulseT) / 0.14)
           : 0;
-      place(
+      this._placeHolo(
         this._holoSlabs[i],
         spec.t,
         spec.scale,
@@ -2100,7 +2228,7 @@ export class DuoFabSystem {
         const discScale =
           DUO_HOLO_PULSE_SCALE * (1 - pulseProg) +
           DUO_HOLO_PULSE_SCALE_END * pulseProg;
-        place(
+        this._placeHolo(
           this._holoPulse,
           pulseT,
           discScale,
@@ -2144,9 +2272,11 @@ export class DuoFabSystem {
         const pm = this._holoPlume.material;
         if (pm) {
           pm.opacity = DUO_HOLO_LABEL_OPACITY * entrance * clearMul;
-          if (labelMap) pm.map = labelMap;
+          if (labelMap && pm.map !== labelMap) {
+            pm.map = labelMap;
+            pm.needsUpdate = true;
+          }
           pm.side = THREE.FrontSide;
-          pm.needsUpdate = true;
         }
       }
     }
@@ -2327,7 +2457,10 @@ export class DuoFabSystem {
     const ys = [min.y, max.y];
     const zs = [min.z, max.z];
 
-    const canvasRect = this.canvas.getBoundingClientRect();
+    const canvasRect =
+      typeof this.canvas?.getBoundingClientRect === "function"
+        ? this.canvas.getBoundingClientRect()
+        : { left: 0, top: 0, width: this._viewW || 1, height: this._viewH || 1 };
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -2389,6 +2522,10 @@ export class DuoFabSystem {
 
   /** Force a fresh capture of the live Mail overlay onto the insight screen. */
   captureMailScreen() {
+    if (this.onCaptureRequest) {
+      this.onCaptureRequest();
+      return;
+    }
     this._mailScreen?.requestCapture?.();
   }
 
@@ -2646,7 +2783,9 @@ export class DuoFabSystem {
     } else {
       idleOpts = this._closedIdleStrengths();
     }
+    const idleT0 = this._noteRig ? performance.now() : 0;
     this._idle.tick(safeDt, time, idleOpts);
+    if (this._noteRig) this._noteRig("duoFab.idle", performance.now() - idleT0);
 
     const hoverSpeed = 1 / Math.max(0.12, DUO_HOVER_SPIN_SEC);
     if (this._hoverT < this._hoverTarget) {
@@ -2669,14 +2808,23 @@ export class DuoFabSystem {
       DUO_FOLD_DAMPING,
       safeDt
     );
+    const foldT0 = this._noteRig ? performance.now() : 0;
     this._scrubFold(this._foldBlend);
     this._applyFoldVisibility(this._foldBlend);
+    if (this._noteRig) this._noteRig("duoFab.fold", performance.now() - foldT0);
 
     // Screens + hologram follow fold only (not hoverEased) so glow can’t
     // lead the unfold. Holo waits past `DUO_HOLO_OPEN_AT` + delay.
     // Unhover exit keeps the volume alive until the clear pulse wipes it.
     const foldOpen = this._foldBlend;
-    this._applyScreenEmissive(foldOpen);
+    const lap = (name, fn) => {
+      if (!this._noteRig) return fn();
+      const t0 = performance.now();
+      const value = fn();
+      this._noteRig(name, performance.now() - t0);
+      return value;
+    };
+    lap("duoFab.emissive", () => this._applyScreenEmissive(foldOpen));
     if (foldOpen >= DUO_HOLO_OPEN_AT && !this._reducedMotion) {
       this._holoDelayT += safeDt;
     } else if (!this._unhoverExit) {
@@ -2697,24 +2845,27 @@ export class DuoFabSystem {
           ? holoGate
           : mailOn);
     const exteriorLit = foldOpen < DUO_HOVER_OPEN_AT;
-    this._exterior?.tick?.(safeDt, { active: exteriorLit });
-    this._projects?.tick?.(safeDt, {
-      active: this.state === "idle" && (holoOn || this._unhoverExit)
+    lap("duoFab.exterior", () => this._exterior?.tick?.(safeDt, { active: exteriorLit }));
+    lap("duoFab.projects", () => {
+      if (this._projects) this._projects._noteRig = this._noteRig;
+      this._projects?.tick?.(safeDt, {
+        active: this.state === "idle" && (holoOn || this._unhoverExit)
+      });
     });
-    this._mailScreen?.tick?.(safeDt, {
+    lap("duoFab.mailScreen", () => this._mailScreen?.tick?.(safeDt, {
       active: mailOn && foldOpen >= DUO_HOVER_OPEN_AT
+    }));
+    lap("duoFab.holo", () => this._syncHoloSheet(holoOn));
+    lap("duoFab.bloom", () => {
+      this._hudBloom?.setEnabled?.(holoOn && clearAmt < 0.95);
+      this._hudBloom?.setStrength?.(
+        holoOn
+          ? (mailOn
+              ? DUO_HUD_BLOOM_STRENGTH * DUO_HUD_BLOOM_MAIL_SCALE
+              : DUO_HUD_BLOOM_STRENGTH) * Math.max(0, 1 - clearAmt)
+          : 0
+      );
     });
-    this._syncHoloSheet(holoOn);
-    this._hudBloom?.setEnabled?.(holoOn && clearAmt < 0.95);
-    // Soft bloom while Mail projects — light Mail paper blooms to solid white
-    // at full HUD strength and buries the UI on the glass.
-    this._hudBloom?.setStrength?.(
-      holoOn
-        ? (mailOn
-            ? DUO_HUD_BLOOM_STRENGTH * DUO_HUD_BLOOM_MAIL_SCALE
-            : DUO_HUD_BLOOM_STRENGTH) * Math.max(0, 1 - clearAmt)
-        : 0
-    );
 
     // Iso: slerp closed tip → measured open (screens +Y, bottom +Z).
     // Mail adds extra tip so the far edge rises toward the POV.
@@ -2742,7 +2893,9 @@ export class DuoFabSystem {
     }
     this.iso.quaternion.copy(this._isoSlerp);
 
+    const seatT0 = this._noteRig ? performance.now() : 0;
     this._applySeat(this._openBlend, { centerT: isoT, refreshSkin: true });
+    if (this._noteRig) this._noteRig("duoFab.seat", performance.now() - seatT0);
     // Same pivot expression as entering (entranceY is 0 once live).
     this.pivot.position.set(this._idle.x, this._entranceY + this._idle.y, 0);
     this.pivot.rotation.set(0, 0, 0);
@@ -2759,7 +2912,9 @@ export class DuoFabSystem {
       this._handoffLiveLeft -= 1;
     }
 
+    const rectT0 = this._noteRig ? performance.now() : 0;
     this._emitScreenRect();
+    if (this._noteRig) this._noteRig("duoFab.screenRect", performance.now() - rectT0);
   }
 
   /**
@@ -2862,7 +3017,7 @@ export class DuoFabSystem {
   _emitScreenRect() {
     if (!this.getScreenRect) return;
     if (this._entrance === "hidden") {
-      this.getScreenRect(null);
+      this._publishScreenRect(null);
       return;
     }
 
@@ -2870,10 +3025,27 @@ export class DuoFabSystem {
       this.state !== "idle" || this._foldBlend >= DUO_HOVER_OPEN_AT;
     if (useScreen && this.primaryScreen) {
       this.root.updateMatrixWorld(true);
-      const canvasRect = this.canvas.getBoundingClientRect();
+      const canvasRect = this._canvasRect || (this._canvasRect = {
+        left: 0,
+        top: 0,
+        width: 1,
+        height: 1
+      });
+      if (typeof this.canvas?.getBoundingClientRect === "function") {
+        const live = this.canvas.getBoundingClientRect();
+        canvasRect.left = live.left;
+        canvasRect.top = live.top;
+        canvasRect.width = live.width;
+        canvasRect.height = live.height;
+      } else {
+        canvasRect.left = 0;
+        canvasRect.top = 0;
+        canvasRect.width = this._viewW || 1;
+        canvasRect.height = this._viewH || 1;
+      }
       const face = this._projectInsightFaceCorners(canvasRect);
       if (face) {
-        this.getScreenRect(face);
+        this._publishScreenRect(face);
         return;
       }
       // Fallback: projected AABB of the screen mesh.
@@ -2903,27 +3075,99 @@ export class DuoFabSystem {
         }
       }
       if (Number.isFinite(minX) && maxX > minX && maxY > minY) {
-        this.getScreenRect({
-          left: minX,
-          top: minY,
-          width: Math.max(40, maxX - minX),
-          height: Math.max(60, maxY - minY)
-        });
+        this._publishAabb(
+          minX,
+          minY,
+          Math.max(40, maxX - minX),
+          Math.max(60, maxY - minY)
+        );
         return;
       }
     }
 
     const fab = this._fabClientRect();
     if (!fab) {
+      this._publishScreenRect(null);
+      return;
+    }
+    this._publishAabb(
+      fab.left,
+      fab.top,
+      Math.max(40, fab.width),
+      Math.max(60, fab.height)
+    );
+  }
+
+  _publishAabb(left, top, width, height) {
+    const rect = this._aabbPayload || (this._aabbPayload = {
+      left: 0,
+      top: 0,
+      width: 0,
+      height: 0
+    });
+    rect.left = left;
+    rect.top = top;
+    rect.width = width;
+    rect.height = height;
+    this._publishScreenRect(rect);
+  }
+
+  _publishScreenRect(rect) {
+    if (!this.getScreenRect) return;
+    if (!rect) {
+      if (this._screenRectNull) return;
+      this._screenRectNull = true;
       this.getScreenRect(null);
       return;
     }
-    this.getScreenRect({
-      left: fab.left,
-      top: fab.top,
-      width: Math.max(40, fab.width),
-      height: Math.max(60, fab.height)
+    const prev = this._screenRectSent;
+    const corners = rect.corners;
+    const hasCorners = Array.isArray(corners) && corners.length === 4;
+    if (
+      prev &&
+      !this._screenRectNull &&
+      Math.abs(prev.left - rect.left) < 0.5 &&
+      Math.abs(prev.top - rect.top) < 0.5 &&
+      Math.abs(prev.width - rect.width) < 0.5 &&
+      Math.abs(prev.height - rect.height) < 0.5 &&
+      prev.hasCorners === hasCorners &&
+      (!hasCorners || cornersWithin(prev.corners, corners, 0.5))
+    ) {
+      return;
+    }
+    const sent = prev || (this._screenRectSent = {
+      left: 0,
+      top: 0,
+      width: 0,
+      height: 0,
+      hasCorners: false,
+      corners: [[0, 0], [0, 0], [0, 0], [0, 0]]
     });
+    sent.left = rect.left;
+    sent.top = rect.top;
+    sent.width = rect.width;
+    sent.height = rect.height;
+    sent.hasCorners = hasCorners;
+    if (hasCorners) {
+      for (let i = 0; i < 4; i += 1) {
+        sent.corners[i][0] = corners[i][0];
+        sent.corners[i][1] = corners[i][1];
+      }
+    }
+    this._screenRectNull = false;
+    this.getScreenRect(rect);
+  }
+
+  _pushSample(out) {
+    const pool = this._samplePool || (this._samplePool = []);
+    const index = out.length;
+    let vec = pool[index];
+    if (!vec) {
+      vec = new THREE.Vector3();
+      pool[index] = vec;
+    }
+    vec.copy(_V);
+    out.push(vec);
   }
 
   /**
@@ -2934,8 +3178,8 @@ export class DuoFabSystem {
    */
   _sampleInsightWorldPoints(insight, out) {
     out.length = 0;
-    /** @type {Set<THREE.Object3D>} */
-    const seen = new Set();
+    const seen = this._sampleSeen || (this._sampleSeen = new Set());
+    seen.clear();
     let source = null;
     const pushSkinned = (mesh) => {
       if (
@@ -2953,7 +3197,7 @@ export class DuoFabSystem {
         mesh.getVertexPosition(i, _V);
         mesh.localToWorld(_V);
         if (!Number.isFinite(_V.x)) continue;
-        out.push(_V.clone());
+        this._pushSample(out);
       }
       if (out.length >= 4) source = "skinned";
     };
@@ -2973,7 +3217,7 @@ export class DuoFabSystem {
         _V.fromBufferAttribute(pos, i);
         mesh.localToWorld(_V);
         if (!Number.isFinite(_V.x)) continue;
-        out.push(_V.clone());
+        this._pushSample(out);
       }
       if (out.length >= 4) source = "static";
     };
@@ -2986,13 +3230,11 @@ export class DuoFabSystem {
     if (this._tmpBox.isEmpty()) return null;
     const min = this._tmpBox.min;
     const max = this._tmpBox.max;
-    const xs = [min.x, max.x];
-    const ys = [min.y, max.y];
-    const zs = [min.z, max.z];
-    for (const x of xs) {
-      for (const y of ys) {
-        for (const z of zs) {
-          out.push(new THREE.Vector3(x, y, z));
+    for (let xi = 0; xi < 2; xi += 1) {
+      for (let yi = 0; yi < 2; yi += 1) {
+        for (let zi = 0; zi < 2; zi += 1) {
+          _V.set(xi ? max.x : min.x, yi ? max.y : min.y, zi ? max.z : min.z);
+          this._pushSample(out);
         }
       }
     }
@@ -3012,16 +3254,17 @@ export class DuoFabSystem {
 
     /** @type {THREE.Vector3[]} */
     const samples = this._insightSampleBuf ?? (this._insightSampleBuf = []);
+    const sampleT0 = this._noteRig ? performance.now() : 0;
     const measure = this._sampleInsightWorldPoints(insight, samples);
+    if (this._noteRig) this._noteRig("duoFab.sampleFace", performance.now() - sampleT0);
     if (!measure) return null;
 
-    const center = new THREE.Vector3();
+    const center = _CENTER.set(0, 0, 0);
     for (const p of samples) center.add(p);
     center.multiplyScalar(1 / samples.length);
 
     insight.getWorldQuaternion(_Q);
-    // Own vector — `_V` is reused below for UV projection.
-    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(_Q).normalize();
+    const normal = _NORMAL.set(0, 0, 1).applyQuaternion(_Q).normalize();
     _V2.copy(this.hudCamera.position).sub(center);
     if (_V2.dot(normal) < 0) normal.negate();
 
@@ -3082,8 +3325,12 @@ export class DuoFabSystem {
       .addScaledVector(_V3, minU)
       .addScaledVector(_V2, minV);
 
-    /** @type {[number, number][]} */
-    const raw = [];
+    const raw = this._rawClientCorners || (this._rawClientCorners = [
+      [0, 0],
+      [0, 0],
+      [0, 0],
+      [0, 0]
+    ]);
     for (let i = 0; i < 4; i++) {
       this._ndc.copy(this._screenCorners[i]).project(this.hudCamera);
       const cx =
@@ -3091,11 +3338,17 @@ export class DuoFabSystem {
       const cy =
         (-this._ndc.y * 0.5 + 0.5) * canvasRect.height + canvasRect.top;
       if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
-      raw.push([cx, cy]);
+      raw[i][0] = cx;
+      raw[i][1] = cy;
     }
 
-    // Guarantee TL/TR/BR/BL in client space (basis may flip on open tip).
-    const corners = orderClientQuad(raw);
+    const corners = this._orderedClientCorners || (this._orderedClientCorners = [
+      [0, 0],
+      [0, 0],
+      [0, 0],
+      [0, 0]
+    ]);
+    orderClientQuadInto(raw, corners);
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -3108,15 +3361,24 @@ export class DuoFabSystem {
     }
     if (!(maxX > minX && maxY > minY)) return null;
 
-    const result = {
-      left: minX,
-      top: minY,
-      width: Math.max(40, maxX - minX),
-      height: Math.max(60, maxY - minY),
-      corners,
-      measure,
-      normal: [normal.x, normal.y, normal.z]
-    };
+    const result = this._facePayload || (this._facePayload = {
+      left: 0,
+      top: 0,
+      width: 0,
+      height: 0,
+      corners: null,
+      measure: "",
+      normal: [0, 0, 0]
+    });
+    result.left = minX;
+    result.top = minY;
+    result.width = Math.max(40, maxX - minX);
+    result.height = Math.max(60, maxY - minY);
+    result.corners = corners;
+    result.measure = measure;
+    result.normal[0] = normal.x;
+    result.normal[1] = normal.y;
+    result.normal[2] = normal.z;
     this._lastFaceCorners = result;
     return result;
   }

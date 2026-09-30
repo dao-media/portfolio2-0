@@ -15,6 +15,9 @@ const _basisA = new THREE.Vector3();
 const _basisB = new THREE.Vector3();
 const _ref = new THREE.Vector3();
 const _guide = new THREE.Vector3();
+const _occRay = new THREE.Vector3();
+const _occHole = new THREE.Vector3();
+const _limb = new THREE.Vector3();
 
 /** Runtime copy. The master in `masters/Black Hole/` stays untouched. */
 export const BLACK_HOLE_GLB_URL = "/assets/models/blackhole/runtime/blackhole.glb";
@@ -26,12 +29,22 @@ export const BLACK_HOLE_SHEAR_STRENGTH = 0.78;
 export const BLACK_HOLE_SHEAR_INWARD = 0.34;
 /** Inner lane. The blob rides this circle instead of crossing the singularity. */
 export const BLACK_HOLE_HORIZON_FRAC = 0.38;
-/** Concentric lanes from the horizon out to the disk edge. */
-export const BLACK_HOLE_TRACK_COUNT = 5;
-/** How fast the blob slides along a lane (1/s). Higher than the radial rate so corners arc. */
-export const BLACK_HOLE_TRACK_ANGULAR_RATE = 9;
-/** How fast the blob changes lanes (1/s). */
-export const BLACK_HOLE_TRACK_RADIAL_RATE = 3.5;
+/** Pointer inside this fraction of the disk radius can be captured. */
+export const BLACK_HOLE_CAPTURE_FRAC = 0.72;
+/** Orbit the blob settles onto after it is sucked in. */
+export const BLACK_HOLE_ORBIT_FRAC = 0.56;
+/** Constant orbit speed once captured, radians per second. */
+export const BLACK_HOLE_ORBIT_RATE = 1.85;
+/** How fast the radius eases onto the orbit (1/s). */
+export const BLACK_HOLE_SUCK_RATE = 2.8;
+/** Pointer slower than this (px/s) counts as resting. */
+export const BLACK_HOLE_CAPTURE_SPEED = 70;
+/** Rest this long inside the capture radius before the suck. */
+export const BLACK_HOLE_CAPTURE_STILL_SEC = 0.06;
+/** Pointer travel from the capture point that yanks the blob back. */
+export const BLACK_HOLE_CAPTURE_RELEASE_PX = 16;
+/** After a yank, ignore recapture for this long. */
+export const BLACK_HOLE_CAPTURE_COOLDOWN = 0.28;
 /**
  * Pitch the other way from the first 8° try. Disk stays nearly horizontal;
  * −8° on X squares the face to the approach.
@@ -135,22 +148,38 @@ export function createBlackHoleModel(center = BLACK_HOLE_CENTER) {
     };
   };
 
+  let captured = false;
+  let orbitAz = 0;
+  let orbitR = 0;
+  let captureX = 0;
+  let captureY = 0;
+  let stillSec = 0;
+  let cooldown = 0;
+  let lastPointerX = NaN;
+  let lastPointerY = NaN;
+
   /**
-   * Pointer over the disk → flow heading plus a point on an invisible lane.
-   * The lane is a circle (a spiral step inward), so the blob arcs instead of
-   * cutting across the hole. Null when the ray misses the disk.
+   * Resting pointer inside the inner disk sucks the blob onto one orbit.
+   * It loops there until the pointer moves, which drops the guide so the
+   * blob returns to the cursor. Null while the blob should follow the pointer.
    * @param {THREE.Camera} camera
    * @param {number} clientX
    * @param {number} clientY
    * @param {number} width
    * @param {number} height
-   * @param {number} blobX follower CSS x
-   * @param {number} blobY follower CSS y
+   * @param {number} _blobX
+   * @param {number} _blobY
    * @param {number} dt seconds
-   * @returns {{ strength: number, angle: number, guideX: number, guideY: number, curve: number } | null}
+   * @returns {{ strength: number, angle: number, guideX: number, guideY: number, curve: number, behind: number, holeX: number, holeY: number, holeRad: number } | null}
    */
-  api.samplePointerShear = (camera, clientX, clientY, width, height, blobX, blobY, dt) => {
-    if (!api.ready || !group.visible || width < 1 || height < 1) return null;
+  api.samplePointerShear = (camera, clientX, clientY, width, height, _blobX, _blobY, dt) => {
+    api.pointerOverDisk = false;
+    if (!api.ready || !group.visible || width < 1 || height < 1) {
+      captured = false;
+      stillSec = 0;
+      lastPointerX = NaN;
+      return null;
+    }
     group.updateMatrixWorld(true);
     const spinParent = api.ring?.parent ?? group;
     _axis.set(0, 1, 0).transformDirection(spinParent.matrixWorld);
@@ -162,56 +191,102 @@ export function createBlackHoleModel(center = BLACK_HOLE_CENTER) {
     _basisA.normalize();
     _basisB.crossVectors(_axis, _basisA).normalize();
 
-    const pointerR = hitDisk(clientX, clientY, width, height, camera, _hit);
-    if (pointerR == null) return null;
     const diskR = BLACK_HOLE_WORLD_DIAMETER * 0.5;
-    if (pointerR > diskR) return null;
-
-    const pointerAz = Math.atan2(_basisB.dot(_radial), _basisA.dot(_radial));
     const horizon = diskR * BLACK_HOLE_HORIZON_FRAC;
-    const outer = diskR * 0.96;
-    const span = Math.max(outer - horizon, 0.001);
-    const laneT = Math.min(Math.max((pointerR - horizon) / span, 0), 1);
-    const laneIndex = Math.round(laneT * (BLACK_HOLE_TRACK_COUNT - 1));
-    const laneR = horizon + (laneIndex / (BLACK_HOLE_TRACK_COUNT - 1)) * span;
+    const stepDt = Math.min(Math.max(dt || 1 / 60, 0), 0.05);
+    cooldown = Math.max(0, cooldown - stepDt);
 
-    let blobAz = pointerAz;
-    let blobR = laneR;
-    if (Number.isFinite(blobX) && Number.isFinite(blobY)) {
-      const blobRadius = hitDisk(blobX, blobY, width, height, camera, _guide);
-      if (blobRadius != null && blobRadius < diskR * 1.15) {
-        blobAz = Math.atan2(_basisB.dot(_radial), _basisA.dot(_radial));
-        blobR = Math.min(Math.max(blobRadius, horizon), outer);
-      }
+    const pointerR = hitDisk(clientX, clientY, width, height, camera, _hit);
+    const pointerAz =
+      pointerR == null ? 0 : Math.atan2(_basisB.dot(_radial), _basisA.dot(_radial));
+    const overDisk = pointerR != null && pointerR <= diskR * 1.08;
+    api.pointerOverDisk = overDisk;
+    const overCapture = pointerR != null && pointerR <= diskR * BLACK_HOLE_CAPTURE_FRAC;
+
+    let pointerSpeed = 0;
+    if (Number.isFinite(lastPointerX)) {
+      pointerSpeed = Math.hypot(clientX - lastPointerX, clientY - lastPointerY) / stepDt;
+    }
+    lastPointerX = clientX;
+    lastPointerY = clientY;
+
+    const release = () => {
+      captured = false;
+      stillSec = 0;
+      cooldown = BLACK_HOLE_CAPTURE_COOLDOWN;
+      return null;
+    };
+
+    if (captured) {
+      const moved = Math.hypot(clientX - captureX, clientY - captureY);
+      if (!overDisk || moved > BLACK_HOLE_CAPTURE_RELEASE_PX) return release();
+      orbitAz += BLACK_HOLE_ORBIT_RATE * stepDt;
+      const targetR = diskR * BLACK_HOLE_ORBIT_FRAC;
+      const suck = 1 - Math.exp(-BLACK_HOLE_SUCK_RATE * stepDt);
+      orbitR += (targetR - orbitR) * suck;
+      return poseOnDisk(orbitR, orbitAz);
     }
 
-    const stepDt = Math.min(Math.max(dt || 1 / 60, 0), 0.05);
-    let dAz = pointerAz - blobAz;
-    dAz = Math.atan2(Math.sin(dAz), Math.cos(dAz));
-    const nextAz = blobAz + dAz * (1 - Math.exp(-BLACK_HOLE_TRACK_ANGULAR_RATE * stepDt));
-    const nextR = blobR + (laneR - blobR) * (1 - Math.exp(-BLACK_HOLE_TRACK_RADIAL_RATE * stepDt));
+    if (!overCapture || cooldown > 0) {
+      stillSec = 0;
+      return null;
+    }
+    if (pointerSpeed < BLACK_HOLE_CAPTURE_SPEED) stillSec += stepDt;
+    else stillSec = 0;
+    if (stillSec < BLACK_HOLE_CAPTURE_STILL_SEC) return null;
 
-    const edge = Math.min(Math.max((pointerR - diskR * 0.86) / (diskR * 0.14), 0), 1);
-    const strength = BLACK_HOLE_SHEAR_STRENGTH * (1 - edge * edge);
+    captured = true;
+    captureX = clientX;
+    captureY = clientY;
+    orbitAz = pointerAz;
+    orbitR = Math.max(pointerR, horizon);
+    return poseOnDisk(orbitR, orbitAz);
 
-    const flowAz = nextAz + 0.22;
-    const flowR = Math.max(horizon, nextR * (1 - BLACK_HOLE_SHEAR_INWARD * 0.22));
-    pointOnDisk(nextR, nextAz, _p0);
-    pointOnDisk(flowR, flowAz, _flow);
-    const css0 = projectCss(_p0, camera, width, height);
-    const css1 = projectCss(_flow, camera, width, height);
-    if (css0.z < -1 || css0.z > 1) return null;
-    const dx = css1.x - css0.x;
-    const dy = css1.y - css0.y;
-    const angle = dx * dx + dy * dy > 1e-4 ? Math.atan2(dy, dx) : pointerAz;
+    function poseOnDisk(radius, az) {
+      const flowAz = az + 0.22;
+      const flowR = Math.max(horizon, radius * (1 - BLACK_HOLE_SHEAR_INWARD * 0.22));
+      pointOnDisk(radius, az, _p0);
+      pointOnDisk(flowR, flowAz, _flow);
+      const css0 = projectCss(_p0, camera, width, height);
+      const css1 = projectCss(_flow, camera, width, height);
+      if (css0.z < -1 || css0.z > 1) return null;
+      const dx = css1.x - css0.x;
+      const dy = css1.y - css0.y;
+      const angle = dx * dx + dy * dy > 1e-4 ? Math.atan2(dy, dx) : az;
 
-    const centerCss = projectCss(group.position, camera, width, height);
-    const sideX = -Math.sin(angle);
-    const sideY = Math.cos(angle);
-    const bendSign = Math.sign((centerCss.x - css0.x) * sideX + (centerCss.y - css0.y) * sideY) || 1;
-    const curve = bendSign * THREE.MathUtils.clamp(1.15 / Math.max(nextR, 0.45), 0.4, 2.4);
+      const centerCss = projectCss(group.position, camera, width, height);
+      const sideX = -Math.sin(angle);
+      const sideY = Math.cos(angle);
+      const bendSign = Math.sign((centerCss.x - css0.x) * sideX + (centerCss.y - css0.y) * sideY) || 1;
+      const curve = bendSign * THREE.MathUtils.clamp(1.15 / Math.max(radius, 0.45), 0.4, 2.4);
 
-    return { strength, angle, guideX: css0.x, guideY: css0.y, curve };
+      _occRay.copy(_p0).sub(camera.position);
+      _occHole.copy(group.position).sub(camera.position);
+      const seg2 = Math.max(_occRay.lengthSq(), 1e-6);
+      const alongRay = _occHole.dot(_occRay) / seg2;
+      let behind = 0;
+      if (alongRay > 0.04 && alongRay < 0.98) {
+        _occHole.copy(camera.position).addScaledVector(_occRay, alongRay);
+        const miss = _occHole.distanceTo(group.position);
+        behind = 1 - THREE.MathUtils.smoothstep(miss, horizon * 0.62, horizon * 1.15);
+      }
+      _limb.setFromMatrixColumn(camera.matrixWorld, 0).multiplyScalar(horizon);
+      _limb.add(group.position);
+      const limbCss = projectCss(_limb, camera, width, height);
+      const holeRad = Math.hypot(limbCss.x - centerCss.x, limbCss.y - centerCss.y);
+
+      return {
+        strength: BLACK_HOLE_SHEAR_STRENGTH,
+        angle,
+        guideX: css0.x,
+        guideY: css0.y,
+        curve,
+        behind,
+        holeX: centerCss.x,
+        holeY: centerCss.y,
+        holeRad
+      };
+    }
   };
 
   return api;

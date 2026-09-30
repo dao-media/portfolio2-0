@@ -301,10 +301,10 @@ export class EdgeGlitchSystem {
 
     if (passU && this.stage >= 3) {
       const subjectDepth = this.sdf.getDepthTexture();
-      const sceneDepth = this._sceneDepth ?? subjectDepth;
+      const sceneDepth = this._sceneDepth;
       passU.uEdgeSdf.value = this.sdf.getTexture();
       passU.uBustDepth.value = subjectDepth;
-      passU.uSceneDepth.value = sceneDepth;
+      passU.uSceneDepth.value = sceneDepth ?? subjectDepth;
       passU.uHasSceneDepth.value = sceneDepth ? 1 : 0;
       passU.uOccSoft.value = EDGE_GLITCH_OCC_SOFT;
       passU.uOccBias.value = EDGE_GLITCH_OCC_BIAS;

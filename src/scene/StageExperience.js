@@ -307,6 +307,14 @@ function maskBits(prev, next, names) {
   return parts.length ? parts : [`${prev}>${next}`];
 }
 
+/** All 4 points within `eps` px on both axes — a perspective quad is not a rect. */
+function cornersWithin(a, b, eps) {
+  for (let i = 0; i < 4; i += 1) {
+    if (Math.abs(a[i][0] - b[i][0]) >= eps || Math.abs(a[i][1] - b[i][1]) >= eps) return false;
+  }
+  return true;
+}
+
 /**
  * Which cache-key fields differ between a warm program and the live one.
  * @param {string[] | undefined} warmKeys
@@ -849,6 +857,296 @@ export class StageExperience {
   }
 
   /**
+   * Mean 0-1 value of one channel of a texture's image, cached on the
+   * texture. glTF packs metalness in B — a low `metalness` factor next to a
+   * mostly-white metalness map (the bust: factor 0→0, but before that fix,
+   * factor 0.12 next to a map averaging 0.88 still read as visible sheen)
+   * is exactly the effective-metalness gap `debugMaterialAudit` flags.
+   * @param {THREE.Texture | null | undefined} tex
+   * @param {number} channelIndex 0=R, 1=G, 2=B, 3=A
+   */
+  _meanTextureChannel(tex, channelIndex) {
+    if (!tex?.image) return null;
+    const cache = tex.userData.__channelMean || (tex.userData.__channelMean = {});
+    if (typeof cache[channelIndex] === "number") return cache[channelIndex];
+    const img = tex.image;
+    const w = img.width;
+    const h = img.height;
+    if (!w || !h) return null;
+    try {
+      const sampleW = Math.min(w, 128);
+      const sampleH = Math.min(h, 128);
+      const canvas = new OffscreenCanvas(sampleW, sampleH);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(img, 0, 0, sampleW, sampleH);
+      const data = ctx.getImageData(0, 0, sampleW, sampleH).data;
+      let sum = 0;
+      let count = 0;
+      for (let i = channelIndex; i < data.length; i += 4) {
+        sum += data[i];
+        count += 1;
+      }
+      const mean = count ? sum / count / 255 : null;
+      cache[channelIndex] = mean;
+      return mean;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * One row per material across every vignette (+ wet floor). DEV —
+   * `window.__stageDebug("debugMaterialAudit")`. r172: `scene.environmentIntensity`
+   * only drives IBL for materials with no own `envMap`; a set `envMap` uses
+   * `material.envMapIntensity` instead (see {@link debugEnvLight}).
+   * `effectiveMetalness` = factor × mean(metalnessMap.B) — the factor alone
+   * (what most of this file tunes) understates reflectivity whenever the map
+   * isn't flat; flagged when that product is still >0.3.
+   */
+  debugMaterialAudit() {
+    const rows = [];
+    const seen = new Set();
+    const visit = (root, vignetteName) => {
+      root?.traverse?.((obj) => {
+        if (!obj.isMesh || !obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const mat of mats) {
+          if (!mat || seen.has(mat)) continue;
+          seen.add(mat);
+          const metalness = typeof mat.metalness === "number" ? mat.metalness : null;
+          const metalMapMean = mat.metalnessMap ? this._meanTextureChannel(mat.metalnessMap, 2) : null;
+          const effectiveMetalness =
+            metalness == null ? null : +(metalness * (metalMapMean ?? 1)).toFixed(3);
+          rows.push({
+            vignette: vignetteName,
+            mesh: obj.name || "(unnamed)",
+            material: mat.name || "(unnamed)",
+            type: mat.type,
+            metalness: metalness == null ? null : +metalness.toFixed(3),
+            roughness: typeof mat.roughness === "number" ? +mat.roughness.toFixed(3) : null,
+            hasMetalnessMap: Boolean(mat.metalnessMap),
+            hasRoughnessMap: Boolean(mat.roughnessMap),
+            sameOrmTexture: Boolean(mat.metalnessMap && mat.metalnessMap === mat.roughnessMap),
+            metalMapMean: metalMapMean == null ? null : +metalMapMean.toFixed(3),
+            effectiveMetalness,
+            effectiveMetalnessFlag: effectiveMetalness != null && effectiveMetalness > 0.3,
+            envMapIntensity: typeof mat.envMapIntensity === "number" ? +mat.envMapIntensity.toFixed(3) : null,
+            hasOwnEnvMap: Boolean(mat.envMap),
+            mapImageW: mat.map?.image?.width ?? null,
+            mapImageH: mat.map?.image?.height ?? null,
+            mapImageCtor: mat.map?.image?.constructor?.name ?? null,
+            mapVersion: mat.map?.version ?? null,
+            mapSourceVersion: mat.map?.source?.version ?? null
+          });
+        }
+      });
+    };
+    const vignettes = this.vignettes || [];
+    for (let i = 0; i < vignettes.length; i += 1) {
+      visit(vignettes[i]?.group, vignettes[i]?.def?.name || `vignette-${i}`);
+    }
+    if (this.wetFloor?.floorMesh) visit(this.wetFloor.floorMesh, "wet-floor");
+    return {
+      sceneEnvironmentIntensity: this.scene.environmentIntensity,
+      ambient: this.ambientLight?.intensity ?? null,
+      hemi: this.hemiLight?.intensity ?? null,
+      rows
+    };
+  }
+
+  /**
+   * DEV — per-texture GPU/decode settings for every material matching
+   * `materialName`, for comparing e.g. a slow upload against a fast one of
+   * the same size (`window.__stageDebug("debugTextureFields", "name")`).
+   * @param {string} materialName
+   */
+  debugTextureFields(materialName) {
+    const rows = [];
+    const seen = new Set();
+    const dumpTex = (tex, slot) => {
+      if (!tex?.isTexture || seen.has(tex)) return;
+      seen.add(tex);
+      const props = this.renderer.properties.get(tex);
+      const srcProps = tex.source ? this.renderer.properties.get(tex.source) : null;
+      rows.push({
+        slot,
+        flipY: tex.flipY,
+        premultiplyAlpha: tex.premultiplyAlpha,
+        colorSpace: tex.colorSpace,
+        generateMipmaps: tex.generateMipmaps,
+        minFilter: tex.minFilter,
+        magFilter: tex.magFilter,
+        anisotropy: tex.anisotropy,
+        wrapS: tex.wrapS,
+        wrapT: tex.wrapT,
+        format: tex.format,
+        type: tex.type,
+        internalFormat: tex.internalFormat,
+        imageCtor: tex.image?.constructor?.name ?? null,
+        imageW: tex.image?.width ?? null,
+        imageH: tex.image?.height ?? null,
+        textureVersion: tex.version,
+        sourceVersion: tex.source?.version ?? null,
+        glResidentVersion: srcProps?.__version ?? null,
+        glResident: Boolean(props?.__webglTexture)
+      });
+    };
+    const visit = (root) => {
+      root?.traverse?.((obj) => {
+        if (!obj.isMesh || !obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const mat of mats) {
+          if (mat?.name !== materialName) continue;
+          for (const key of ["map", "normalMap", "roughnessMap", "metalnessMap", "emissiveMap", "aoMap"]) {
+            dumpTex(mat[key], key);
+          }
+        }
+      });
+    };
+    const vignettes = this.vignettes || [];
+    for (let i = 0; i < vignettes.length; i += 1) visit(vignettes[i]?.group);
+    return rows;
+  }
+
+  /**
+   * DEV — one row per program created during a real hop 0→3, with the live
+   * cacheKey and every warmed cacheKey registered under that same program
+   * name (empty when the name was never warmed at all — "no-warm-key").
+   */
+  debugHop03Detail() {
+    return this._hop03 || [];
+  }
+
+  /**
+   * DEV — roots `_compileThenShow` skipped (not held on GPU_HOLD_LAYER, so
+   * never pre-warmed) and textures whose `initTexture` upload alone took
+   * ≥35ms (KTX2 conversion candidates), since boot.
+   */
+  debugSlowTextures() {
+    return {
+      skippedRoots: this._compileThenShowSkipped || [],
+      succeededRoots: this._compileThenShowSucceeded || [],
+      slowTextures: this._slowTextureLog || [],
+      textureWarmStats: this._textureWarmStats || { uploaded: 0, skipped: 0, ms: 0, byRoot: [] },
+      enterShownAtMs: this._enterShownAtMs ?? null
+    };
+  }
+
+  /** DEV — arms texImage2D/texSubImage2D capture for {@link debugTextureUploads}. */
+  debugStartTextureCapture() {
+    this._texUploadLog = [];
+    this._texUploadCapture = true;
+    return true;
+  }
+
+  /**
+   * DEV — resolves each captured GL call (see {@link debugStartTextureCapture})
+   * to the THREE.Texture / material / mesh it belongs to, by scanning every
+   * vignette's current materials for a matching `__webglTexture` handle.
+   */
+  debugTextureUploads() {
+    this._texUploadCapture = false;
+    const log = this._texUploadLog || [];
+    this._texUploadLog = null;
+    if (!log.length) return { calls: 0, rows: [] };
+
+    const byHandle = new Map();
+    const visit = (root, vignetteName) => {
+      root?.traverse?.((obj) => {
+        if (!obj.isMesh || !obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const mat of mats) {
+          if (!mat) continue;
+          for (const key of Object.keys(mat)) {
+            const tex = mat[key];
+            if (!tex?.isTexture) continue;
+            const props = this.renderer.properties.get(tex);
+            const handle = props?.__webglTexture;
+            if (!handle || byHandle.has(handle)) continue;
+            byHandle.set(handle, {
+              vignette: vignetteName,
+              mesh: obj.name || "(unnamed)",
+              material: mat.name || "(unnamed)",
+              slot: key,
+              srcW: tex.image?.width ?? null,
+              srcH: tex.image?.height ?? null,
+              isImageBitmap: typeof ImageBitmap !== "undefined" && tex.image instanceof ImageBitmap
+            });
+          }
+        }
+      });
+    };
+    const vignettes = this.vignettes || [];
+    for (let i = 0; i < vignettes.length; i += 1) {
+      visit(vignettes[i]?.group, vignettes[i]?.def?.name || `vignette-${i}`);
+    }
+    if (this.wetFloor?.floorMesh) visit(this.wetFloor.floorMesh, "wet-floor");
+
+    const rows = log.map((entry) => {
+      const found = byHandle.get(entry.glTex);
+      return {
+        kind: entry.kind,
+        t: entry.t,
+        uploadW: entry.w,
+        uploadH: entry.h,
+        isImageBitmap: entry.isImageBitmap,
+        ...(found || { vignette: "(unresolved)", mesh: null, material: null, slot: null })
+      };
+    });
+    return { calls: log.length, rows };
+  }
+
+  /** DEV — starts/clears the frame-time ring buffer for {@link debugFrameHistogram}. */
+  debugStartFrameHistogram() {
+    this._frameHistogram = [];
+    return true;
+  }
+
+  /**
+   * DEV — p50/p1/min fps and the count of frames over the 24fps floor
+   * (`FLOOR_FRAME_MS` ≈ 41.7ms), from whatever has accumulated since
+   * {@link debugStartFrameHistogram}. Stops collecting so the buffer is a
+   * frozen sample of the window just measured.
+   */
+  debugFrameHistogram() {
+    const raw = this._frameHistogram || [];
+    this._frameHistogram = null;
+    if (!raw.length) return { frames: 0 };
+    const sorted = raw.slice().sort((a, b) => a.ms - b.ms);
+    const at = (p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
+    const p50Ms = at(0.5).ms;
+    const p99Ms = at(0.99).ms;
+    const worst = sorted[sorted.length - 1];
+    const fastest = sorted[0];
+    const tByTime = raw.slice().sort((a, b) => a.t - b.t);
+    return {
+      frames: raw.length,
+      windowStartMs: tByTime[0].t,
+      windowEndMs: tByTime[tByTime.length - 1].t,
+      windowSpanSec: +((tByTime[tByTime.length - 1].t - tByTime[0].t) / 1000).toFixed(1),
+      p50Fps: Math.round((1000 / p50Ms) * 10) / 10,
+      p1Fps: Math.round((1000 / p99Ms) * 10) / 10,
+      minFps: Math.round((1000 / worst.ms) * 10) / 10,
+      maxFps: Math.round((1000 / fastest.ms) * 10) / 10,
+      overFloorCount: raw.filter((f) => f.ms > FLOOR_FRAME_MS).length,
+      worstFrame: { ms: Math.round(worst.ms * 10) / 10, cause: worst.cause, t: worst.t }
+    };
+  }
+
+  /** DEV — `window.__stageDebug("debugWarmState")`. Where stepVignette0Warm is. */
+  debugWarmState() {
+    const w = this._vignette0Warm;
+    return {
+      phase: w?.phase ?? null,
+      done: Boolean(w?.done),
+      liveAt: w?._liveAt ?? null,
+      liveStepsTotal: w?._liveSteps?.length ?? null,
+      currentStep: w?._liveSteps?.[w?._liveAt] ?? null
+    };
+  }
+
+  /**
    * POV spotlight — parented to camera; aim refreshed each frame toward the
    * active vignette look target (or LOOK as a fallback before the rig exists).
    */
@@ -1032,16 +1330,29 @@ export class StageExperience {
         const msg = this._duoRectMsg || (this._duoRectMsg = {
           type: "duo",
           action: "screenRect",
-          rect: { left: 0, top: 0, width: 0, height: 0 }
+          rect: {
+            left: 0,
+            top: 0,
+            width: 0,
+            height: 0,
+            corners: [[0, 0], [0, 0], [0, 0], [0, 0]],
+            hasCorners: false,
+            measure: "",
+            normal: [0, 0, 0]
+          }
         });
         const slot = msg.rect;
+        const corners = rect.corners;
+        const hasCorners = Array.isArray(corners) && corners.length === 4;
         if (
           this._duoRectLive &&
           !this._duoRectNull &&
           Math.abs(slot.left - rect.left) < 0.5 &&
           Math.abs(slot.top - rect.top) < 0.5 &&
           Math.abs(slot.width - rect.width) < 0.5 &&
-          Math.abs(slot.height - rect.height) < 0.5
+          Math.abs(slot.height - rect.height) < 0.5 &&
+          slot.hasCorners === hasCorners &&
+          (!hasCorners || cornersWithin(slot.corners, corners, 0.5))
         ) {
           return;
         }
@@ -1049,6 +1360,19 @@ export class StageExperience {
         slot.top = rect.top;
         slot.width = rect.width;
         slot.height = rect.height;
+        slot.hasCorners = hasCorners;
+        if (hasCorners) {
+          for (let i = 0; i < 4; i += 1) {
+            slot.corners[i][0] = corners[i][0];
+            slot.corners[i][1] = corners[i][1];
+          }
+        }
+        slot.measure = rect.measure || "";
+        if (rect.normal) {
+          slot.normal[0] = rect.normal[0] ?? 0;
+          slot.normal[1] = rect.normal[1] ?? 0;
+          slot.normal[2] = rect.normal[2] ?? 0;
+        }
         this._duoRectNull = false;
         this._duoRectLive = true;
         this._hostPost?.(msg);
@@ -1965,6 +2289,13 @@ export class StageExperience {
     if (!(frameMs > 0) || frameMs > 2000) return;
     const stats = this._floorStats;
     stats.frames += 1;
+    if (this._frameHistogram) {
+      const hist = this._frameHistogram;
+      hist.push({ ms: frameMs, cause: this._lastCause || "render", t: Math.round(performance.now()) });
+      // 60s at up to ~90fps is ~5400 frames — cap comfortably above that so
+      // a full 60s capture is never silently truncated to its tail.
+      if (hist.length > 6000) hist.shift();
+    }
     if (frameMs > stats.maxMs) {
       stats.maxMs = frameMs;
       stats.minFps = 1000 / frameMs;
@@ -2018,8 +2349,9 @@ export class StageExperience {
   }
 
   _publishFloor(dt) {
+    if (!import.meta.env.DEV) return;
     this._floorPostT += dt || 0;
-    if (this._floorPostT < 0.5) return;
+    if (this._floorPostT < 1) return;
     this._floorPostT = 0;
     const stats = this._floorStats;
     this._hostPost?.({
@@ -2131,8 +2463,11 @@ export class StageExperience {
     const stage = this;
     programs.push = (program) => {
       const count = orig(program);
-      if (stage._enterShown) stage._noteProgram(program);
-      else stage._noteWarmProgram(program);
+      // `_compileThenShow`'s pre-compile (onPropMounted, deferred vignette
+      // integration) can run after `_enterShown` flips — it's still a warm
+      // pass, not a live draw, so it must register the same way regardless.
+      if (stage._inPreCompile > 0 || !stage._enterShown) stage._noteWarmProgram(program);
+      else stage._noteProgram(program);
       return count;
     };
     programs.__floorLog = true;
@@ -2200,7 +2535,9 @@ export class StageExperience {
           name,
           type: program?.type || "",
           role: this._programRole(program),
-          delta
+          delta,
+          liveCacheKey: program?.cacheKey || "",
+          warmKeysForName: this._warmProgramKeys?.get(name) || []
         });
       }
     }
@@ -2447,6 +2784,36 @@ export class StageExperience {
     wrap("readPixels", "readPixelsMs", "readPixels");
     wrap("texImage2D", "texImageMs", "texImages");
     wrap("texSubImage2D", "texSubMs", "texSubs");
+
+    // DEV — captures which raw texture each texImage2D/texSubImage2D call
+    // touches, for debugTextureUploads(). Off unless armed.
+    const captureUpload = (kind, args) => {
+      if (!this._texUploadCapture) return;
+      if (!this._texUploadLog) this._texUploadLog = [];
+      if (this._texUploadLog.length >= 4000) return;
+      const glTex = gl.getParameter(gl.TEXTURE_BINDING_2D);
+      const source = args[args.length - 1];
+      const w = source?.width ?? (typeof args[4] === "number" ? args[4] : null);
+      const h = source?.height ?? (typeof args[5] === "number" ? args[5] : null);
+      this._texUploadLog.push({
+        kind,
+        glTex,
+        w,
+        h,
+        isImageBitmap: typeof ImageBitmap !== "undefined" && source instanceof ImageBitmap,
+        t: Math.round(performance.now())
+      });
+    };
+    const origTexImage2D = gl.texImage2D.bind(gl);
+    gl.texImage2D = (...args) => {
+      captureUpload("texImage2D", args);
+      return origTexImage2D(...args);
+    };
+    const origTexSubImage2D = gl.texSubImage2D.bind(gl);
+    gl.texSubImage2D = (...args) => {
+      captureUpload("texSubImage2D", args);
+      return origTexSubImage2D(...args);
+    };
     const origParam = gl.getProgramParameter.bind(gl);
     const linkStatus = gl.LINK_STATUS;
     const completion = 0x91b1;
@@ -3110,15 +3477,45 @@ export class StageExperience {
     root.traverse((obj) => {
       if (obj.isMesh && obj.layers.isEnabled(GPU_HOLD_LAYER)) held = true;
     });
-    if (!held) return;
+    if (!held) {
+      if (!this._compileThenShowSkipped) this._compileThenShowSkipped = [];
+      if (this._compileThenShowSkipped.length < 20) {
+        this._compileThenShowSkipped.push({ root: root.name || "(unnamed)", t: Math.round(performance.now()) });
+      }
+      return;
+    }
+    if (!this._compileThenShowSucceeded) this._compileThenShowSucceeded = [];
+    if (this._compileThenShowSucceeded.length < 20) {
+      this._compileThenShowSucceeded.push({ root: root.name || "(unnamed)", t: Math.round(performance.now()) });
+    }
     this._holdStableLightVariant();
-    await warmMeshesChunked(root, this.renderer);
+    const warmResult = await warmMeshesChunked(root, this.renderer, null, (info) => {
+      if (!this._slowTextureLog) this._slowTextureLog = [];
+      if (this._slowTextureLog.length < 20) {
+        this._slowTextureLog.push({ root: root.name || "(unnamed)", ...info });
+      }
+    });
+    if (!this._textureWarmStats) {
+      this._textureWarmStats = { uploaded: 0, skipped: 0, ms: 0, byRoot: [] };
+    }
+    this._textureWarmStats.uploaded += warmResult.uploaded;
+    this._textureWarmStats.skipped += warmResult.skipped;
+    this._textureWarmStats.ms += warmResult.ms;
+    if (this._textureWarmStats.byRoot.length < 30) {
+      this._textureWarmStats.byRoot.push({ root: root.name || "(unnamed)", ...warmResult });
+    }
     try {
+      // Counter, not a boolean: onPropMounted fires `_compileThenShow` without
+      // awaiting it, so several props' pre-compiles can overlap — one
+      // finishing must not clear the flag while a sibling is still mid-compile.
+      this._inPreCompile = (this._inPreCompile || 0) + 1;
       await spanFrame("shader-compile", async () => {
         await compileHeldRoot(this.renderer, this.scene, this.camera, root);
       });
     } catch (error) {
       console.warn("[StageExperience] Held compile failed:", error);
+    } finally {
+      this._inPreCompile -= 1;
     }
     releaseRootToCamera(root);
     this._revealPending = true;
@@ -4630,6 +5027,7 @@ export class StageExperience {
 
   _showBlackHoleEnter() {
     if (!this._blackHoleActive) return;
+    this._enterShownAtMs = Math.round(performance.now());
     document.getElementById("bh-enter")?.removeAttribute("hidden");
     this._hostPost?.({ type: "dom", enterVisible: true });
   }
@@ -5077,11 +5475,12 @@ export class StageExperience {
       if (this.ui?.fps) this.ui.fps.textContent = `${fps} FPS`;
       if (this._inWorker) {
         const deg = this._getDisplayStageDegrees();
-        this._hostPost?.({
-          type: "hud",
-          fps,
-          readout: `STAGE ${deg.toFixed(1).padStart(5, "0")}°`
-        });
+        const readout = `STAGE ${deg.toFixed(1).padStart(5, "0")}°`;
+        if (fps !== this._lastHudFps || readout !== this._lastHudReadout) {
+          this._lastHudFps = fps;
+          this._lastHudReadout = readout;
+          this._hostPost?.({ type: "hud", fps, readout });
+        }
       }
     }
 

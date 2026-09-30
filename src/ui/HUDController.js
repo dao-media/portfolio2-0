@@ -27,6 +27,55 @@ export class HUDController {
     });
   }
 
+  /** Dots + caption for the worker host. Stops arrive once from the worker. */
+  setStops(stops, onSelect) {
+    this._stops = stops;
+    const dots = document.getElementById("dots");
+    if (!dots) return;
+    dots.replaceChildren();
+    stops.forEach((stop, index) => {
+      const button = document.createElement("button");
+      button.className = `dot${index === 0 ? " active" : ""}`;
+      button.setAttribute("aria-label", stop.name);
+      button.addEventListener("click", () => onSelect(index));
+      dots.appendChild(button);
+    });
+  }
+
+  /**
+   * @param {{ stopIndex: number, count: number, name: string, desc: string }} data
+   */
+  updateCaption(data) {
+    const index = data.stopIndex ?? 0;
+    const count = data.count ?? this._stops?.length ?? 0;
+    const capIndex = document.getElementById("capIndex");
+    const capName = document.getElementById("capName");
+    const capDesc = document.getElementById("capDesc");
+    const dots = document.getElementById("dots");
+    if (capIndex) {
+      capIndex.textContent = `${String(index + 1).padStart(2, "0")} / ${String(count).padStart(2, "0")}`;
+    }
+    if (capName) capName.textContent = data.name ?? "";
+    if (capDesc) capDesc.textContent = data.desc ?? "";
+    if (dots) {
+      [...dots.children].forEach((dot, i) => {
+        dot.classList.toggle("active", i === index);
+      });
+    }
+    this._vignetteIndex = index;
+    this.updateMySpacePanelForVignette(index);
+  }
+
+  setReadout(text) {
+    const readout = document.getElementById("readout");
+    if (readout) readout.textContent = text;
+  }
+
+  setFps(fps) {
+    const el = document.getElementById("fps");
+    if (el) el.textContent = `${fps} FPS`;
+  }
+
   setVignette(meta) {
     if (this.titleEl) this.titleEl.textContent = meta.title;
     if (this.subtitleEl) this.subtitleEl.textContent = meta.subtitle;

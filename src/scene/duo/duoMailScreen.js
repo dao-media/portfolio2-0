@@ -101,8 +101,9 @@ export class DuoMailScreen {
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.texture.flipY = true;
     this.texture.center.set(0.5, 0.5);
-    // UV on insight already matches; π flipped the Mail UI upside-down.
-    this.texture.rotation = 0;
+    // The open-pose Ry(π) spins insight UVs 180°. π around the center puts
+    // the Mail / case-study capture back upright with the overlay.
+    this.texture.rotation = Math.PI;
     this.texture.generateMipmaps = true;
     this.texture.minFilter = THREE.LinearMipmapLinearFilter;
     this.texture.magFilter = THREE.LinearFilter;
@@ -159,7 +160,7 @@ export class DuoMailScreen {
   async _captureNow() {
     if (this._capturePending || !this._active) return;
     const source = this._getSource?.() ?? null;
-    if (!(source instanceof HTMLElement)) {
+    if (typeof HTMLElement === "undefined" || !(source instanceof HTMLElement)) {
       this._dirty = false;
       return;
     }

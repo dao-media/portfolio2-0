@@ -866,6 +866,8 @@ export class DuoMailOverlay {
     this._duoRect = this._ensureDuoRect();
     const slot = this._duoRect;
     const nextMeasure = rect.measure || "";
+    const nextCorners = rect.corners;
+    const nextHasCorners = Array.isArray(nextCorners) && nextCorners.length === 4;
     const unchanged =
       !this._entranceActive &&
       Math.abs(slot.left - rect.left) < 0.5 &&
@@ -873,7 +875,9 @@ export class DuoMailOverlay {
       Math.abs(slot.width - rect.width) < 0.5 &&
       Math.abs(slot.height - rect.height) < 0.5 &&
       slot.measure === nextMeasure &&
-      slot._seen;
+      slot._seen &&
+      Boolean(slot._hasCorners) === nextHasCorners &&
+      (!nextHasCorners || cornersWithin(slot.corners, nextCorners, 0.5));
     if (unchanged) return;
 
     slot.left = rect.left;
@@ -968,6 +972,14 @@ const _BEAM_STROKES = [
   "url(#duo-mail-beam-grad-2)",
   "url(#duo-mail-beam-grad-3)"
 ];
+
+/** All 4 points within `eps` px on both axes — a perspective quad is not a rect. */
+function cornersWithin(a, b, eps) {
+  for (let i = 0; i < 4; i += 1) {
+    if (Math.abs(a[i][0] - b[i][0]) >= eps || Math.abs(a[i][1] - b[i][1]) >= eps) return false;
+  }
+  return true;
+}
 
 function writeRectCorners(r, out) {
   out[0][0] = r.left;

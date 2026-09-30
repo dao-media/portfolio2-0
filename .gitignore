@@ -9,3 +9,4 @@ dist
 # Keep only runtime model sets vendored under public/assets/models/
 # (no symlink to the Webflow mega-tree). Ignore incidental junk only.
 public/assets/models/**/.DS_Store
+public/assets/models/lawn-grass-stump/Grass_meshed_obj.obj

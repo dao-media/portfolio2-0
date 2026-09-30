@@ -148,7 +148,13 @@ export class LiveStageEnvironment {
    * @param {THREE.Vector3} [position] Cube capture origin (defaults to stage center)
    * @param {{ applyToScene?: boolean }} [options]
    */
+  /** After the black-hole bake, live frames reuse this texture. */
+  lockLivePmrem() {
+    this._livePmremLocked = true;
+  }
+
   update(scene, position = this.position, options = {}) {
+    if (this._livePmremLocked) return this.getTexture();
     // Default false — CRT / glass captures must not recolor stage MeshStandard materials.
     const { applyToScene = false } = options;
     if (this._roomSphere) {

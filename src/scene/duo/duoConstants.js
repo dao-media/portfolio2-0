@@ -158,7 +158,8 @@ export const DUO_SPIN = 0.48;
 export const DUO_HOVER_FACE_YAW = 0;
 /** @deprecated Z-roll pulse retired — hover faces camera instead. */
 export const DUO_HOVER_ROLL = 0;
-export const DUO_HOVER_SPIN_SEC = 0.42;
+/** Hover blend that drives the fold target. 1.5× the previous 0.42 s ramp. */
+export const DUO_HOVER_SPIN_SEC = 0.28;
 /**
  * @deprecated Idle never overlaps entrance.
  */
@@ -210,9 +211,12 @@ export const DUO_HIT_PAD_LEAVE_PX = 28;
 export const DUO_OPEN_STIFFNESS = 14;
 export const DUO_OPEN_DAMPING = 5.2;
 
-/** Fold scrub spring (closed ↔ open clip times). */
-export const DUO_FOLD_STIFFNESS = 18;
-export const DUO_FOLD_DAMPING = 6.5;
+/**
+ * Fold scrub spring (closed ↔ open clip times).
+ * 1.5× the previous 18 / 6.5: stiffness scales with speed², damping with speed.
+ */
+export const DUO_FOLD_STIFFNESS = 40.5;
+export const DUO_FOLD_DAMPING = 9.75;
 
 export const DUO_HIT_PAD = 0.08;
 /** @deprecated use DUO_HIT_PAD_ENTER_PX / LEAVE_PX */

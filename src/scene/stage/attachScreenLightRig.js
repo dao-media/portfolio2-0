@@ -60,9 +60,16 @@ export function measureScreenPlaneDimensions(mesh) {
  * @param {THREE.Mesh} screenMesh
  * @param {THREE.Texture} screenTexture
  * @param {keyof typeof SCREEN_LIGHT_PRESETS | Partial<typeof SCREEN_LIGHT_PRESETS.pc>} [presetOrOptions]
+ * @param {{ spill?: THREE.RectAreaLight, glow?: THREE.PointLight } | null} [stageSlots]
  * @returns {ScreenLightRig | null}
  */
-export function attachScreenLightRig(renderer, screenMesh, screenTexture, presetOrOptions = "pc") {
+export function attachScreenLightRig(
+  renderer,
+  screenMesh,
+  screenTexture,
+  presetOrOptions = "pc",
+  stageSlots = null
+) {
   if (!renderer || !screenMesh?.isMesh || !screenTexture) return null;
 
   const preset =
@@ -85,9 +92,12 @@ export function attachScreenLightRig(renderer, screenMesh, screenTexture, preset
     saturationBoost: merged.saturationBoost,
     forwardOffset: merged.forwardOffset,
     glowDepth: merged.glowDepth,
-    flipForward: merged.flipForward
+    flipForward: merged.flipForward,
+    spill: stageSlots?.spill ?? null,
+    glow: stageSlots?.glow ?? null
   });
 
-  screenMesh.add(rig.group);
+  if (stageSlots?.spill && stageSlots?.glow) rig.bindAnchor(screenMesh);
+  else screenMesh.add(rig.group);
   return rig;
 }

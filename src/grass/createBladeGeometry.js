@@ -54,10 +54,16 @@ export function createBladeGeometry(opts = {}) {
     }
   }
 
+  // Second winding so FrontSide still shows the back of a blade.
+  // DoubleSide disables early-Z and shades both faces.
+  const flipped = [];
+  for (let i = 0; i < indices.length; i += 3) {
+    flipped.push(indices[i], indices[i + 2], indices[i + 1]);
+  }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-  geo.setIndex(indices);
+  geo.setIndex(indices.concat(flipped));
   geo.computeVertexNormals();
   return geo;
 }

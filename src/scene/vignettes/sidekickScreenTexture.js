@@ -50,6 +50,12 @@ export const SIDEKICK_SCREEN_WINDOW = {
  * @returns {Promise<HTMLImageElement>}
  */
 function loadImage(url) {
+  if (globalThis.__STAGE_WORKER && typeof createImageBitmap === "function") {
+    return fetch(url).then((response) => {
+      if (!response.ok) throw new Error(`Sidekick screen asset failed to load: ${url}`);
+      return response.blob();
+    }).then((blob) => createImageBitmap(blob));
+  }
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = "anonymous";

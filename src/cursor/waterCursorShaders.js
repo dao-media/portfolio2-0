@@ -126,6 +126,9 @@ export const waterCursorFragmentShader = /* glsl */ `
   uniform float uAngle;
   uniform float uGravity;
   uniform float uCurve;
+  uniform float uHoleHide;
+  uniform vec2 uHoleUv;
+  uniform float uHoleRad;
   uniform float uTailBias;
   uniform float uPressScale;
   uniform float uRimPress;
@@ -212,6 +215,11 @@ export const waterCursorFragmentShader = /* glsl */ `
     float d = length(vec2(gx, gy)) - r;
     float alpha = 1.0 - smoothstep(-fwidth(d), fwidth(d), d);
     alpha *= uOpacity * clamp(uPresence, 0.0, 1.0);
+    if (uHoleHide > 0.001 && uHoleRad > 0.0) {
+      float holeD = length(vUv - uHoleUv);
+      float cover = 1.0 - smoothstep(uHoleRad * 0.9, uHoleRad * 1.06, holeD);
+      alpha *= 1.0 - cover * uHoleHide;
+    }
 
     if (alpha < 0.001) discard;
 

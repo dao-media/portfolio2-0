@@ -34,7 +34,7 @@ export function createStageLoadGate({
     }
 
     const wait = Math.max(0, bootMinMs - (performance.now() - bootStart));
-    window.setTimeout(() => {
+    setTimeout(() => {
       ready = true;
       bootSequence.dismiss();
       onReady?.();

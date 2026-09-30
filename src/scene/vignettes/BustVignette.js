@@ -581,7 +581,6 @@ export class BustVignette {
     root.updateMatrixWorld(true);
     this._reseatBottom(root);
     this._tagMeshes(root);
-    this._hardenBustMaterials(root);
 
     this.group.add(root);
     this.bustRoot = root;
@@ -976,21 +975,6 @@ export class BustVignette {
       if (!obj.isMesh) return;
       obj.castShadow = true;
       obj.receiveShadow = true;
-    });
-  }
-
-  /** Stone/bronze bust — GLB often ships metalness 1 (chrome under IBL). */
-  _hardenBustMaterials(root) {
-    root.traverse((obj) => {
-      if (!obj.isMesh) return;
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for (const mat of mats) {
-        if (!mat) continue;
-        if (typeof mat.metalness === "number") mat.metalness = Math.min(mat.metalness, 0.12);
-        if (typeof mat.roughness === "number") mat.roughness = Math.max(mat.roughness, 0.55);
-        mat.envMapIntensity = 0.06;
-        mat.needsUpdate = true;
-      }
     });
   }
 

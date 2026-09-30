@@ -9,12 +9,15 @@
 // dead). Mid-travel intent is also NOT queued into an auto-fire on land —
 // that skipped stops (force-scroll past Sidekick).
 
+/** CSS height for DOM_DELTA_PAGE. The worker sets this from its resize message. */
+let viewportHeight = 800;
+
 /** Normalize wheel deltas across line / pixel / page modes. */
 function normalizeDeltaY(event) {
   let { deltaY, deltaMode } = event;
   if (!Number.isFinite(deltaY)) return 0;
   if (deltaMode === 1) deltaY *= 48; // DOM_DELTA_LINE
-  else if (deltaMode === 2) deltaY *= Math.max(window.innerHeight || 800, 1) * 0.85; // PAGE
+  else if (deltaMode === 2) deltaY *= Math.max(viewportHeight, 1) * 0.85; // PAGE
   return deltaY;
 }
 
@@ -110,6 +113,9 @@ export function createScrollAdvance({
   return {
     handleWheel,
     notifySettled,
+    setViewportHeight(height) {
+      if (Number.isFinite(height) && height > 0) viewportHeight = height;
+    },
     attach(el) {
       el.addEventListener("wheel", handleWheel, { passive: false });
     },

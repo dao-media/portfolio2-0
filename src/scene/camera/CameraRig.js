@@ -131,6 +131,33 @@ export class CameraRig {
     this.parallax.attach(el);
   }
 
+  /**
+   * Pointer in the same NDC the main-thread move handler used (Y grows downward).
+   * @param {number} x
+   * @param {number} y
+   */
+  setPointer(x, y) {
+    this.parallax?.setPointerNdc(x, y);
+  }
+
+  /**
+   * CSS viewport from the worker resize message. Updates the camera aspect.
+   * @param {number} width
+   * @param {number} height
+   */
+  setViewport(width, height) {
+    const w = Math.max(1, width);
+    const h = Math.max(1, height);
+    if (this.camera?.isPerspectiveCamera) {
+      const aspect = w / h;
+      if (Math.abs(this.camera.aspect - aspect) > 1e-6) {
+        this.camera.aspect = aspect;
+        this.camera.updateProjectionMatrix();
+      }
+    }
+    this.scrollAdvance?.setViewportHeight?.(h);
+  }
+
   dispose() {
     if (this._scrollEl) this.scrollAdvance.detach(this._scrollEl);
     if (this._pointerEl) this.parallax.detach(this._pointerEl);

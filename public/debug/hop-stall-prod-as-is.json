@@ -1,0 +1,432 @@
+{
+  "visibility": "visible",
+  "loafTop5": [],
+  "longTasks": [],
+  "eventTasks": [
+    {
+      "startTime": 103623,
+      "duration": 32,
+      "name": "pointerenter",
+      "processingStart": 103624,
+      "processingEnd": 103624,
+      "processing": 0,
+      "target": "",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103623,
+      "duration": 32,
+      "name": "pointerenter",
+      "processingStart": 103624,
+      "processingEnd": 103624,
+      "processing": 0,
+      "target": "",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103623,
+      "duration": 32,
+      "name": "pointerenter",
+      "processingStart": 103624,
+      "processingEnd": 103624,
+      "processing": 0,
+      "target": "",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103623,
+      "duration": 32,
+      "name": "mouseout",
+      "processingStart": 103624,
+      "processingEnd": 103624,
+      "processing": 0,
+      "target": "scene-canvas",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103623,
+      "duration": 32,
+      "name": "mouseover",
+      "processingStart": 103624,
+      "processingEnd": 103624,
+      "processing": 0,
+      "target": "dot",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103623,
+      "duration": 32,
+      "name": "pointerdown",
+      "processingStart": 103625,
+      "processingEnd": 103625,
+      "processing": 0,
+      "target": "dot",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103623,
+      "duration": 32,
+      "name": "mousedown",
+      "processingStart": 103625,
+      "processingEnd": 103625,
+      "processing": 0,
+      "target": "dot",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103624,
+      "duration": 32,
+      "name": "pointerup",
+      "processingStart": 103625,
+      "processingEnd": 103625,
+      "processing": 0,
+      "target": "dot",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103624,
+      "duration": 32,
+      "name": "mouseup",
+      "processingStart": 103625,
+      "processingEnd": 103625,
+      "processing": 0,
+      "target": "dot",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103624,
+      "duration": 32,
+      "name": "click",
+      "processingStart": 103625,
+      "processingEnd": 103625,
+      "processing": 0,
+      "target": "dot",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103628,
+      "duration": 24,
+      "name": "pointerout",
+      "processingStart": 103652,
+      "processingEnd": 103652,
+      "processing": 0,
+      "target": "dot",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103628,
+      "duration": 24,
+      "name": "pointerleave",
+      "processingStart": 103652,
+      "processingEnd": 103652,
+      "processing": 0,
+      "target": "",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103628,
+      "duration": 24,
+      "name": "pointerleave",
+      "processingStart": 103652,
+      "processingEnd": 103652,
+      "processing": 0,
+      "target": "",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103628,
+      "duration": 24,
+      "name": "pointerleave",
+      "processingStart": 103652,
+      "processingEnd": 103652,
+      "processing": 0,
+      "target": "",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103628,
+      "duration": 24,
+      "name": "pointerleave",
+      "processingStart": 103652,
+      "processingEnd": 103652,
+      "processing": 0,
+      "target": "",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103628,
+      "duration": 24,
+      "name": "pointerleave",
+      "processingStart": 103652,
+      "processingEnd": 103652,
+      "processing": 0,
+      "target": "",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103628,
+      "duration": 24,
+      "name": "pointerover",
+      "processingStart": 103652,
+      "processingEnd": 103652,
+      "processing": 0,
+      "target": "scene-canvas",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103628,
+      "duration": 24,
+      "name": "pointerenter",
+      "processingStart": 103652,
+      "processingEnd": 103652,
+      "processing": 0,
+      "target": "",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103628,
+      "duration": 24,
+      "name": "mouseout",
+      "processingStart": 103652,
+      "processingEnd": 103652,
+      "processing": 0,
+      "target": "dot",
+      "visibility": "visible"
+    },
+    {
+      "startTime": 103628,
+      "duration": 24,
+      "name": "mouseover",
+      "processingStart": 103652,
+      "processingEnd": 103652,
+      "processing": 0,
+      "target": "scene-canvas",
+      "visibility": "visible"
+    }
+  ],
+  "pageStall": {
+    "ms": 219,
+    "label": "none",
+    "trigger": "duo:screenRect",
+    "sum": 0,
+    "during": [],
+    "t": 109997,
+    "start": 109778,
+    "visibility": "visible",
+    "harness": []
+  },
+  "mainTasks": [
+    {
+      "name": "page-raf:late|none",
+      "ms": 106,
+      "t": 109674.69999998808,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 99,
+      "t": 109775.19999998808,
+      "trigger": "duo:screenRect",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:stall|none",
+      "ms": 219,
+      "t": 109997,
+      "trigger": "duo:screenRect",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 42,
+      "t": 110053.89999997616,
+      "trigger": "duo:screenRect",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 52,
+      "t": 110146.39999997616,
+      "trigger": "duo:screenRect",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 87,
+      "t": 110239.30000001192,
+      "trigger": "duo:screenRect",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 136,
+      "t": 110380.59999996424,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 85,
+      "t": 110471.59999996424,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 83,
+      "t": 110562,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 42,
+      "t": 110604.59999996424,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 92,
+      "t": 110696.59999996424,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 69,
+      "t": 110765.59999996424,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 64,
+      "t": 111074.39999997616,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 52,
+      "t": 111305.89999997616,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 42,
+      "t": 111895.69999998808,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 43,
+      "t": 112387.69999998808,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 43,
+      "t": 112437.30000001192,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 46,
+      "t": 112865.59999996424,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 41,
+      "t": 113144.09999996424,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 42,
+      "t": 113369,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 43,
+      "t": 113420.89999997616,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 44,
+      "t": 114312.59999996424,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 49,
+      "t": 114369.5,
+      "trigger": "pointer",
+      "kind": "raf"
+    },
+    {
+      "name": "page-raf:late|none",
+      "ms": 66,
+      "t": 114584.69999998808,
+      "trigger": "pointer",
+      "kind": "raf"
+    }
+  ],
+  "msgStats": {
+    "pixelBudget": {
+      "count": 9,
+      "bytes": 432
+    },
+    "stops": {
+      "count": 1,
+      "bytes": 48
+    },
+    "stopChange": {
+      "count": 10,
+      "bytes": 480
+    },
+    "dom": {
+      "count": 4,
+      "bytes": 192
+    },
+    "bootProgress": {
+      "count": 54,
+      "bytes": 2592
+    },
+    "hud": {
+      "count": 357,
+      "bytes": 17136
+    },
+    "ready": {
+      "count": 1,
+      "bytes": 48
+    },
+    "duo:state": {
+      "count": 3,
+      "bytes": 144
+    },
+    "pointerBuf": {
+      "count": 1771,
+      "bytes": 85008
+    },
+    "duo:screenRect": {
+      "count": 188,
+      "bytes": 24064
+    }
+  },
+  "floorBreaches": [],
+  "mode": "as-is"
+}

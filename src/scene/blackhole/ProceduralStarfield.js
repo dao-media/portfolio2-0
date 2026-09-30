@@ -2,8 +2,11 @@ import * as THREE from "three";
 import { BLACK_HOLE_CENTER } from "../camera/BlackHoleCameraSequence.js";
 import {
   blackHoleLensFromCamera,
+  GALACTIC_ARC_HALF,
   GALACTIC_PLANE_N,
   MILKY_WAY_DISTANCE,
+  RING_BAND_ELEV,
+  SKY_DOME_RADIUS,
   SKY_HORIZON_HIGH
 } from "./MilkyWayNebulaShader.js";
 
@@ -11,6 +14,16 @@ import {
 export const STARFIELD_COUNT = 6000;
 /** Meters a star jumps ahead when it falls behind the camera during the flight. */
 export const STARFIELD_WRAP_DEPTH = 250;
+/**
+ * Draw distance for sky points. They are directions around the camera, not
+ * a shell around the origin, so cursor and dolly parallax do not move them.
+ * 170 m matches the old far-star point size and stays inside CAM_FAR.
+ */
+export const SKY_POINT_DISTANCE = 170;
+
+const BAND_WHITE = new THREE.Color(0xffffff);
+const BAND_COOL = new THREE.Color(0xd0dcff);
+const BAND_WARM = new THREE.Color(0xfff0e0);
 
 const STAR_PALETTE = [
   new THREE.Color(0x9bb0ff),
@@ -26,23 +39,52 @@ const StarfieldShader = {
     uTime: { value: 0 },
     uCameraPos: { value: new THREE.Vector3() },
     uBlackHolePos: { value: BLACK_HOLE_CENTER.clone() },
-    uLensAngular: { value: 0 },
+    uLensInner: { value: 0 },
+    uLensOuter: { value: 0 },
+    uLensStrength: { value: 0 },
     uCamZ: { value: 0 },
     uWrap: { value: 0 },
-    uPixelRatio: { value: 1 }
+    uMirror: { value: 0 },
+    uHorizonFade: { value: 1 },
+    uPixelRatio: { value: 1 },
+    uDropPitch: { value: 0 },
+    uDropAxis: { value: new THREE.Vector3(1, 0, 0) },
+    uWorldDome: { value: 0 },
+    uReveal: { value: 0 },
+    uMaskGain: { value: 0 },
+    uCursorPx: { value: new THREE.Vector2() },
+    uHeading: { value: new THREE.Vector2(1, 0) },
+    uViewport: { value: new THREE.Vector2(1, 1) },
+    uTrailLength: { value: 80 },
+    uTrailHalf: { value: 24 }
   },
   vertexShader: /* glsl */ `
     uniform float uTime;
     uniform vec3 uCameraPos;
     uniform vec3 uBlackHolePos;
-    uniform float uLensAngular;
+    uniform float uLensInner;
+    uniform float uLensOuter;
+    uniform float uLensStrength;
     uniform float uCamZ;
     uniform float uWrap;
+    uniform float uMirror;
+    uniform float uHorizonFade;
     uniform float uPixelRatio;
+    uniform float uDropPitch;
+    uniform vec3 uDropAxis;
+    uniform float uWorldDome;
+    uniform float uReveal;
+    uniform float uMaskGain;
+    uniform vec2 uCursorPx;
+    uniform vec2 uHeading;
+    uniform vec2 uViewport;
+    uniform float uTrailLength;
+    uniform float uTrailHalf;
 
     attribute float aSize;
     attribute vec3 aColor;
     attribute float aPhase;
+    attribute float aBand;
 
     varying vec3 vColor;
     varying float vAlpha;
@@ -51,7 +93,45 @@ const StarfieldShader = {
     void main() {
       vColor = aColor;
       vec3 worldPos = position;
+      // The flight copy fills the downhill view with field stars. The belt
+      // stays on its own arc so it is not drawn twice.
+      if (uMirror > 0.5 && aBand > 0.5) {
+        vBright = 0.0;
+        vAlpha = 0.0;
+        gl_PointSize = 0.0;
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+        return;
+      }
+      if (uMirror > 0.5) worldPos.y = -worldPos.y;
       float skyR = length(worldPos);
+      // Celestial direction. The flight draws it on a shell around the
+      // camera. The ring draws it on the world dome.
+      vec3 skyDir = normalize(worldPos);
+      // Belt stars are a cloud in both skies. On the ring they sit on a
+      // full circle at RING_BAND_ELEV so the band crosses every stop.
+      if (aBand > 0.5) {
+        float h1 = fract(sin(aPhase * 127.1 + aSize * 311.7) * 43758.5453);
+        float h2 = fract(sin(aPhase * 269.5 + aSize * 183.3) * 12578.1459);
+        if (uWorldDome > 0.5) {
+          float elev = ${RING_BAND_ELEV.toFixed(3)} + (h1 - 0.5) * 0.1;
+          float ring = sqrt(max(0.0, 1.0 - elev * elev));
+          skyDir = vec3(cos(aPhase) * ring, elev, sin(aPhase) * ring);
+        }
+        vec3 axis = abs(skyDir.y) > 0.92 ? vec3(1.0, 0.0, 0.0) : vec3(-skyDir.z, 0.0, skyDir.x);
+        axis = normalize(axis);
+        vec3 side = normalize(cross(skyDir, axis));
+        skyDir = normalize(skyDir + side * (h1 - 0.5) * 0.28 + axis * (h2 - 0.5) * 0.1);
+      }
+      // Aerial drop only, and only while the sky is glued to the camera.
+      // On the ring the shell is world-fixed, so the drop shifts it by itself.
+      if (uWorldDome < 0.5 && abs(uDropPitch) > 0.0001) {
+        float c = cos(uDropPitch);
+        float s = sin(uDropPitch);
+        skyDir = normalize(skyDir * c + cross(uDropAxis, skyDir) * s + uDropAxis * dot(uDropAxis, skyDir) * (1.0 - c));
+      }
+      worldPos = uWorldDome > 0.5
+        ? skyDir * ${SKY_DOME_RADIUS.toFixed(1)}
+        : uCameraPos + skyDir * ${SKY_POINT_DISTANCE.toFixed(1)};
 
       // Flight-only recycle for nearby stars. The galactic belt sits at
       // MILKY_WAY_DISTANCE and must not wrap — that would smear the band.
@@ -59,9 +139,9 @@ const StarfieldShader = {
         worldPos.z -= ${STARFIELD_WRAP_DEPTH.toFixed(1)};
       }
 
-      // Bend background stars around the hole. The affected angle is the
-      // hole's angular size, so the warp shrinks when the camera is far.
-      if (uLensAngular > 0.002) {
+      // Annulus: outside the event horizon, tight to the ring. Bend uses
+      // strength, which stays shut until halfway in.
+      if (uLensOuter > 0.002 && uLensStrength > 0.001) {
         vec3 camToStar = worldPos - uCameraPos;
         vec3 camToHole = uBlackHolePos - uCameraPos;
         float holeDist = length(camToHole);
@@ -71,10 +151,11 @@ const StarfieldShader = {
           vec3 starDir = camToStar / starDist;
           float cosA = clamp(dot(starDir, holeDir), -1.0, 1.0);
           float ang = acos(cosA);
-          float reach = uLensAngular * 2.4;
-          if (ang < reach) {
-            float inside = smoothstep(reach, uLensAngular * 0.2, ang);
-            float bend = inside * uLensAngular * 0.9;
+          if (ang > uLensInner && ang < uLensOuter) {
+            float u = (ang - uLensInner) / max(uLensOuter - uLensInner, 1e-4);
+            float onset = smoothstep(0.0, 0.08, u);
+            float tight = smoothstep(1.0, 0.9, u);
+            float bend = onset * tight * uLensStrength * 0.053;
             vec3 tangent = starDir - holeDir * cosA;
             float tLen = length(tangent);
             if (tLen > 1e-5) {
@@ -87,26 +168,45 @@ const StarfieldShader = {
         }
       }
 
-      skyR = length(worldPos);
       vec4 mvPosition = modelViewMatrix * vec4(worldPos, 1.0);
       float camDist = length(mvPosition.xyz);
       // Brightness shimmer only. Size stays put so stars don't blink in and out.
       vBright = 0.78 + 0.22 * sin(uTime * 5.5 + aPhase);
-      // Belt stars are kilometers out. Size them as if they sat at 170 m,
-      // or perspective would shrink them to nothing.
-      float size = skyR > 2000.0
-        ? aSize * (120.0 / 170.0)
-        : (aSize * 120.0) / max(-mvPosition.z, 0.4);
+      float size = (aSize * 120.0) / max(-mvPosition.z, 0.4);
       gl_PointSize = clamp(size * uPixelRatio, 0.0, 9.0);
 
       float nearFade = smoothstep(0.4, 2.5, camDist);
-      float farFade = 1.0 - smoothstep(180.0, 300.0, camDist);
-      float elev = worldPos.y / max(skyR, 0.001);
-      float horizonFade = smoothstep(0.0, ${SKY_HORIZON_HIGH.toFixed(3)}, elev);
-      vAlpha = nearFade * mix(farFade, 1.0, step(2000.0, skyR)) * horizonFade;
+      float elev = skyDir.y;
+      float horizonFade = mix(1.0, smoothstep(0.0, ${SKY_HORIZON_HIGH.toFixed(3)}, elev), uHorizonFade);
+      vAlpha = nearFade * horizonFade;
       gl_Position = projectionMatrix * mvPosition;
-      if (skyR > 2000.0 && gl_Position.w > 0.0) {
-        gl_Position.z = gl_Position.w * 0.999;
+
+      // Hidden field. Same stars as the sky; a soft teardrop uncovers them.
+      // The mask moves. The star directions do not.
+      if (uReveal > 0.5) {
+        if (gl_Position.w <= 0.0 || uMaskGain < 0.001) {
+          vAlpha = 0.0;
+          gl_PointSize = 0.0;
+        } else {
+          vec2 ndc = gl_Position.xy / gl_Position.w;
+          vec2 starPx = vec2(
+            (ndc.x * 0.5 + 0.5) * uViewport.x,
+            (0.5 - ndc.y * 0.5) * uViewport.y
+          );
+          vec2 delta = starPx - uCursorPx;
+          vec2 side = vec2(-uHeading.y, uHeading.x);
+          float along = dot(delta, -uHeading);
+          float across = abs(dot(delta, side));
+          float u = along / max(uTrailLength, 1.0);
+          float neck = clamp(u / 0.07, 0.0, 1.0);
+          float prof = neck * pow(clamp(1.0 - u, 0.0, 1.0), 1.25);
+          float halfW = max(uTrailHalf * prof, 0.001);
+          float d = across / halfW;
+          float smudge = exp(-d * d * 1.35);
+          smudge *= smoothstep(-0.06, 0.14, u) * smoothstep(1.25, 0.42, u);
+          vAlpha *= smudge * uMaskGain;
+          if (vAlpha < 0.025) gl_PointSize = 0.0;
+        }
       }
     }
   `,
@@ -117,10 +217,9 @@ const StarfieldShader = {
 
     void main() {
       vec2 coord = gl_PointCoord - vec2(0.5);
-      float dist = length(coord);
-      if (dist > 0.5) discard;
-
-      float core = pow(smoothstep(0.5, 0.02, dist), 1.35);
+      float dist = dot(coord, coord);
+      float core = exp(-dist * 18.0);
+      if (core < 0.04) discard;
       gl_FragColor = vec4(vColor * vBright, core * vAlpha);
     }
   `
@@ -134,34 +233,25 @@ const _bandDir = new THREE.Vector3();
 const SKY_ELEV_MIN = (1 * Math.PI) / 180;
 
 /**
- * Brighter stars on the galactic filaments, only the arc above the horizon.
- * The plane dips through the ground; that half is folded to the sky side.
+ * Brighter stars on one arc of the galactic circle — the piece that crosses
+ * the top-right of the black-hole view. The other half of the circle is left
+ * empty so the belt is not a second layer.
  * @param {Float32Array} positions
  * @param {number} index
  */
 function writeGalacticBand(positions, index) {
   const i3 = index * 3;
-  const filament = Math.floor(Math.random() * 6);
-  let along = (filament / 6) * Math.PI * 2 + (Math.random() - 0.5) * 0.7;
-  const spread = 0.012 + (filament % 3) * 0.008;
-  const across = (Math.random() - 0.5) * spread * 2;
+  let along = Math.PI + (Math.random() - 0.5) * GALACTIC_ARC_HALF * 2;
+  if (along > Math.PI) along -= Math.PI * 2;
+  const across = (Math.random() - 0.5) * 0.036;
   const radius = MILKY_WAY_DISTANCE * (0.985 + Math.random() * 0.03);
-  const yMin = Math.sin(SKY_ELEV_MIN);
-  for (let n = 0; n < 2; n += 1) {
-    _bandDir
-      .copy(BAND_TANGENT)
-      .multiplyScalar(Math.cos(along))
-      .addScaledVector(BAND_BITANGENT, Math.sin(along))
-      .addScaledVector(GALACTIC_PLANE_N, across)
-      .normalize();
-    if (_bandDir.y >= yMin) break;
-    along += Math.PI;
-  }
-  if (_bandDir.y < yMin) {
-    _bandDir.y = yMin;
-    _bandDir.normalize();
-  }
-  _bandDir.multiplyScalar(radius);
+  _bandDir
+    .copy(BAND_TANGENT)
+    .multiplyScalar(Math.cos(along))
+    .addScaledVector(BAND_BITANGENT, Math.sin(along))
+    .addScaledVector(GALACTIC_PLANE_N, across)
+    .normalize()
+    .multiplyScalar(radius);
   positions[i3] = _bandDir.x;
   positions[i3 + 1] = _bandDir.y;
   positions[i3 + 2] = _bandDir.z;
@@ -195,6 +285,7 @@ export function createProceduralStarfield(starCount = STARFIELD_COUNT) {
   const colors = new Float32Array(starCount * 3);
   const sizes = new Float32Array(starCount);
   const phases = new Float32Array(starCount);
+  const bands = new Float32Array(starCount);
 
   const bandStart = Math.floor(starCount * 0.6);
 
@@ -204,10 +295,14 @@ export function createProceduralStarfield(starCount = STARFIELD_COUNT) {
     if (inBand) writeGalacticBand(positions, i);
     else writeUpperSky(positions, i);
 
-    const colIndex = inBand
-      ? 2 + Math.floor(Math.random() * (STAR_PALETTE.length - 2))
-      : Math.floor(Math.pow(Math.random(), 1.8) * STAR_PALETTE.length);
-    const col = STAR_PALETTE[Math.min(colIndex, STAR_PALETTE.length - 1)];
+    let col;
+    if (inBand) {
+      const roll = Math.random();
+      col = roll < 0.84 ? BAND_WHITE : roll < 0.92 ? BAND_COOL : BAND_WARM;
+    } else {
+      const colIndex = Math.floor(Math.pow(Math.random(), 1.8) * STAR_PALETTE.length);
+      col = STAR_PALETTE[Math.min(colIndex, STAR_PALETTE.length - 1)];
+    }
     colors[i3] = col.r;
     colors[i3 + 1] = col.g;
     colors[i3 + 2] = col.b;
@@ -215,12 +310,14 @@ export function createProceduralStarfield(starCount = STARFIELD_COUNT) {
       ? Math.pow(Math.random(), 2) * 2.4 + 0.7
       : Math.pow(Math.random(), 3) * 1.8 + 0.4;
     phases[i] = Math.random() * Math.PI * 2;
+    bands[i] = inBand ? 1 : 0;
   }
 
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
   geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
   geometry.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
+  geometry.setAttribute("aBand", new THREE.BufferAttribute(bands, 1));
 
   const material = new THREE.ShaderMaterial({
     name: "ProceduralStarfield",
@@ -243,11 +340,84 @@ export function createProceduralStarfield(starCount = STARFIELD_COUNT) {
 }
 
 /**
+ * Denser copy of the field stars, same shader and palette. Drawn only
+ * where the cursor smudge is open. Directions stay fixed.
+ * @param {number} [starCount]
+ */
+export function createRevealStarfield(starCount = 24000) {
+  const geometry = new THREE.BufferGeometry();
+  const positions = new Float32Array(starCount * 3);
+  const colors = new Float32Array(starCount * 3);
+  const sizes = new Float32Array(starCount);
+  const phases = new Float32Array(starCount);
+  const bands = new Float32Array(starCount);
+
+  for (let i = 0; i < starCount; i += 1) {
+    const i3 = i * 3;
+    writeUpperSky(positions, i);
+    const colIndex = Math.floor(Math.pow(Math.random(), 1.8) * STAR_PALETTE.length);
+    const col = STAR_PALETTE[Math.min(colIndex, STAR_PALETTE.length - 1)];
+    colors[i3] = col.r;
+    colors[i3 + 1] = col.g;
+    colors[i3 + 2] = col.b;
+    sizes[i] = Math.pow(Math.random(), 2) * 2.2 + 0.55;
+    phases[i] = Math.random() * Math.PI * 2;
+    bands[i] = 0;
+  }
+
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
+  geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
+  geometry.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
+  geometry.setAttribute("aBand", new THREE.BufferAttribute(bands, 1));
+
+  const material = new THREE.ShaderMaterial({
+    name: "RevealStarfield",
+    uniforms: THREE.UniformsUtils.clone(StarfieldShader.uniforms),
+    vertexShader: StarfieldShader.vertexShader,
+    fragmentShader: StarfieldShader.fragmentShader,
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    blending: THREE.NormalBlending,
+    toneMapped: true,
+    fog: false
+  });
+  material.uniforms.uReveal.value = 1;
+  material.uniforms.uMaskGain.value = 0;
+
+  const stars = new THREE.Points(geometry, material);
+  stars.name = "cursor-star-reveal";
+  stars.frustumCulled = false;
+  stars.renderOrder = 1;
+  stars.visible = false;
+  return stars;
+}
+
+/**
+ * Same 6,000 points, reflected under the horizon. Shown only while the
+ * black-hole flight looks downhill into that half of the sky.
+ * @param {THREE.Points} starfield
+ */
+export function createFlightStarMirror(starfield) {
+  const material = starfield.material.clone();
+  material.uniforms = THREE.UniformsUtils.clone(starfield.material.uniforms);
+  material.uniforms.uMirror.value = 1;
+  material.uniforms.uHorizonFade.value = 0;
+  const mirror = new THREE.Points(starfield.geometry, material);
+  mirror.name = "procedural-starfield-flight";
+  mirror.frustumCulled = false;
+  mirror.renderOrder = 1;
+  mirror.visible = false;
+  return mirror;
+}
+
+/**
  * Uniform tick. Wrap is a shader flag (1 during the black-hole flight only).
  * @param {THREE.Points} starfield
  * @param {THREE.Camera} camera
  * @param {number} time
- * @param {{ wrap?: boolean, pixelRatio?: number }} [opts]
+ * @param {{ wrap?: boolean, horizonFade?: boolean, pixelRatio?: number, dropPitch?: number, dropAxis?: THREE.Vector3, worldDome?: boolean }} [opts]
  */
 export function updateStarfield(starfield, camera, time, opts = {}) {
   const uniforms = starfield?.material?.uniforms;
@@ -256,9 +426,20 @@ export function updateStarfield(starfield, camera, time, opts = {}) {
   uniforms.uCameraPos.value.copy(camera.position);
   uniforms.uCamZ.value = camera.position.z;
   uniforms.uWrap.value = opts.wrap ? 1 : 0;
-  uniforms.uLensAngular.value = opts.wrap
-    ? blackHoleLensFromCamera(camera, uniforms.uBlackHolePos.value).angular
-    : 0;
+  uniforms.uDropPitch.value = opts.dropPitch || 0;
+  if (opts.dropAxis) uniforms.uDropAxis.value.copy(opts.dropAxis);
+  if (opts.worldDome != null && uniforms.uWorldDome) {
+    uniforms.uWorldDome.value = opts.worldDome ? 1 : 0;
+  }
+  if (opts.horizonFade != null && uniforms.uMirror.value < 0.5) {
+    uniforms.uHorizonFade.value = opts.horizonFade ? 1 : 0;
+  }
+  const lens = opts.wrap
+    ? blackHoleLensFromCamera(camera, uniforms.uBlackHolePos.value)
+    : null;
+  uniforms.uLensInner.value = lens ? lens.innerAngular : 0;
+  uniforms.uLensOuter.value = lens ? lens.outerAngular : 0;
+  uniforms.uLensStrength.value = lens ? lens.strength : 0;
   if (Number.isFinite(opts.pixelRatio)) {
     uniforms.uPixelRatio.value = opts.pixelRatio;
   }

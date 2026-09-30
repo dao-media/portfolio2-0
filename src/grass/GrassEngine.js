@@ -9,6 +9,7 @@
 import * as THREE from "three";
 import {
   GRASS_BASE_RADIUS,
+  GRASS_BLADE_HEIGHT,
   GRASS_BLADE_SEGMENTS,
   GRASS_GROUND_COLOR,
   GRASS_INITIAL_CAPACITY,
@@ -48,6 +49,13 @@ import { sampleCoverageOutline } from "./lawnCoverage.js";
  * }} GrassLayout
  */
 
+const _restMatrix = new THREE.Matrix4();
+const _restPos = new THREE.Vector3();
+const _restTop = new THREE.Vector3();
+const _restQuat = new THREE.Quaternion();
+const _restScale = new THREE.Vector3();
+const _restView = new THREE.Matrix4();
+
 export class GrassEngine {
   /**
    * @param {{
@@ -67,6 +75,16 @@ export class GrassEngine {
     this.coverage = { ...opts.coverage };
     this.layout = opts.layout;
     this._capacity = GRASS_INITIAL_CAPACITY;
+    this._restActive = false;
+    this._restCompacted = false;
+    /** @type {Float32Array | null} */
+    this._restBackupM = null;
+    /** @type {Float32Array | null} */
+    this._restBackupBlade = null;
+    /** @type {Float32Array | null} */
+    this._restBackupPhase = null;
+    this._restFullCount = 0;
+    this._restStats = null;
 
     this.root = new THREE.Group();
     this.root.name = "lawn-grass-stump";
@@ -226,6 +244,36 @@ export class GrassEngine {
     this.mesh.customDistanceMaterial = this._material.userData.distanceMaterial;
     this.mesh.scale.y = this.bladeLength;
     this.root.add(this.mesh);
+
+    if (this.depthMesh) {
+      this.root.remove(this.depthMesh);
+      this.depthMesh = null;
+    }
+    const prepass = this._material.userData.prepassMaterial;
+    if (prepass) {
+      this.depthMesh = new THREE.InstancedMesh(this._bladeGeo, prepass, capacity);
+      this.depthMesh.name = "lawn-grass-depth";
+      this.depthMesh.castShadow = false;
+      this.depthMesh.receiveShadow = false;
+      this.depthMesh.frustumCulled = false;
+      this.depthMesh.renderOrder = -3;
+      this._bladeGeo.setAttribute("instanceMatrix", this.mesh.instanceMatrix);
+      this.depthMesh.instanceMatrix = this.mesh.instanceMatrix;
+      this.root.add(this.depthMesh);
+      this._bindDepthMesh();
+    }
+  }
+
+  _bindDepthMesh() {
+    const mesh = this.mesh;
+    const depth = this.depthMesh;
+    if (!mesh || !depth) return;
+    depth.count = mesh.count;
+    depth.instanceMatrix = mesh.instanceMatrix;
+    depth.scale.copy(mesh.scale);
+    depth.visible = mesh.visible;
+    depth.position.copy(mesh.position);
+    depth.quaternion.copy(mesh.quaternion);
   }
 
   /**
@@ -322,6 +370,7 @@ export class GrassEngine {
   }
 
   rebuild() {
+    this.clearRestCull();
     const built = buildGrassInstances({
       radius: this.radius,
       bladeLength: this.bladeLength,
@@ -380,6 +429,7 @@ export class GrassEngine {
     this._aBlade.needsUpdate = true;
     this._aPhase.needsUpdate = true;
     this.mesh.scale.y = this.bladeLength;
+    this._bindDepthMesh();
 
     this._rebuildGround();
     this.ground.position.y = -0.06;
@@ -388,12 +438,145 @@ export class GrassEngine {
   /** @param {number} timeSec */
   update(timeSec) {
     setGrassTime(this._material, timeSec);
+    this._bindDepthMesh();
+  }
+
+  /**
+   * Settled view: drop instances outside the camera, or shorter than one pixel.
+   * The placement count is unchanged — motion restores every blade.
+   * @param {THREE.Camera} camera
+   * @param {{ subpixelPx?: number, ndcMargin?: number }} [opts]
+   */
+  applyRestCull(camera, opts = {}) {
+    if (!this.mesh || !camera || this._restActive) return this._restStats;
+    camera.updateMatrixWorld();
+    const subpixelPx = opts.subpixelPx ?? 1;
+    const ndcMargin = opts.ndcMargin ?? 0.12;
+    const limit = 1 + Math.max(0, ndcMargin);
+    const count = this.mesh.count;
+    this.mesh.updateMatrixWorld(true);
+    _restView.copy(camera.matrixWorldInverse);
+    const ve = _restView.elements;
+    const drawW = typeof window !== "undefined" ? window.innerWidth : 1;
+    const drawH = typeof window !== "undefined" ? window.innerHeight : 1;
+    /** @type {number[]} */
+    const keep = [];
+    let offscreen = 0;
+    let subpixel = 0;
+    for (let i = 0; i < count; i += 1) {
+      this.mesh.getMatrixAt(i, _restMatrix);
+      _restMatrix.premultiply(this.mesh.matrixWorld);
+      _restMatrix.decompose(_restPos, _restQuat, _restScale);
+      const worldH = GRASS_BLADE_HEIGHT * Math.abs(_restScale.y);
+      const vz =
+        ve[2] * _restPos.x +
+        ve[6] * _restPos.y +
+        ve[10] * _restPos.z +
+        ve[14];
+      if (vz > -camera.near) {
+        offscreen += 1;
+        continue;
+      }
+      _restTop.copy(_restPos);
+      _restTop.y += worldH;
+      _restTop.project(camera);
+      const tipX = _restTop.x;
+      const tipY = _restTop.y;
+      const tipZ = _restTop.z;
+      _restPos.project(camera);
+      const inRoot =
+        _restPos.z >= -1 &&
+        _restPos.z <= 1 &&
+        Math.abs(_restPos.x) <= limit &&
+        Math.abs(_restPos.y) <= limit;
+      const inTip =
+        tipZ >= -1 &&
+        tipZ <= 1 &&
+        Math.abs(tipX) <= limit &&
+        Math.abs(tipY) <= limit;
+      if (!inRoot && !inTip) {
+        offscreen += 1;
+        continue;
+      }
+      const px = Math.hypot(
+        (tipX - _restPos.x) * drawW * 0.5,
+        (tipY - _restPos.y) * drawH * 0.5
+      );
+      if (px < subpixelPx) {
+        subpixel += 1;
+        continue;
+      }
+      keep.push(i);
+    }
+
+    this._restFullCount = count;
+    this._restActive = true;
+    this._restStats = {
+      full: count,
+      kept: keep.length,
+      offscreen,
+      subpixel
+    };
+    if (keep.length >= count) return this._restStats;
+
+    const matrix = this.mesh.instanceMatrix.array;
+    const blade = this._aBlade.array;
+    const phase = this._aPhase.array;
+    this._restBackupM = new Float32Array(matrix);
+    this._restBackupBlade = new Float32Array(blade);
+    this._restBackupPhase = new Float32Array(phase);
+    for (let k = 0; k < keep.length; k += 1) {
+      const src = keep[k] * 16;
+      matrix.set(this._restBackupM.subarray(src, src + 16), k * 16);
+      const b = keep[k] * 4;
+      blade.set(this._restBackupBlade.subarray(b, b + 4), k * 4);
+      const p = keep[k] * 2;
+      phase.set(this._restBackupPhase.subarray(p, p + 2), k * 2);
+    }
+    this.mesh.count = keep.length;
+    this.mesh.instanceMatrix.needsUpdate = true;
+    this._bindDepthMesh();
+    this._aBlade.needsUpdate = true;
+    this._aPhase.needsUpdate = true;
+    this._restCompacted = true;
+    return this._restStats;
+  }
+
+  /** Hop: draw the full meadow again. */
+  clearRestCull() {
+    if (this._restCompacted && this.mesh && this._restBackupM) {
+      this.mesh.instanceMatrix.array.set(this._restBackupM);
+      this._aBlade.array.set(this._restBackupBlade);
+      this._aPhase.array.set(this._restBackupPhase);
+      this.mesh.count = this._restFullCount;
+      this.mesh.instanceMatrix.needsUpdate = true;
+      this._bindDepthMesh();
+      this._aBlade.needsUpdate = true;
+      this._aPhase.needsUpdate = true;
+    }
+    this._restCompacted = false;
+    this._restBackupM = null;
+    this._restBackupBlade = null;
+    this._restBackupPhase = null;
+    this._restActive = false;
+    this._restStats = null;
+  }
+
+  /**
+   * Rest drops the per-blade noise sample. The sine gust stays.
+   * @param {boolean} full
+   */
+  setWindDetail(full) {
+    const u = this._material?.userData?.grassUniforms;
+    if (u?.uWindDetail) u.uWindDetail.value = full ? 1 : 0;
   }
 
   dispose() {
     this._bladeGeo.dispose();
     this._material.dispose();
     this._material.userData.depthMaterial?.dispose?.();
+    this._material.userData.prepassMaterial?.dispose?.();
+    if (this.depthMesh) this.root.remove(this.depthMesh);
     this._groundMat.dispose();
     this.ground.geometry.dispose();
     this.root.remove(this.mesh);

@@ -10,7 +10,11 @@ const activeSfx = new Set();
 const trackedSfx = new WeakSet();
 
 export function isSiteAudioMuted() {
-  return sessionStorage.getItem(SITE_AUDIO_MUTE_KEY) === "1";
+  try {
+    return sessionStorage.getItem(SITE_AUDIO_MUTE_KEY) === "1";
+  } catch {
+    return true;
+  }
 }
 
 /** @param {boolean} muted */
@@ -80,6 +84,7 @@ export function playSiteSfx(audio, opts = {}) {
 let linkClickAudio = null;
 
 function getLinkClickAudio() {
+  if (typeof Audio === "undefined") return null;
   if (!linkClickAudio) {
     linkClickAudio = new Audio(XP_BOOT_CONFIG.assets.linkClick);
     linkClickAudio.preload = "auto";
@@ -104,6 +109,7 @@ let sidekickOpenAudio = null;
 let sidekickCloseAudio = null;
 
 function getSidekickOpenAudio() {
+  if (typeof Audio === "undefined") return null;
   if (!sidekickOpenAudio) {
     sidekickOpenAudio = new Audio(SIDEKICK_OPEN_URL);
     sidekickOpenAudio.preload = "auto";
@@ -114,6 +120,7 @@ function getSidekickOpenAudio() {
 }
 
 function getSidekickCloseAudio() {
+  if (typeof Audio === "undefined") return null;
   if (!sidekickCloseAudio) {
     sidekickCloseAudio = new Audio(SIDEKICK_CLOSE_URL);
     sidekickCloseAudio.preload = "auto";
@@ -127,6 +134,7 @@ function getSidekickCloseAudio() {
 export function preloadSidekickSfx() {
   const open = getSidekickOpenAudio();
   const close = getSidekickCloseAudio();
+  if (!open || !close) return;
   open.load?.();
   close.load?.();
   // Warm the element without audible output (muted prime).
@@ -160,7 +168,7 @@ export function preloadSidekickSfx() {
  * @param {number} volume
  */
 function playSidekickClip(audio, other, volume) {
-  if (isSiteAudioMuted()) return;
+  if (!audio || isSiteAudioMuted()) return;
   if (other && !other.paused) {
     other.pause();
     other.currentTime = 0;

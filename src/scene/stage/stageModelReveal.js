@@ -227,21 +227,28 @@ const GPU_TEXTURE_KEYS = [
 ];
 
 /**
- * Upload material maps 1-mesh-per-batch so first hop to a deferred vignette
- * does not compile/upload on the click frame. Same cadence as Desktop's
- * INTRO_MATERIAL_BATCH_SIZE path.
+ * Upload every material map under `root` that isn't already GPU-resident,
+ * one texture per call so a single slow one (see `onSlowTexture`) cannot
+ * stretch one warm step past budget. Checked against the renderer's own
+ * texture properties first — an already-uploaded, version-matched texture
+ * is skipped outright, not re-forced (see `debugSlowTextures` / the warm vs.
+ * live-reveal timing check this was built to answer).
  * @param {THREE.Object3D | null | undefined} root
  * @param {THREE.WebGLRenderer | null | undefined} renderer
  * @param {(frames?: number) => Promise<void>} [yieldFrame]
- * @param {number} [batchSize=1]
+ * @param {(info: { name: string, w: number, h: number, ms: number }) => void} [onSlowTexture]
+ * @param {number} [slowMs=35]
  */
-export async function warmMeshesChunked(root, renderer, yieldFrame, batchSize = 1) {
-  if (!root || !renderer) return;
+export async function warmMeshesChunked(root, renderer, yieldFrame, onSlowTexture, slowMs = 35) {
+  if (!root || !renderer) return { uploaded: 0, skipped: 0, ms: 0 };
   const meshes = [];
   root.traverse((obj) => {
     if (obj.isMesh) meshes.push(obj);
   });
-  const n = Math.max(1, batchSize | 0);
+  const seen = new Set();
+  let uploaded = 0;
+  let skipped = 0;
+  const t00 = performance.now();
   for (let i = 0; i < meshes.length; i += 1) {
     const mats = Array.isArray(meshes[i].material)
       ? meshes[i].material
@@ -250,11 +257,54 @@ export async function warmMeshesChunked(root, renderer, yieldFrame, batchSize = 
       if (!mat) continue;
       for (const key of GPU_TEXTURE_KEYS) {
         const tex = mat[key];
-        if (tex?.isTexture) renderer.initTexture(tex);
+        if (!tex?.isTexture || seen.has(tex)) continue;
+        seen.add(tex);
+        const props = renderer.properties.get(tex);
+        const srcProps = tex.source ? renderer.properties.get(tex.source) : null;
+        const alreadyResident =
+          Boolean(props?.__webglTexture) && srcProps?.__version === tex.source?.version;
+        if (alreadyResident) {
+          skipped += 1;
+          continue;
+        }
+        tex.needsUpdate = true;
+        // DEV — separates GPU sync-point wait from actual upload cost for the
+        // known-slow Ishtar Gate texture (diagnosis only; gl.finish() is not
+        // called for any other texture, so this doesn't change normal timing).
+        const isIshtarProbe = mat.name === "tripo_material_6baed76b-dead-4d56-ab5e-361c2228315d";
+        let preFinishMs = 0;
+        let postFinishMs = 0;
+        const gl = isIshtarProbe ? renderer.getContext() : null;
+        if (gl) {
+          const tf0 = performance.now();
+          gl.finish();
+          preFinishMs = performance.now() - tf0;
+        }
+        const t0 = performance.now();
+        renderer.initTexture(tex);
+        const ms = performance.now() - t0;
+        if (gl) {
+          const tf1 = performance.now();
+          gl.finish();
+          postFinishMs = performance.now() - tf1;
+        }
+        uploaded += 1;
+        if (ms >= slowMs || isIshtarProbe) {
+          onSlowTexture?.({
+            name: mat.name ? `${mat.name}.${key}` : key,
+            w: tex.image?.width ?? 0,
+            h: tex.image?.height ?? 0,
+            ms: Math.round(ms * 10) / 10,
+            preFinishMs: isIshtarProbe ? Math.round(preFinishMs * 10) / 10 : undefined,
+            postFinishMs: isIshtarProbe ? Math.round(postFinishMs * 10) / 10 : undefined
+          });
+        }
+        tagFrame("material-warm");
+        // One texture per step — do not yield into the live fog-depth +
+        // beauty frame here (that compiled each new program inside a >1s
+        // present and stretched ~45s), just cap the cost per iteration.
       }
     }
-    tagFrame("material-warm");
-    // Do not yield into the live fog-depth + beauty frame per mesh — that
-    // compiled each new program inside a >1s present and stretched ~45s.
   }
+  return { uploaded, skipped, ms: Math.round((performance.now() - t00) * 10) / 10 };
 }

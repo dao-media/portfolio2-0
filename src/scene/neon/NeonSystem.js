@@ -16,8 +16,7 @@ import {
   NEON_SHADOW,
   vignetteAngle
 } from "../stage/constants.js";
-import { FogDepthCapture } from "./FogDepthCapture.js";
-import { FogDebugOverlay } from "./FogDebugOverlay.js";
+import { restResource } from "../stage/restFidelity.js";
 import { makeNeonTube } from "./makeNeonTube.js";
 import { makeNeonLantern, LANTERN_WARM, LANTERN_LIGHT, BUST_LANTERN_HEIGHT_M } from "./makeNeonLantern.js";
 import { sampleNeonMapUv } from "./neonGradientTexture.js";
@@ -38,7 +37,7 @@ const _LIGHT_COLOR = new THREE.Color();
  * Per-stop neon PointLights + tubes.
  * Focus-only: inactive stops are dark; the active stop fades in near rest,
  * flickers in the last ~7% of hop travel, and scrolls its emissive gradient.
- * Atmosphere is VolumetricFogPass; FogDepthCapture feeds soft-contact depth.
+ * Fog renderers are parked in src/fog-aside and are not constructed here.
  */
 export class NeonSystem {
   /**
@@ -84,6 +83,11 @@ export class NeonSystem {
      */
     this._arriveLatchedIndex = -1;
     this._lastActiveIndex = -1;
+    /**
+     * Stop forced to arrive 1 before the first reveal (Bust lantern prewarm).
+     * Cleared once the camera leaves that stop so later hops fade in normally.
+     */
+    this._prelitIndex = -1;
     this._gradientPhase = 0;
     /** @deprecated Alias of `_gradientPhase` — PointLight always tracks the live tube. */
     this._lightColorPhase = 0;
@@ -92,11 +96,9 @@ export class NeonSystem {
 
     camera.layers.enable(NEON_FOG_LAYER);
 
-    /** Opaque depth pre-pass for volumetric soft-contact. */
-    this.depthCapture = new FogDepthCapture();
-
-    /** DEV depth / soft-term quads. Off until debugFogVis(). */
-    this.debugOverlay = new FogDebugOverlay(camera, this.depthCapture.depthTexture);
+    /** Fog depth pre-pass is parked in src/fog-aside and is not constructed. */
+    this.depthCapture = null;
+    this.debugOverlay = null;
   }
 
   /**
@@ -113,6 +115,16 @@ export class NeonSystem {
    * Intro→first-settle handoff for stop 0 (C01) — content/neon one stable lit state.
    * @param {number} index
    */
+  /**
+   * Bust lantern is already at full intensity before the world is shown.
+   * @param {number} [index=0]
+   */
+  prelightStop(index = 0) {
+    const n = this.entries.length;
+    if (!n) return;
+    this._prelitIndex = ((index % n) + n) % n;
+  }
+
   armArriveForActiveStop(index = 0) {
     const n = this.entries.length;
     if (!n) return;
@@ -182,7 +194,11 @@ export class NeonSystem {
       lanternKnobs?.decay ?? NEON_LIGHT_DECAY
     );
     light.name = `neon-stop-light-${this.entries.length}`;
-    light.castShadow = false;
+    // castShadow stays on for every stop. Intensity 0 drops the shadow
+    // without changing NUM_POINT_LIGHT_SHADOWS.
+    light.castShadow = true;
+    light.shadow.autoUpdate = false;
+    light.shadow.intensity = 0;
     light.layers.enable(0);
     light.layers.enable(NEON_FOG_LAYER);
     light.layers.enable(WET_FLOOR_LAYER);
@@ -190,12 +206,20 @@ export class NeonSystem {
       ? _TUBE_WORLD.y + (tube.userData.flameLocalY ?? LANTERN_LIGHT.flameFrac * BUST_LANTERN_HEIGHT_M)
       : this._lightHeight;
     light.position.set(_TUBE_WORLD.x, lightY, _TUBE_WORLD.z);
-    if (isLantern) {
+    if (isLantern && restResource(this.entries.length, "lantern-shadow-bake")) {
+      light.userData.lanternWarm = true;
+      light.userData.lanternMaxLight =
+        lanternKnobs?.maxIntensity ?? LANTERN_LIGHT.maxIntensity;
+      // restFidelity bust/lantern-shadow-bake: one cube on settle, frozen after.
+      light.shadow.autoUpdate = false;
+      light.userData.shadowBakes = 0;
+      light.userData.shadowCasting = false;
+    } else if (isLantern) {
       light.userData.lanternWarm = true;
       light.userData.lanternMaxLight =
         lanternKnobs?.maxIntensity ?? LANTERN_LIGHT.maxIntensity;
     }
-    // Shadow map prepared once; castShadow toggled per-frame for the active stop only.
+    // Map allocation is once. castShadow is still settled-active only.
     light.shadow.mapSize.set(NEON_SHADOW.mapSize, NEON_SHADOW.mapSize);
     light.shadow.bias = NEON_SHADOW.bias;
     light.shadow.normalBias = NEON_SHADOW.normalBias;
@@ -279,6 +303,20 @@ export class NeonSystem {
    *   allowNeon?: boolean
    * }} [opts]
    */
+  /** Arm a lantern shadow bake for the next motion frame, not the hold. */
+  deferShadowBake() {
+    const lights = this.stopLights;
+    if (!lights) return;
+    for (let i = 0; i < lights.length; i += 1) {
+      if (!restResource(i, "lantern-shadow-bake")) continue;
+      const light = lights[i]?.light;
+      if (!light?.shadow) continue;
+      if (light.userData.shadowPrebaked === true && light.shadow.map != null) continue;
+      light.userData.shadowBakeDeferred = true;
+      light.shadow.needsUpdate = false;
+    }
+  }
+
   update(theta, _total, time = 0, opts = {}) {
     const n = this.entries.length;
     if (!n) return;
@@ -296,6 +334,9 @@ export class NeonSystem {
       this._flickerEligible = false;
       if (this._arriveLatchedIndex !== activeIndex) {
         this._arriveLatchedIndex = -1;
+      }
+      if (this._prelitIndex >= 0 && this._prelitIndex !== activeIndex) {
+        this._prelitIndex = -1;
       }
     }
 
@@ -377,6 +418,10 @@ export class NeonSystem {
           level *= neonFlickerMul(this._flickerT);
         }
       }
+      if (this._prelitIndex === i) {
+        arriveLevel = 1;
+        level = 1;
+      }
       this.entries[i]._arriveLevel = arriveLevel;
 
       const portalLit = this._portalStops.has(i);
@@ -406,12 +451,43 @@ export class NeonSystem {
           LANTERN_LIGHT.maxIntensity ??
           this._maxLight;
         light.intensity = displayLevel * maxL * flicker;
-        // Cubemap shadows only while settled on the active stop (skip during hops).
-        light.castShadow =
+        // Settled-only cube. castShadow stays true on every stop so the
+        // shadow #define does not change mid-hop. shadow.intensity hides it.
+        const shouldCast =
           i === activeIndex &&
           settled &&
           displayLevel > 0.08 &&
           !this.reducedMotion;
+        const bake = restResource(i, "lantern-shadow-bake");
+        light.castShadow = true;
+        light.shadow.autoUpdate = false;
+        light.shadow.intensity = shouldCast ? 1 : 0;
+        if (bake) {
+          const wasCasting = light.userData.shadowCasting === true;
+          const prebaked =
+            light.userData.shadowPrebaked === true && light.shadow.map != null;
+          const flush =
+            i === activeIndex &&
+            light.userData.shadowBakeDeferred === true &&
+            light.shadow.map == null;
+          if (flush) {
+            light.shadow.needsUpdate = true;
+            light.userData.shadowBakeDeferred = false;
+            light.userData.shadowPrebaked = true;
+            light.userData.flushShadow = true;
+            light.userData.shadowBakes = (light.userData.shadowBakes ?? 0) + 1;
+          } else if (shouldCast && (!wasCasting || light.shadow.map == null)) {
+            if (prebaked || light.shadow.map != null) light.userData.shadowPrebaked = false;
+            else {
+              light.userData.shadowBakeDeferred = true;
+              light.shadow.needsUpdate = false;
+            }
+            if (shouldCast && light.shadow.map == null) light.shadow.needsUpdate = true;
+          }
+          light.userData.shadowCasting = shouldCast;
+        } else if (shouldCast && light.shadow.map == null) {
+          light.shadow.needsUpdate = true;
+        }
         // Reach must match the warm spill (attach-time far can lag knobs).
         if (light.shadow?.camera) {
           light.shadow.camera.far = Math.max(
@@ -500,12 +576,18 @@ export class NeonSystem {
 
       const light = this.stopLights[i].light;
       light.intensity = displayLevel * this._maxLight;
-      // Only the settled active stop casts — cubemap shadows are expensive (6 faces).
-      light.castShadow =
+      // Same shadow #define on every stop. Only the settled tube contributes.
+      const shouldCast =
         i === activeIndex &&
         settled &&
         displayLevel > 0.08 &&
         !this.reducedMotion;
+      light.castShadow = true;
+      if (light.shadow) {
+        light.shadow.autoUpdate = false;
+        light.shadow.intensity = shouldCast ? 1 : 0;
+        if (shouldCast && light.shadow.map == null) light.shadow.needsUpdate = true;
+      }
       // Fog / haze integrate over the volume — use arrive only (no strike flicker).
       // Portal stops contribute no neon fog — daylight Spot owns in-scatter.
       light.userData.fogIntensity = portalLit

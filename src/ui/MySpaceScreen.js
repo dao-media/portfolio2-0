@@ -27,6 +27,17 @@ import { XP_BOOT_STATES } from "./xpBoot/config.js";
 import { renderCrtPowerOnFrame } from "./crtPowerOnCanvas.js";
 import { playXpLinkClick } from "../audio/siteAudio.js";
 
+function packHoverBoxes(regions) {
+  const out = [];
+  if (!regions) return out;
+  for (let i = 0; i < regions.length; i += 1) {
+    const region = regions[i];
+    if (!region) continue;
+    out.push(region.id, region.x, region.y, region.w, region.h);
+  }
+  return out;
+}
+
 const WIDTH = 1024;
 const HEIGHT = 768;
 /** External margin for the IE frame inside the CRT glass (not page padding). */
@@ -56,7 +67,8 @@ export class MySpaceScreen {
     this.view = "dashboard";
     this.selectedId = null;
     this.hoverId = null;
-    /** Page-local link regions (relative to content origin + scroll). */
+    /** Bumped when hit regions or the UV map change. The page republishes the worker index. */
+    this._hoverIndexRev = 0;
     this._pageHitRegions = [];
     /** Merged page + IE chrome regions used by hitTest / hover. */
     this.hitRegions = [];
@@ -152,12 +164,14 @@ export class MySpaceScreen {
 
   setScreenUvBounds(bounds) {
     this.screenUvBounds = bounds;
+    this._hoverIndexRev += 1;
     this._updateScreenGeometry();
     if (this.powerOnProgress > 0) this.draw();
   }
 
   setScreenMap(map) {
     this.screenMap = map;
+    this._hoverIndexRev += 1;
     applyScreenMapSettings(this.texture, map);
     this._updateScreenGeometry();
     if (this.powerOnProgress > 0) this.draw();
@@ -209,6 +223,15 @@ export class MySpaceScreen {
     this.onChange = fn;
   }
 
+  /** Fired after the CRT canvas pixels change. Main thread posts an ImageBitmap. */
+  setFrameHandler(fn) {
+    this._frameHandler = fn;
+  }
+
+  _emitFrame() {
+    this._frameHandler?.();
+  }
+
   setPoweredOnHandler(fn) {
     this.onPoweredOn = fn;
   }
@@ -238,6 +261,7 @@ export class MySpaceScreen {
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     this._drawScanlines();
     this.texture.needsUpdate = true;
+    this._emitFrame();
   }
 
   async playPowerOn() {
@@ -310,6 +334,10 @@ export class MySpaceScreen {
     return true;
   }
 
+  get hoverIndexRev() {
+    return this._hoverIndexRev;
+  }
+
   get maxScroll() {
     return Math.max(0, this.pageHeight - this.layout.content.h);
   }
@@ -317,6 +345,41 @@ export class MySpaceScreen {
   _rebuildHitRegions() {
     const chrome = this.isPoweredOn ? collectIeChromeHitRegions(this.layout) : [];
     this.hitRegions = [...this._pageHitRegions, ...chrome];
+    this._hoverIndexRev += 1;
+  }
+
+  /**
+   * Hit table the worker uses so a pointer sweep posts only when the hover id changes.
+   * @returns {object}
+   */
+  exportHoverIndex() {
+    const map = this.screenMap || {};
+    const bounds = this.screenUvBounds;
+    const content = this.layout?.content || { x: 0, y: 0, w: 0, h: 0 };
+    const chrome = this.isPoweredOn ? collectIeChromeHitRegions(this.layout) : [];
+    return {
+      w: this.canvas?.width || WIDTH,
+      h: this.canvas?.height || HEIGHT,
+      scrollY: this.scrollY || 0,
+      cx: content.x,
+      cy: content.y,
+      cw: content.w,
+      ch: content.h,
+      flipY: map.flipY !== false,
+      repeatX: map.repeatX ?? 1,
+      repeatY: map.repeatY ?? 1,
+      offsetX: map.offsetX ?? 0,
+      offsetY: map.offsetY ?? 0,
+      hasBounds: Boolean(bounds),
+      uMin: bounds?.uMin ?? 0,
+      uMax: bounds?.uMax ?? 1,
+      vMin: bounds?.vMin ?? 0,
+      vMax: bounds?.vMax ?? 1,
+      boot: Boolean(this.xpBoot?.active),
+      login: Boolean(this.xpBoot?.isBooting && this.xpBoot.state === XP_BOOT_STATES.LOGIN),
+      page: packHoverBoxes(this._pageHitRegions),
+      chrome: packHoverBoxes(chrome)
+    };
   }
 
   hitTest(uv) {
@@ -397,7 +460,7 @@ export class MySpaceScreen {
     return true;
   }
 
-  setHover(uv) {
+  setHover(uv, knownId) {
     if (this.xpBoot?.isBooting && this.xpBoot.state === XP_BOOT_STATES.LOGIN) {
       if (!uv) {
         this.xpBoot.clearHover();
@@ -414,7 +477,7 @@ export class MySpaceScreen {
       return;
     }
     if (this.xpBoot?.active) return;
-    const next = uv ? this.hitTest(uv) : null;
+    const next = knownId !== undefined ? knownId : uv ? this.hitTest(uv) : null;
     if (next === this.hoverId) return;
     this.hoverId = next;
     this._hoverPaintCount += 1;
@@ -511,6 +574,7 @@ export class MySpaceScreen {
     }
 
     this.texture.needsUpdate = true;
+    this._emitFrame();
   }
 
   /** Orange link hover — recolor existing link pixels only (no fill, no text redraw). */

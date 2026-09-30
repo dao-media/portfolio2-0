@@ -82,6 +82,7 @@ export class DesktopVignette {
     this.powerLed = null;
     this.powerButton = null;
     this.screenLightRig = null;
+    this.stageLights = deps.stageLights ?? null;
     this.glassMesh = null;
     this.liveEnv = deps.liveEnv ?? null;
     this._lastEnvRotY = null;
@@ -477,7 +478,8 @@ export class DesktopVignette {
       this.renderer,
       screenMesh,
       this.mySpace.getTexture(),
-      "pc"
+      "pc",
+      this.stageLights
     );
   }
 

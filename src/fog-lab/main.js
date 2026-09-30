@@ -21,7 +21,7 @@ import {
   STAGE_BG,
   STAGE_RADIUS
 } from "../scene/stage/constants.js";
-import { VolumetricFogPass } from "../scene/neon/VolumetricFogPass.js";
+import { VolumetricFogPass } from "../fog-aside/VolumetricFogPass.js";
 import { createFogParams, FOG_DEFAULTS, FOG_PARAM_SCHEMA } from "../fog/fogConfig.js";
 
 /** Lab fog params — identical to stage live defaults (mutable copy for sliders). */

@@ -12,6 +12,27 @@ import { STAGE_FLOOR_Y } from "../vignettes/pcSceneBlockout.js";
 /** Standalone 4096×2048 equirect (preferred). */
 export const SKYBOX_NIGHT_EQUIRECT_URL =
   "/assets/textures/skybox-night/equirect.webp";
+/** Ring sky. Full plate is 8000×3660. Not a full 180° sphere. */
+export const SKYBOX_MILKYWAY_URL =
+  "/assets/textures/skybox-milkyway/equirect.jpg";
+/** Shifts the plate so the galaxy core faces the bust (−Z). Added to equirect u. */
+export const SKYBOX_MILKYWAY_LON = 0.33;
+/**
+ * Shell-local dir.y of the plate. Tuned so the bust frame still sees the
+ * galaxy: at radius 78 the far wall sits higher than the view ray.
+ */
+export const SKYBOX_MILKYWAY_ELEV_LO = 0.012;
+export const SKYBOX_MILKYWAY_ELEV_SPAN = 1.236;
+/** Inside the camera's orbit so the ring turn parallaxes the shell. */
+export const SKYBOX_MILKYWAY_RADIUS = 78;
+/**
+ * Linear grade on the plate. The JPEG's night sky sits above black, and this
+ * material skips ACES (`toneMapped` false), so the veil would otherwise stay.
+ * Gain pushes the core past 1 so bloom (threshold 1.0) can catch it.
+ */
+export const SKYBOX_MILKYWAY_GRADE_BLACK = 0.035;
+export const SKYBOX_MILKYWAY_GRADE_GAMMA = 1.55;
+export const SKYBOX_MILKYWAY_GRADE_GAIN = 2.1;
 /** Fallback GLB if the webp is missing. */
 export const SKYBOX_NIGHT_GLB_URL =
   "/assets/models/skybox-night/runtime/skybox-night.glb";
@@ -36,12 +57,13 @@ export const SKYBOX_TWINKLE_HZ = 1;
 /**
  * @returns {Promise<THREE.Texture>}
  */
-async function loadEquirect() {
+async function loadEquirect(url = SKYBOX_NIGHT_EQUIRECT_URL) {
   const loader = new THREE.TextureLoader();
   try {
-    const tex = await loader.loadAsync(SKYBOX_NIGHT_EQUIRECT_URL);
+    const tex = await loader.loadAsync(url);
     return tex;
   } catch (err) {
+    if (url !== SKYBOX_NIGHT_EQUIRECT_URL) throw err;
     console.warn(
       "[StageSkybox] equirect.webp missing — falling back to GLB texture",
       err
@@ -75,13 +97,40 @@ async function loadEquirect() {
 /**
  * @param {{
  *   scene: THREE.Scene,
- *   parent?: THREE.Object3D
+ *   parent?: THREE.Object3D,
+ *   url?: string,
+ *   twinkle?: number,
+ *   horizonLow?: number,
+ *   horizonHigh?: number,
+ *   lonOffset?: number,
+ *   elevLo?: number,
+ *   elevSpan?: number,
+ *   worldLock?: boolean,
+ *   radius?: number,
+ *   gradeBlack?: number,
+ *   gradeGamma?: number,
+ *   gradeGain?: number
  * }} opts
  */
 export async function installNightSkybox(opts) {
-  const { scene, parent = scene } = opts;
+  const {
+    scene,
+    parent = scene,
+    url = SKYBOX_NIGHT_EQUIRECT_URL,
+    twinkle = SKYBOX_TWINKLE,
+    horizonLow = SKYBOX_HORIZON_LOW,
+    horizonHigh = SKYBOX_HORIZON_HIGH,
+    lonOffset = 0,
+    elevLo = 0,
+    elevSpan = 0,
+    worldLock = false,
+    radius = SKYBOX_RADIUS,
+    gradeBlack = 0,
+    gradeGamma = 1,
+    gradeGain = 1
+  } = opts;
 
-  const equirect = await loadEquirect();
+  const equirect = await loadEquirect(url);
   equirect.colorSpace = THREE.SRGBColorSpace;
   equirect.mapping = THREE.EquirectangularReflectionMapping;
   equirect.wrapS = THREE.RepeatWrapping;
@@ -96,11 +145,18 @@ export async function installNightSkybox(opts) {
   const uniforms = {
     uMap: { value: equirect },
     uFloorColor: { value: new THREE.Color(STAGE_BG) },
-    uHorizonLow: { value: SKYBOX_HORIZON_LOW },
-    uHorizonHigh: { value: SKYBOX_HORIZON_HIGH },
-    uTwinkle: { value: SKYBOX_TWINKLE },
+    uHorizonLow: { value: horizonLow },
+    uHorizonHigh: { value: horizonHigh },
+    uTwinkle: { value: twinkle },
     uTwinkleHz: { value: SKYBOX_TWINKLE_HZ },
-    uTime: { value: 0 }
+    uTime: { value: 0 },
+    uLonOffset: { value: lonOffset },
+    uElevLo: { value: elevLo },
+    uElevSpan: { value: elevSpan },
+    uWorldLock: { value: worldLock ? 1 : 0 },
+    uGradeBlack: { value: gradeBlack },
+    uGradeGamma: { value: gradeGamma },
+    uGradeGain: { value: gradeGain }
   };
 
   const material = new THREE.ShaderMaterial({
@@ -113,12 +169,15 @@ export async function installNightSkybox(opts) {
     toneMapped: false,
     uniforms,
     vertexShader: /* glsl */ `
+      uniform float uWorldLock;
       varying vec3 vDir;
       void main() {
         vec4 world = modelMatrix * vec4(position, 1.0);
-        vDir = world.xyz - cameraPosition;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        gl_Position.z = gl_Position.w;
+        // 0: direction from the camera, pinned at the far plane (infinite).
+        // 1: the shell's own direction, real depth, so an orbit parallaxes it.
+        vDir = mix(world.xyz - cameraPosition, position, uWorldLock);
+        gl_Position = projectionMatrix * viewMatrix * world;
+        gl_Position.z = mix(gl_Position.w, gl_Position.z, uWorldLock);
       }
     `,
     fragmentShader: /* glsl */ `
@@ -130,6 +189,12 @@ export async function installNightSkybox(opts) {
       uniform float uTwinkle;
       uniform float uTwinkleHz;
       uniform float uTime;
+      uniform float uLonOffset;
+      uniform float uElevLo;
+      uniform float uElevSpan;
+      uniform float uGradeBlack;
+      uniform float uGradeGamma;
+      uniform float uGradeGain;
       varying vec3 vDir;
 
       const float PI = 3.14159265359;
@@ -144,7 +209,11 @@ export async function installNightSkybox(opts) {
         vec3 n = normalize(d);
         float lon = atan(n.z, n.x);
         float lat = asin(clamp(n.y, -1.0, 1.0));
-        return vec2(lon * (1.0 / (2.0 * PI)) + 0.5, lat * (1.0 / PI) + 0.5);
+        float u = fract(lon * (1.0 / (2.0 * PI)) + 0.5 + uLonOffset);
+        float v = (uElevSpan > 0.001)
+          ? (n.y - uElevLo) / uElevSpan
+          : lat * (1.0 / PI) + 0.5;
+        return vec2(u, v);
       }
 
       void main() {
@@ -170,6 +239,10 @@ export async function installNightSkybox(opts) {
         vec3 twinkled = sky * mix(0.08, 2.4, spark);
         sky = mix(sky, twinkled, starMask * clamp(uTwinkle, 0.0, 1.0));
 
+        // Crush the JPEG's lifted black, then stretch the core past 1.
+        sky = max(sky - uGradeBlack, 0.0);
+        sky = pow(sky, vec3(max(uGradeGamma, 0.001))) * uGradeGain;
+
         // Soft horizon: dim lower sky into floor ink — does not touch the apron.
         float elev = dir.y;
         float skyW = smoothstep(uHorizonLow, uHorizonHigh, elev);
@@ -181,7 +254,7 @@ export async function installNightSkybox(opts) {
   });
 
   const skybox = new THREE.Mesh(
-    new THREE.SphereGeometry(SKYBOX_RADIUS, 64, 48),
+    new THREE.SphereGeometry(radius, worldLock ? 128 : 64, worldLock ? 80 : 48),
     material
   );
   skybox.name = "stage-night-skybox";
