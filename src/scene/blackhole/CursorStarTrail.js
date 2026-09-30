@@ -9,9 +9,9 @@ import { createRevealStarfield, updateStarfield } from "./ProceduralStarfield.js
 export const REVEAL_STAR_COUNT = 16000;
 /** Below this blob speed (px/s) the smudge closes. */
 export const CURSOR_TRAIL_MIN_SPEED = 80;
-/** Flame length in pixels at a crawl and at full momentum. */
-export const CURSOR_TRAIL_LENGTH_MIN = 48;
-export const CURSOR_TRAIL_LENGTH_MAX = 168;
+/** Flame length in pixels at a crawl and at full momentum — 2x the original. */
+export const CURSOR_TRAIL_LENGTH_MIN = 96;
+export const CURSOR_TRAIL_LENGTH_MAX = 336;
 /** Half-width of the belly, in pixels, at a crawl and at full momentum. */
 export const CURSOR_TRAIL_HALF_WIDTH_MIN = 12;
 export const CURSOR_TRAIL_HALF_WIDTH_MAX = 42;
@@ -28,6 +28,7 @@ export function createCursorStarTrail() {
   points.userData.headingX = 1;
   points.userData.headingY = 0;
   points.userData.momentum = 0;
+  points.userData.bend = 0;
   points.userData.seeded = false;
   return points;
 }
@@ -86,15 +87,30 @@ export function updateCursorStarTrail(trail, camera, dt, opts = {}) {
   const momentumTarget = canSeed ? Math.min(1, (speed - CURSOR_TRAIL_MIN_SPEED) / 720) : 0;
   const momentumK = 1 - Math.exp(-(canSeed ? 7 : 4) * step);
   trail.userData.momentum += (momentumTarget - trail.userData.momentum) * momentumK;
+  // Trajectory-driven arc: a flame trailing a moving, turning light doesn't
+  // just point opposite the heading, it bends — the tail lags the turn and
+  // curves behind it. Signed heading rotation this step (the cross product
+  // of the old and new heading, i.e. angular velocity) drives that bend;
+  // it decays on its own timescale so a snap-turn arcs and eases back
+  // straight rather than snapping the shape instantly.
+  let bendTarget = 0;
   if (canSeed) {
+    const prevHX = trail.userData.headingX;
+    const prevHY = trail.userData.headingY;
     const inv = 1 / speed;
     const turn = 1 - Math.exp(-9 * step);
-    trail.userData.headingX += (opts.vx * inv - trail.userData.headingX) * turn;
-    trail.userData.headingY += (opts.vy * inv - trail.userData.headingY) * turn;
-    const hLen = Math.hypot(trail.userData.headingX, trail.userData.headingY) || 1;
-    trail.userData.headingX /= hLen;
-    trail.userData.headingY /= hLen;
+    let nhx = prevHX + (opts.vx * inv - prevHX) * turn;
+    let nhy = prevHY + (opts.vy * inv - prevHY) * turn;
+    const hLen = Math.hypot(nhx, nhy) || 1;
+    nhx /= hLen;
+    nhy /= hLen;
+    trail.userData.headingX = nhx;
+    trail.userData.headingY = nhy;
+    const angularRate = (prevHX * nhy - prevHY * nhx) / Math.max(step, 1 / 240);
+    bendTarget = Math.max(-1, Math.min(1, angularRate * 5.5));
   }
+  const bendK = 1 - Math.exp(-6 * step);
+  trail.userData.bend += (bendTarget - trail.userData.bend) * bendK;
 
   if (canSeed && !trail.userData.seeded) seedRevealField(trail, camera);
 
@@ -120,4 +136,7 @@ export function updateCursorStarTrail(trail, camera, dt, opts = {}) {
   uniforms.uViewport.value.set(opts.width || 1, opts.height || 1);
   uniforms.uTrailLength.value = length;
   uniforms.uTrailHalf.value = halfWidth;
+  // Scaled by momentum so a slow or stopped cursor doesn't hold a residual
+  // arc — the bend is something the flame does while it's actually moving.
+  uniforms.uBend.value = trail.userData.bend * momentum;
 }

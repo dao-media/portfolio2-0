@@ -86,6 +86,7 @@ import {
   NEON_BLOOM,
   CURSOR_DOF,
   WET_FLOOR_LAYER,
+  SKY_LAYER,
   STAGE_FOG_MODE,
   STAGE_FOG_ENABLED,
   INACTIVE_VIGNETTE_LAYER,
@@ -714,14 +715,18 @@ export class StageExperience {
     this.world.add(this.stageFloor);
     // See neon tubes + wet apron (POV spot stays layer 0 only — no disc).
     this.camera.layers.enable(WET_FLOOR_LAYER);
+    this.camera.layers.enable(SKY_LAYER);
 
     this.wetFloor = null;
     this.studioRoom.visible = false;
     this.starField = createStarField();
+    this.starField.layers.set(SKY_LAYER);
     this.scene.add(this.starField);
     this.flightStarStreak = createFlightStarStreak();
+    this.flightStarStreak.layers.set(SKY_LAYER);
     this.scene.add(this.flightStarStreak);
     this.cursorStarTrail = createCursorStarTrail();
+    this.cursorStarTrail.layers.set(SKY_LAYER);
     this.scene.add(this.cursorStarTrail);
     loadWetFloorTextures()
       .then((maps) => {
@@ -5680,6 +5685,15 @@ export class StageExperience {
     this.cameraRig?.update(dt);
     const skyDrop = this._introSkyDrop();
     if (this.starField) {
+      // Defensive, matching the old milky-way-dome/starfield pattern this
+      // replaced: warmVignette0's per-stop compile passes (hideSceneExcept)
+      // hide every scene child outside the held root for one frame, then
+      // restore it — but a hide that lands exactly when the black-hole hold
+      // settles (this pass's "live" warm phase runs across that whole
+      // window) can leave this particular child's restore out of sync.
+      // Unconditionally re-asserting visible here costs nothing and is the
+      // reason the stars used to never vanish at that moment.
+      this.starField.visible = true;
       const pixelRatio = this.renderer?.getPixelRatio?.() ?? this.pixelRatio ?? 1;
       updateStarField(this.starField, this.camera, t, dt, {
         horizonFadeOn: !this._blackHoleActive,
@@ -5690,13 +5704,27 @@ export class StageExperience {
       });
     }
     if (this.flightStarStreak) {
-      const pixelRatio = this.renderer?.getPixelRatio?.() ?? this.pixelRatio ?? 1;
-      const blend = this.blackHoleSeq?.restParallaxBlend?.() ?? 0;
-      // Fade to 0 over the last stretch of the approach so the near layer is
-      // gone before arrival — the ring shows only the far sky.
-      const arrivalFade = Math.max(0, Math.min(1, 1 - (blend - 0.55) / 0.4));
-      const streakFadeTarget = this._blackHoleActive ? arrivalFade : 0;
-      updateFlightStarStreak(this.flightStarStreak, this.camera, pixelRatio, streakFadeTarget, dt);
+      if (!this._blackHoleActive) {
+        // Hard cut, not a fade: this layer is a flight-only "streaming past"
+        // effect. A multi-second fade tail was still visibly recycling
+        // stars — near-camera streaks crossing the frame — for a couple of
+        // seconds after landing on the ring, where the camera is settling
+        // into place and nothing should still be "streaming past." The
+        // pre-arrival fade below already empties it before the flight ends
+        // in the normal case; this is the backstop for whatever's left.
+        this.flightStarStreak.visible = false;
+        this.flightStarStreak.userData.layerFadeCurrent = 0;
+        if (this.flightStarStreak.material?.uniforms?.uLayerFade) {
+          this.flightStarStreak.material.uniforms.uLayerFade.value = 0;
+        }
+      } else {
+        const pixelRatio = this.renderer?.getPixelRatio?.() ?? this.pixelRatio ?? 1;
+        const blend = this.blackHoleSeq?.restParallaxBlend?.() ?? 0;
+        // Fade to 0 over the last stretch of the approach so the near layer
+        // is gone before arrival — the ring shows only the far sky.
+        const arrivalFade = Math.max(0, Math.min(1, 1 - (blend - 0.55) / 0.4));
+        updateFlightStarStreak(this.flightStarStreak, this.camera, pixelRatio, arrivalFade, dt);
+      }
     }
     preT = this._markPre("sky", preT);
     this._beginRigProbe();

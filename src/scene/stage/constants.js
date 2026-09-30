@@ -220,6 +220,15 @@ export const STAGE_FOG_ENABLED = false;
  */
 export const INACTIVE_VIGNETTE_LAYER = 6;
 /**
+ * The far sky and flight near-stars live here instead of layer 0, and only
+ * the main camera enables it. The wet-floor CubeCamera (default layer 0
+ * only) never sees them — its reflection bake is infrequent
+ * (`restFidelity.js`) while the sky re-centers on the camera every frame, so
+ * a stale reflected copy visibly drifted from the live sky and read as
+ * streaks smeared across the floor.
+ */
+export const SKY_LAYER = 7;
+/**
  * Fog in-scatter uses a longer neon reach + softer decay than the mesh
  * PointLight so haze across the vignette picks up tube color without widening
  * the lit floor pool.

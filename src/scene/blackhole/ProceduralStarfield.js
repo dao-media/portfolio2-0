@@ -49,7 +49,8 @@ const StarfieldShader = {
     uHeading: { value: new THREE.Vector2(1, 0) },
     uViewport: { value: new THREE.Vector2(1, 1) },
     uTrailLength: { value: 80 },
-    uTrailHalf: { value: 24 }
+    uTrailHalf: { value: 24 },
+    uBend: { value: 0 }
   },
   vertexShader: /* glsl */ `
     uniform float uTime;
@@ -73,6 +74,7 @@ const StarfieldShader = {
     uniform vec2 uViewport;
     uniform float uTrailLength;
     uniform float uTrailHalf;
+    uniform float uBend;
 
     attribute float aSize;
     attribute vec3 aColor;
@@ -174,8 +176,8 @@ const StarfieldShader = {
       vAlpha = nearFade * horizonFade;
       gl_Position = projectionMatrix * mvPosition;
 
-      // Hidden field. Same stars as the sky; a soft teardrop uncovers them.
-      // The mask moves. The star directions do not.
+      // Hidden field. Same stars as the sky; a soft candle-flame smudge
+      // uncovers them. The mask moves. The star directions do not.
       if (uReveal > 0.5) {
         if (gl_Position.w <= 0.0 || uMaskGain < 0.001) {
           vAlpha = 0.0;
@@ -189,14 +191,32 @@ const StarfieldShader = {
           vec2 delta = starPx - uCursorPx;
           vec2 side = vec2(-uHeading.y, uHeading.x);
           float along = dot(delta, -uHeading);
-          float across = abs(dot(delta, side));
+          float acrossSigned = dot(delta, side);
           float u = along / max(uTrailLength, 1.0);
-          float neck = clamp(u / 0.07, 0.0, 1.0);
-          float prof = neck * pow(clamp(1.0 - u, 0.0, 1.0), 1.25);
+          // Trajectory arc: a real flame trailing a turning light doesn't
+          // stay straight behind it, it bends — lagging the turn and curving
+          // progressively more toward the tip. uBend is signed angular
+          // velocity of the cursor's heading (see CursorStarTrail.js);
+          // pow(u, 1.3) makes the offset grow from the wick (u=0, no bend)
+          // out to the tip, like a whip.
+          float bendOffset = uBend * pow(clamp(u, 0.0, 1.0), 1.3) * uTrailHalf * 2.2;
+          float across = abs(acrossSigned - bendOffset);
+          // Candle-flame body: width(u) ~ sqrt(u) * exp(-k*u), the same
+          // rise-then-decay envelope a real flame's silhouette follows — a
+          // rounded base that bulges just above the wick, then tapers
+          // smoothly to a fine tip, instead of a straight-sided teardrop.
+          // 0.2398 normalizes the envelope's own peak (at u = 1/(2k)) to 1.
+          float k = 3.2;
+          float flicker = 1.0 + 0.05 * sin(uTime * 9.0 + across * 0.05);
+          float body = sqrt(max(u, 0.0001)) * exp(-k * u) * flicker;
+          // A sharp turn also flares the flame a touch, same as a real one
+          // guttering in a draft, on top of the steady taper.
+          float flare = 1.0 + 0.22 * abs(uBend) * smoothstep(0.0, 0.5, u);
+          float prof = clamp(body * flare / 0.2398, 0.0, 1.5);
           float halfW = max(uTrailHalf * prof, 0.001);
           float d = across / halfW;
           float smudge = exp(-d * d * 1.35);
-          smudge *= smoothstep(-0.06, 0.14, u) * smoothstep(1.25, 0.42, u);
+          smudge *= smoothstep(-0.02, 0.05, u) * smoothstep(1.35, 0.9, u);
           vAlpha *= smudge * uMaskGain;
           if (vAlpha < 0.025) gl_PointSize = 0.0;
         }
@@ -278,7 +298,11 @@ export function createRevealStarfield(starCount = 24000) {
     transparent: true,
     depthWrite: false,
     depthTest: true,
-    blending: THREE.NormalBlending,
+    // Additive, matching StarField.js's far sky — NormalBlending read as a
+    // visibly different, flatter "second sky" inside the reveal mask next to
+    // the additive-glow base sky. Additive also reads as more intense,
+    // which is the ask, without needing a separate brightness formula.
+    blending: THREE.AdditiveBlending,
     toneMapped: true,
     fog: false
   });
