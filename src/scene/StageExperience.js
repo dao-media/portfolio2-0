@@ -25,19 +25,10 @@ import { VignetteContactShadows } from "./stage/VignetteContactShadows.js";
 import { LiveStageEnvironment } from "./stage/LiveStageEnvironment.js";
 import { buildStageStudioRoom } from "./stage/StageStudioRoom.js";
 import { buildStageFloor } from "./stage/StageFloor.js";
-import {
-  createFlightStarMirror,
-  createProceduralStarfield,
-  updateStarfield
-} from "./blackhole/ProceduralStarfield.js";
 import { createCursorStarTrail, updateCursorStarTrail } from "./blackhole/CursorStarTrail.js";
-import {
-  createMilkyWayDome,
-  introSkyDropPitch,
-  skyDropAxis,
-  updateMilkyWayDome
-} from "./blackhole/MilkyWayNebulaShader.js";
-import { createNebulaCluster, updateNebulaCluster } from "./blackhole/NebulaCloudCluster.js";
+import { introSkyDropPitch, skyDropAxis } from "./blackhole/MilkyWayNebulaShader.js";
+import { createStarField, rebuildStarField, updateStarField } from "./blackhole/StarField.js";
+import { createFlightStarStreak, updateFlightStarStreak } from "./blackhole/FlightStarStreak.js";
 import {
   loadWetFloorTextures,
   WetFloorSystem
@@ -726,16 +717,12 @@ export class StageExperience {
 
     this.wetFloor = null;
     this.studioRoom.visible = false;
-    this.milkyWayDome = createMilkyWayDome();
-    this.scene.add(this.milkyWayDome);
-    this.starfield = createProceduralStarfield();
-    this.scene.add(this.starfield);
-    this.starfieldFlight = createFlightStarMirror(this.starfield);
-    this.scene.add(this.starfieldFlight);
+    this.starField = createStarField();
+    this.scene.add(this.starField);
+    this.flightStarStreak = createFlightStarStreak();
+    this.scene.add(this.flightStarStreak);
     this.cursorStarTrail = createCursorStarTrail();
     this.scene.add(this.cursorStarTrail);
-    this.nebulaClouds = createNebulaCluster();
-    this.scene.add(this.nebulaClouds);
     loadWetFloorTextures()
       .then((maps) => {
         const mat = this._wetFloorMaterial;
@@ -1095,6 +1082,16 @@ export class StageExperience {
       };
     });
     return { calls: log.length, rows };
+  }
+
+  /** DEV — new WebGL programs compiled since Enter showed (should stay 0). */
+  debugProgramsSinceEnter() {
+    return Math.max(0, (this.renderer.info.programs?.length ?? 0) - (this._programBaseline ?? 0));
+  }
+
+  /** DEV — which program names/keys compiled live (post-Enter), not during warm. */
+  debugProgramLeakRows() {
+    return this._programLeakRows();
   }
 
   /** DEV — starts/clears the frame-time ring buffer for {@link debugFrameHistogram}. */
@@ -1823,6 +1820,72 @@ export class StageExperience {
 
   debugWetFloor() {
     return this.wetFloor?.debugState?.() ?? null;
+  }
+
+  /**
+   * DEV — live StarField knobs (Shift+S). No graphical panel yet: Shift+S
+   * logs the current tuning and usage to console; call setStarFieldParams
+   * from devtools (or `window.__stageDebug("setStarFieldParams", {...})`)
+   * to change values. Rebuilds the field's geometry in place — never writes
+   * to StarField.js's DEFAULT_TUNING constants.
+   * @param {Partial<import("./blackhole/StarField.js").DEFAULT_TUNING>} [partial]
+   */
+  setStarFieldParams(partial = {}) {
+    if (!this.starField) return null;
+    rebuildStarField(this.starField, partial);
+    const tuning = this.starField.userData.tuning;
+    console.log("[StarFieldTuner] params:", JSON.stringify(tuning));
+    return tuning;
+  }
+
+  getStarFieldParams() {
+    return this.starField?.userData?.tuning ?? null;
+  }
+
+  /**
+   * DEV — live near-layer (flight star streak) knobs: density (rebuilds the
+   * point count) and fadeDistance (the near-camera fade uniform, no rebuild).
+   * @param {{ density?: number, fadeDistance?: number }} [partial]
+   */
+  setFlightStreakParams(partial = {}) {
+    const streak = this.flightStarStreak;
+    if (!streak) return null;
+    if (Number.isFinite(partial.density) && partial.density !== streak.geometry.attributes.position.count) {
+      const fresh = createFlightStarStreak(Math.max(0, Math.round(partial.density)));
+      fresh.visible = streak.visible;
+      fresh.userData.layerFadeCurrent = streak.userData.layerFadeCurrent;
+      fresh.material.uniforms.uLayerFade.value = streak.material.uniforms.uLayerFade.value;
+      if (Number.isFinite(partial.fadeDistance)) {
+        fresh.material.uniforms.uNearFadeDistance.value = partial.fadeDistance;
+      }
+      this.scene.remove(streak);
+      streak.geometry.dispose();
+      streak.material.dispose();
+      this.scene.add(fresh);
+      this.flightStarStreak = fresh;
+    } else if (Number.isFinite(partial.fadeDistance)) {
+      streak.material.uniforms.uNearFadeDistance.value = partial.fadeDistance;
+    }
+    const state = {
+      density: this.flightStarStreak.geometry.attributes.position.count,
+      fadeDistance: this.flightStarStreak.material.uniforms.uNearFadeDistance.value
+    };
+    console.log("[StarFieldTuner] flight streak params:", JSON.stringify(state));
+    return state;
+  }
+
+  _logStarFieldTuning() {
+    console.log("[StarFieldTuner] Shift+S — current StarField tuning:", JSON.stringify(this.getStarFieldParams()));
+    console.log(
+      "[StarFieldTuner] flight streak:",
+      JSON.stringify({
+        density: this.flightStarStreak?.geometry.attributes.position.count ?? null,
+        fadeDistance: this.flightStarStreak?.material.uniforms.uNearFadeDistance.value ?? null
+      })
+    );
+    console.log(
+      '[StarFieldTuner] tune via window.__stageDebug("setStarFieldParams", {baseCount, bandRatio, bandSigmaDeg, bandTiltDeg, coreSwellChance, coreWidthDeg, baseExponent, bandExponent, maxBrightness, minSizePx, maxSizePx}) or "setFlightStreakParams", {density, fadeDistance}'
+    );
   }
 
   /**
@@ -4467,6 +4530,13 @@ export class StageExperience {
         this.setPixelBudget(steps[(index + 1) % steps.length]);
         return;
       }
+      if (event.key.toLowerCase() === "s" && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        const tag = event.target?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || event.target?.isContentEditable) return;
+        event.preventDefault();
+        this._logStarFieldTuning();
+        return;
+      }
       if (event.key === "Escape") {
         if (this.duoCaseStudy?.isOpen) {
           this._duoCloseAll();
@@ -5560,40 +5630,25 @@ export class StageExperience {
     this._tickCursorStarTrail(dt, t);
     this.cameraRig?.update(dt);
     const skyDrop = this._introSkyDrop();
-    if (this.milkyWayDome) this.milkyWayDome.visible = true;
-    if (this.starfield) {
-      this.starfield.visible = true;
+    if (this.starField) {
       const pixelRatio = this.renderer?.getPixelRatio?.() ?? this.pixelRatio ?? 1;
-      updateStarfield(this.starfield, this.camera, t, {
-        wrap: this._blackHoleActive,
-        horizonFade: !this._blackHoleActive,
+      updateStarField(this.starField, this.camera, t, dt, {
+        horizonFadeOn: !this._blackHoleActive,
+        lensActive: this._blackHoleActive,
         pixelRatio,
         dropPitch: skyDrop.pitch,
-        dropAxis: skyDrop.axis,
-        worldDome: !this._blackHoleActive
+        dropAxis: skyDrop.axis
       });
-      if (this.starfieldFlight) {
-        this.starfieldFlight.visible = this._blackHoleActive;
-        if (this._blackHoleActive) {
-          updateStarfield(this.starfieldFlight, this.camera, t, {
-            wrap: true,
-            pixelRatio
-          });
-        }
-      }
     }
-    updateMilkyWayDome(
-      this.milkyWayDome,
-      this.camera,
-      t,
-      this._blackHoleActive ? this.blackHole?.group?.position : null,
-      this._blackHoleActive,
-      skyDrop.pitch,
-      skyDrop.axis,
-      !this._blackHoleActive
-    );
-    if (this.nebulaClouds) this.nebulaClouds.visible = this._blackHoleActive;
-    updateNebulaCluster(this.nebulaClouds, this.camera, t);
+    if (this.flightStarStreak) {
+      const pixelRatio = this.renderer?.getPixelRatio?.() ?? this.pixelRatio ?? 1;
+      const blend = this.blackHoleSeq?.restParallaxBlend?.() ?? 0;
+      // Fade to 0 over the last stretch of the approach so the near layer is
+      // gone before arrival — the ring shows only the far sky.
+      const arrivalFade = Math.max(0, Math.min(1, 1 - (blend - 0.55) / 0.4));
+      const streakFadeTarget = this._blackHoleActive ? arrivalFade : 0;
+      updateFlightStarStreak(this.flightStarStreak, this.camera, pixelRatio, streakFadeTarget, dt);
+    }
     preT = this._markPre("sky", preT);
     this._beginRigProbe();
     if (this.duoFab) this.duoFab._noteRig = (name, ms) => this._rigRecord(name, ms);

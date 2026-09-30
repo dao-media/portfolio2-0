@@ -1,29 +1,22 @@
 import * as THREE from "three";
 import { BLACK_HOLE_CENTER } from "../camera/BlackHoleCameraSequence.js";
-import {
-  blackHoleLensFromCamera,
-  GALACTIC_ARC_HALF,
-  GALACTIC_PLANE_N,
-  MILKY_WAY_DISTANCE,
-  RING_BAND_ELEV,
-  SKY_DOME_RADIUS,
-  SKY_HORIZON_HIGH
-} from "./MilkyWayNebulaShader.js";
+import { blackHoleLensFromCamera, RING_BAND_ELEV, SKY_DOME_RADIUS, SKY_HORIZON_HIGH } from "./MilkyWayNebulaShader.js";
 
-/** One draw call. Sizing, twinkle, and lensing stay in the vertex shader. */
-export const STARFIELD_COUNT = 6000;
-/** Meters a star jumps ahead when it falls behind the camera during the flight. */
-export const STARFIELD_WRAP_DEPTH = 250;
 /**
- * Draw distance for sky points. They are directions around the camera, not
- * a shell around the origin, so cursor and dolly parallax do not move them.
- * 170 m matches the old far-star point size and stays inside CAM_FAR.
+ * This module now serves the cursor hover star trail only (see
+ * CursorStarTrail.js) — the far-sky field it used to also generate
+ * (createProceduralStarfield / createFlightStarMirror) has been replaced by
+ * StarField.js, a single object shared by the ring and the black-hole
+ * flight. Do not add the far-sky field back here; wire it through
+ * StarField.js instead.
  */
-export const SKY_POINT_DISTANCE = 170;
 
-const BAND_WHITE = new THREE.Color(0xffffff);
-const BAND_COOL = new THREE.Color(0xd0dcff);
-const BAND_WARM = new THREE.Color(0xfff0e0);
+/** Distant shell radius for the reveal-trail's own field, meters. */
+const MILKY_WAY_DISTANCE = 24000;
+/** Meters a trail star jumps ahead when it falls behind the camera. */
+const STARFIELD_WRAP_DEPTH = 250;
+/** Draw distance for the trail's points — a shell around the camera. */
+const SKY_POINT_DISTANCE = 170;
 
 const STAR_PALETTE = [
   new THREE.Color(0x9bb0ff),
@@ -225,37 +218,8 @@ const StarfieldShader = {
   `
 };
 
-const _UP = new THREE.Vector3(0, 1, 0);
-const BAND_TANGENT = new THREE.Vector3().crossVectors(GALACTIC_PLANE_N, _UP).normalize();
-const BAND_BITANGENT = new THREE.Vector3().crossVectors(GALACTIC_PLANE_N, BAND_TANGENT).normalize();
-const _bandDir = new THREE.Vector3();
 /** Lowest star elevation. The horizon fade hides them before this meets the ground. */
 const SKY_ELEV_MIN = (1 * Math.PI) / 180;
-
-/**
- * Brighter stars on one arc of the galactic circle — the piece that crosses
- * the top-right of the black-hole view. The other half of the circle is left
- * empty so the belt is not a second layer.
- * @param {Float32Array} positions
- * @param {number} index
- */
-function writeGalacticBand(positions, index) {
-  const i3 = index * 3;
-  let along = Math.PI + (Math.random() - 0.5) * GALACTIC_ARC_HALF * 2;
-  if (along > Math.PI) along -= Math.PI * 2;
-  const across = (Math.random() - 0.5) * 0.036;
-  const radius = MILKY_WAY_DISTANCE * (0.985 + Math.random() * 0.03);
-  _bandDir
-    .copy(BAND_TANGENT)
-    .multiplyScalar(Math.cos(along))
-    .addScaledVector(BAND_BITANGENT, Math.sin(along))
-    .addScaledVector(GALACTIC_PLANE_N, across)
-    .normalize()
-    .multiplyScalar(radius);
-  positions[i3] = _bandDir.x;
-  positions[i3 + 1] = _bandDir.y;
-  positions[i3 + 2] = _bandDir.z;
-}
 
 /**
  * Upper sky only, on the same distant shell as the belt. Nothing at stage height.
@@ -272,71 +236,6 @@ function writeUpperSky(positions, index) {
   positions[i3] = radius * ring * Math.cos(theta);
   positions[i3 + 1] = radius * y;
   positions[i3 + 2] = radius * ring * Math.sin(theta);
-}
-
-/**
- * All 6,000 points live on the distant sky. 60% fill the cap above the
- * horizon; 40% are the brighter galactic belt. No stage-height ring or box.
- * @param {number} [starCount]
- */
-export function createProceduralStarfield(starCount = STARFIELD_COUNT) {
-  const geometry = new THREE.BufferGeometry();
-  const positions = new Float32Array(starCount * 3);
-  const colors = new Float32Array(starCount * 3);
-  const sizes = new Float32Array(starCount);
-  const phases = new Float32Array(starCount);
-  const bands = new Float32Array(starCount);
-
-  const bandStart = Math.floor(starCount * 0.6);
-
-  for (let i = 0; i < starCount; i += 1) {
-    const i3 = i * 3;
-    const inBand = i >= bandStart;
-    if (inBand) writeGalacticBand(positions, i);
-    else writeUpperSky(positions, i);
-
-    let col;
-    if (inBand) {
-      const roll = Math.random();
-      col = roll < 0.84 ? BAND_WHITE : roll < 0.92 ? BAND_COOL : BAND_WARM;
-    } else {
-      const colIndex = Math.floor(Math.pow(Math.random(), 1.8) * STAR_PALETTE.length);
-      col = STAR_PALETTE[Math.min(colIndex, STAR_PALETTE.length - 1)];
-    }
-    colors[i3] = col.r;
-    colors[i3 + 1] = col.g;
-    colors[i3 + 2] = col.b;
-    sizes[i] = inBand
-      ? Math.pow(Math.random(), 2) * 2.4 + 0.7
-      : Math.pow(Math.random(), 3) * 1.8 + 0.4;
-    phases[i] = Math.random() * Math.PI * 2;
-    bands[i] = inBand ? 1 : 0;
-  }
-
-  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
-  geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
-  geometry.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
-  geometry.setAttribute("aBand", new THREE.BufferAttribute(bands, 1));
-
-  const material = new THREE.ShaderMaterial({
-    name: "ProceduralStarfield",
-    uniforms: THREE.UniformsUtils.clone(StarfieldShader.uniforms),
-    vertexShader: StarfieldShader.vertexShader,
-    fragmentShader: StarfieldShader.fragmentShader,
-    transparent: true,
-    depthWrite: false,
-    depthTest: true,
-    blending: THREE.NormalBlending,
-    toneMapped: true,
-    fog: false
-  });
-
-  const stars = new THREE.Points(geometry, material);
-  stars.name = "procedural-starfield";
-  stars.frustumCulled = false;
-  stars.renderOrder = 1;
-  return stars;
 }
 
 /**
@@ -392,24 +291,6 @@ export function createRevealStarfield(starCount = 24000) {
   stars.renderOrder = 1;
   stars.visible = false;
   return stars;
-}
-
-/**
- * Same 6,000 points, reflected under the horizon. Shown only while the
- * black-hole flight looks downhill into that half of the sky.
- * @param {THREE.Points} starfield
- */
-export function createFlightStarMirror(starfield) {
-  const material = starfield.material.clone();
-  material.uniforms = THREE.UniformsUtils.clone(starfield.material.uniforms);
-  material.uniforms.uMirror.value = 1;
-  material.uniforms.uHorizonFade.value = 0;
-  const mirror = new THREE.Points(starfield.geometry, material);
-  mirror.name = "procedural-starfield-flight";
-  mirror.frustumCulled = false;
-  mirror.renderOrder = 1;
-  mirror.visible = false;
-  return mirror;
 }
 
 /**
