@@ -71,6 +71,10 @@ export class ChunkedTextureQueue {
     const { w, h } = imageSize(source);
     texture.userData.__chunkClaimed = true;
     texture.userData.__chunkSource = source;
+    // __chunkSource is cleared in _finish(); keep the real dimensions around
+    // under a name debug tooling can still read after the job completes.
+    texture.userData.__chunkW = w;
+    texture.userData.__chunkH = h;
     texture.image = placeholderCanvas();
     texture.generateMipmaps = false;
     // Do NOT route the placeholder through three's normal initTexture(): in
@@ -91,6 +95,31 @@ export class ChunkedTextureQueue {
     const props = renderer.properties.get(texture);
     props.__webglTexture = glTex;
     props.__version = texture.version;
+    // Three only attaches its own 'dispose' listener (the one that frees the
+    // GL object) inside its own initTexture/uploadTexture path — which this
+    // texture never goes through. Without our own listener, texture.dispose()
+    // is a silent no-op for every chunk-claimed texture: gl.deleteTexture is
+    // never called and the GL object leaks for the runtime's whole session.
+    const onDispose = () => {
+      texture.removeEventListener("dispose", onDispose);
+      const p = renderer.properties.get(texture);
+      if (p?.__webglTexture) gl.deleteTexture(p.__webglTexture);
+      renderer.properties.remove(texture);
+      const idx = this.jobs.findIndex((job) => job.texture === texture);
+      if (idx >= 0) this.jobs.splice(idx, 1);
+    };
+    texture.addEventListener("dispose", onDispose);
+    // Callers like warmMeshesChunked treat a texture as GPU-resident once
+    // `renderer.properties.get(tex.source).__version === tex.source.version`
+    // — a check three's own upload path satisfies itself. We bypass that
+    // path, so without setting it here every such check reads as "not
+    // resident" for a texture we already claimed (pending OR finished),
+    // and would call the renderer's real initTexture() on it again — which,
+    // since texture.image is still the 1×1 placeholder, lets three silently
+    // allocate its OWN new WebGLTexture and overwrite __webglTexture here,
+    // abandoning ours mid-stream (or reverting a finished upload to 1×1).
+    const srcProps = renderer.properties.get(texture.source);
+    srcProps.__version = texture.source.version;
     this.jobs.push({
       texture,
       source,

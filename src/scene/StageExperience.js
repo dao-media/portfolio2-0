@@ -1134,6 +1134,159 @@ export class StageExperience {
     };
   }
 
+  /**
+   * DEV — every texture across every vignette that is (or was) eligible for
+   * the chunk queue (either dimension >= CHUNK_TEXTURE_EDGE): mesh, material,
+   * slot, dimensions, and its chunk flags. Not gated to a live upload — a
+   * texture already __chunkDone still reports its recorded pre-claim size.
+   */
+  debugChunkInventory() {
+    const edge = 2048;
+    const seen = new Set();
+    const rows = [];
+    const keys = [
+      "map",
+      "normalMap",
+      "roughnessMap",
+      "metalnessMap",
+      "aoMap",
+      "emissiveMap",
+      "alphaMap",
+      "bumpMap",
+      "displacementMap",
+      "envMap",
+      "lightMap"
+    ];
+    const visit = (vignetteName, root) => {
+      root?.traverse?.((obj) => {
+        if (!obj.isMesh || !obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const mat of mats) {
+          if (!mat) continue;
+          for (const key of keys) {
+            const tex = mat[key];
+            if (!tex?.isTexture || seen.has(tex)) continue;
+            const wasClaimed = Boolean(tex.userData.__chunkClaimed);
+            const src = tex.userData.__chunkSource || tex.image;
+            const w = wasClaimed ? tex.userData.__chunkW ?? 0 : src?.width || src?.videoWidth || 0;
+            const h = wasClaimed ? tex.userData.__chunkH ?? 0 : src?.height || src?.videoHeight || 0;
+            if (!wasClaimed && w < edge && h < edge) continue;
+            seen.add(tex);
+            rows.push({
+              vignette: vignetteName,
+              mesh: obj.name || "(unnamed)",
+              material: mat.name || "(unnamed)",
+              slot: key,
+              w,
+              h,
+              chunkClaimed: wasClaimed,
+              chunkDone: Boolean(tex.userData.__chunkDone)
+            });
+          }
+        }
+      });
+    };
+    for (const vig of this.vignettes || []) visit(vig?.name || "(unnamed)", vig?.group);
+    return rows;
+  }
+
+  /**
+   * DEV — chunk-queue state for a named material's `map` texture: claimed?
+   * done? still queued? plus the queue's own pending count and front job.
+   */
+  debugChunkState(materialName) {
+    let found = null;
+    const visit = (root) => {
+      root?.traverse?.((obj) => {
+        if (found || !obj.isMesh || !obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const mat of mats) {
+          if (mat?.name === materialName && mat.map) found = mat.map;
+        }
+      });
+    };
+    for (const vig of this.vignettes || []) visit(vig?.group);
+    const q = this.chunkedTextures;
+    const front = q?.jobs?.[0];
+    return {
+      pending: q?.pending ?? null,
+      frontJobTextureUuid: front?.texture?.uuid ?? null,
+      frontJobY: front?.y ?? null,
+      frontJobH: front?.h ?? null,
+      frontJobAllocated: front?.allocated ?? null,
+      frontJobCoarse: front?.coarse ?? null,
+      texture: found
+        ? {
+            uuid: found.uuid,
+            chunkClaimed: Boolean(found.userData.__chunkClaimed),
+            chunkDone: Boolean(found.userData.__chunkDone),
+            imageW: found.image?.width ?? null,
+            imageH: found.image?.height ?? null,
+            isFrontJob: front?.texture === found
+          }
+        : null
+    };
+  }
+
+  /**
+   * DEV — reads back real GPU pixel data for a named material's `.map`
+   * (or `slot`) via a framebuffer, at a few sample points, so we can tell
+   * whether the chunk-uploaded texture actually holds real image data or
+   * something else (garbage, all-zero, all-one, a single flat color).
+   */
+  debugReadTexturePixels(materialName, slot = "map") {
+    let tex = null;
+    const visit = (root) => {
+      root?.traverse?.((obj) => {
+        if (tex || !obj.isMesh || !obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const mat of mats) {
+          if (mat?.name === materialName && mat[slot]?.isTexture) tex = mat[slot];
+        }
+      });
+    };
+    for (const vig of this.vignettes || []) visit(vig?.group);
+    if (!tex) return { error: "texture not found" };
+
+    const renderer = this.renderer;
+    const gl = renderer.getContext();
+    const props = renderer.properties.get(tex);
+    const glTex = props?.__webglTexture;
+    if (!glTex) return { error: "no GL texture allocated" };
+
+    const fb = gl.createFramebuffer();
+    const prevFb = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, glTex, 0);
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    const result = { fbStatus: status, fbComplete: status === gl.FRAMEBUFFER_COMPLETE, samples: [] };
+    if (result.fbComplete) {
+      const w = tex.userData.__chunkClaimed ? undefined : null; // not needed; sample by NDC-ish fractions
+      // Sample 5 points without knowing exact GL-side dims: read at fixed
+      // small offsets from (0,0) — valid for any texture ≥8px, which every
+      // candidate here is.
+      const points = [
+        [0, 0],
+        [4, 4],
+        [16, 16],
+        [64, 64],
+        [200, 200]
+      ];
+      const px = new Uint8Array(4);
+      for (const [x, y] of points) {
+        try {
+          gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+          result.samples.push({ x, y, rgba: [px[0], px[1], px[2], px[3]] });
+        } catch (error) {
+          result.samples.push({ x, y, error: String(error) });
+        }
+      }
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, prevFb);
+    gl.deleteFramebuffer(fb);
+    return result;
+  }
+
   /** DEV — `window.__stageDebug("debugWarmState")`. Where stepVignette0Warm is. */
   debugWarmState() {
     const w = this._vignette0Warm;
