@@ -73,10 +73,24 @@ export class ChunkedTextureQueue {
     texture.userData.__chunkSource = source;
     texture.image = placeholderCanvas();
     texture.generateMipmaps = false;
-    texture.needsUpdate = true;
-    initTexture(texture);
+    // Do NOT route the placeholder through three's normal initTexture(): in
+    // WebGL2 that allocates via texStorage2D (immutable storage), and step()'s
+    // own "alloc" phase below can never resize an immutable texture to the
+    // real w×h — every gl.texImage2D there fails outright with
+    // "GL_INVALID_OPERATION: Texture is immutable", the strips that follow
+    // then fail too ("offset overflows"), and the job still marks itself
+    // __chunkDone while the GPU texture is still the 1×1 placeholder fill.
+    // Create the GL object ourselves with a legacy mutable texImage2D call so
+    // it stays resizable for every step() that follows.
+    const gl = renderer.getContext();
+    const glTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, glTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([26, 26, 26, 255]));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     const props = renderer.properties.get(texture);
-    if (props) props.__version = texture.version;
+    props.__webglTexture = glTex;
+    props.__version = texture.version;
     this.jobs.push({
       texture,
       source,
@@ -113,6 +127,12 @@ export class ChunkedTextureQueue {
     gl.bindTexture(gl.TEXTURE_2D, glTex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0);
+    // Three's own upload path always sets this per-texture; pixelStorei is
+    // context-global, so without resetting it here this chunk's raw
+    // texImage2D/texSubImage2D calls inherit whatever the PREVIOUS upload
+    // (chunked or not) left behind — silently reinterpreting raw ORM/normal
+    // bytes as a browser-default color-managed source.
+    gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
 
     if (!job.allocated) {
       const internal = this._internalFormat(gl, job.texture);
@@ -120,6 +140,7 @@ export class ChunkedTextureQueue {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       job.allocated = true;
+      job.glTex = glTex;
       job.internal = internal;
       return "alloc";
     }
