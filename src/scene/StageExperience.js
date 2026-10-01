@@ -910,6 +910,7 @@ export class StageExperience {
           const metalMapMean = mat.metalnessMap ? this._meanTextureChannel(mat.metalnessMap, 2) : null;
           const effectiveMetalness =
             metalness == null ? null : +(metalness * (metalMapMean ?? 1)).toFixed(3);
+          const isUnlit = mat.isMeshBasicMaterial || Boolean(mat.userData?.KHR_materials_unlit);
           rows.push({
             vignette: vignetteName,
             mesh: obj.name || "(unnamed)",
@@ -929,7 +930,16 @@ export class StageExperience {
             mapImageH: mat.map?.image?.height ?? null,
             mapImageCtor: mat.map?.image?.constructor?.name ?? null,
             mapVersion: mat.map?.version ?? null,
-            mapSourceVersion: mat.map?.source?.version ?? null
+            mapSourceVersion: mat.map?.source?.version ?? null,
+            isUnlit,
+            toneMapped: mat.toneMapped,
+            mapColorSpace: mat.map?.colorSpace ?? null,
+            emissiveMapColorSpace: mat.emissiveMap?.colorSpace ?? null,
+            normalMapColorSpace: mat.normalMap?.colorSpace ?? null,
+            roughnessMapColorSpace: mat.roughnessMap?.colorSpace ?? null,
+            emissive: mat.emissive ? [+mat.emissive.r.toFixed(3), +mat.emissive.g.toFixed(3), +mat.emissive.b.toFixed(3)] : null,
+            emissiveIntensity: typeof mat.emissiveIntensity === "number" ? +mat.emissiveIntensity.toFixed(3) : null,
+            hasEmissiveMap: Boolean(mat.emissiveMap)
           });
         }
       });
@@ -944,6 +954,56 @@ export class StageExperience {
       ambient: this.ambientLight?.intensity ?? null,
       hemi: this.hemiLight?.intensity ?? null,
       rows
+    };
+  }
+
+  /**
+   * DEV — many Archaeology props come from GLBs with generic internal mesh/
+   * material names ("Object_2"/"material_0"), so a name search in
+   * debugMaterialAudit finds nothing for them. This looks a named root
+   * child up directly by its own name (e.g. "ptolemy-root") under a
+   * vignette's group and dumps every mesh/material underneath it, plus
+   * whether it's present at all and how many meshes it holds — the same
+   * "GLB has no meshes" check ArchaeologyVignette.js itself runs.
+   * `window.__stageDebug("debugFindRoot", 3, "ptolemy-root")`.
+   * @param {number} vignetteIndex
+   * @param {string} rootName
+   */
+  debugFindRoot(vignetteIndex, rootName) {
+    const group = this.vignettes?.[vignetteIndex]?.group;
+    if (!group) return { error: "no such vignette" };
+    let root = null;
+    group.traverse((obj) => {
+      if (!root && obj.name === rootName) root = obj;
+    });
+    if (!root) return { found: false, rootName };
+    const meshes = [];
+    root.traverse((obj) => {
+      if (!obj.isMesh) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const mat of mats) {
+        meshes.push({
+          mesh: obj.name || "(unnamed)",
+          material: mat?.name || "(unnamed)",
+          type: mat?.type ?? null,
+          visible: obj.visible,
+          color: mat?.color ? [+mat.color.r.toFixed(3), +mat.color.g.toFixed(3), +mat.color.b.toFixed(3)] : null,
+          metalness: typeof mat?.metalness === "number" ? +mat.metalness.toFixed(3) : null,
+          roughness: typeof mat?.roughness === "number" ? +mat.roughness.toFixed(3) : null,
+          envMapIntensity: typeof mat?.envMapIntensity === "number" ? +mat.envMapIntensity.toFixed(3) : null,
+          mapImageW: mat?.map?.image?.width ?? null,
+          mapImageH: mat?.map?.image?.height ?? null,
+          toneMapped: mat?.toneMapped ?? null
+        });
+      }
+    });
+    return {
+      found: true,
+      rootName,
+      rootVisible: root.visible,
+      parentedInGroup: Boolean(root.parent),
+      meshCount: meshes.length,
+      meshes
     };
   }
 
@@ -5381,6 +5441,90 @@ export class StageExperience {
       cameraSettled: Boolean(this.cameraRig?.state?.isSettled),
       cameraZoomed: Boolean(this.cameraRig?.state?.isZoomed)
     };
+  }
+
+  /**
+   * DEV — canvas drawing-buffer size and last-frame triangle count, for a
+   * "did anything actually render" smoke check. The worker owns the canvas
+   * (`stageHost.js` only holds a `<canvas>` it transferred to offscreen), so
+   * a test on the page side can't read `canvas.width`/`renderer.info` itself
+   * the way a main-thread stage could — this is the bridge-safe equivalent.
+   */
+  debugCanvasStats() {
+    return {
+      width: this.canvas?.width ?? 0,
+      height: this.canvas?.height ?? 0,
+      triangles: this.renderer?.info?.render?.triangles ?? 0
+    };
+  }
+
+  /**
+   * DEV — presence of the key mounted roots `test:smoke` checks after a hop
+   * cycle (every vignette's own async GLB loads settle on their own
+   * schedule, independent of which stop the camera is looking at).
+   */
+  debugVignetteProps() {
+    const desktop = this.vignettes?.[1]?.instance;
+    const sidekick = this.vignettes?.[2]?.instance;
+    const archaeology = this.vignettes?.[3]?.instance;
+    return {
+      pcRoot: Boolean(desktop?.pcRoot),
+      screenMesh: Boolean(desktop?.screenMesh),
+      buttons: Boolean(sidekick?.sidekickRoot?.getObjectByName?.("Buttons")),
+      shelfRoot: Boolean(archaeology?.shelfRoot),
+      venusRoot: Boolean(archaeology?.venusRoot),
+      lucyRoot: Boolean(archaeology?.lucyRoot),
+      trojanHorseRoot: Boolean(archaeology?.trojanHorseRoot),
+      olmecHeadRoot: Boolean(archaeology?.olmecHeadRoot),
+      oliveBoatRoot: Boolean(archaeology?.oliveBoatRoot),
+      cuneiformRoot: Boolean(archaeology?.cuneiformRoot),
+      ishtarGateRoot: Boolean(archaeology?.ishtarGateRoot),
+      ptolemyRoot: Boolean(archaeology?.ptolemyRoot),
+      divjeBabeFluteRoot: Boolean(archaeology?.divjeBabeFluteRoot),
+      neanderthalRoot: Boolean(archaeology?.neanderthalRoot)
+    };
+  }
+
+  /** DEV — CRT power/boot state, for asserting the Desktop zoom actually starts XP boot. */
+  debugCrtBootState() {
+    const desktop = this.vignettes?.[1]?.instance;
+    return {
+      isPoweredOn: Boolean(desktop?.mySpace?.isPoweredOn),
+      isMonitorBooting: Boolean(desktop?.mySpace?.isMonitorBooting),
+      canStartBoot: Boolean(desktop?.mySpace?.xpBoot?.canStartBoot),
+      isBooting: Boolean(desktop?.mySpace?.xpBoot?.isBooting)
+    };
+  }
+
+  /** DEV — render-target sizes after a hop cycle (zero-size = a resize bug). */
+  debugRenderTargetStats() {
+    const fog = this.volumetricFog?.fogTarget;
+    const input = this.post?.composer?.inputBuffer;
+    return {
+      fog: fog ? { w: fog.width, h: fog.height } : null,
+      input: input ? { w: input.width, h: input.height } : null
+    };
+  }
+
+  /**
+   * DEV — the chunk-queue completion check `test:smoke` runs after landing:
+   * is anything still pending, and is one finished texture's mip 0 real
+   * image data (not a flat placeholder or garbage)?
+   */
+  debugChunkReadbackSample() {
+    const q = this.chunkedTextures;
+    let sampleMat = null;
+    for (const vig of this.vignettes || []) {
+      vig?.group?.traverse?.((obj) => {
+        if (sampleMat || !obj.isMesh || !obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const mat of mats) {
+          if (mat?.map?.userData?.__chunkDone) sampleMat = mat.name;
+        }
+      });
+    }
+    const readback = sampleMat ? this.debugReadTexturePixels(sampleMat, "map", 0) : null;
+    return { pending: q?.pending ?? 0, sampleMaterial: sampleMat, readback };
   }
 
   _runIntro() {
