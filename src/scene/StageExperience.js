@@ -1260,6 +1260,49 @@ export class StageExperience {
   }
 
   /**
+   * DEV — timeline probe for the spiral-end -> drop-start gap.
+   * `window.__stageDebug("debugUploadTimeline")`. Reports every job still in
+   * the chunk queue (rows remaining, allocated/coarse state), the mipmap
+   * queue depth, warmVignette0's own step, and the black-hole/rig state
+   * needed to place this reading on a timeline (Enter shown, spiral phase,
+   * rig height/settled).
+   */
+  debugUploadTimeline() {
+    const q = this.chunkedTextures;
+    const jobs = (q?.jobs || []).map((j) => ({
+      textureUuid: j.texture?.uuid ?? null,
+      w: j.w,
+      h: j.h,
+      allocated: Boolean(j.allocated),
+      coarse: Boolean(j.coarse),
+      y: j.y,
+      rowsRemaining: Math.max(0, j.h - (j.y || 0))
+    }));
+    const warm = this._vignette0Warm;
+    const seq = this.blackHoleSeq;
+    return {
+      tMs: Math.round(performance.now()),
+      enterShown: Boolean(this._enterShown),
+      chunkUploadsAllowed: this._chunkUploadsAllowed(),
+      uploadStop: Boolean(this._uploadStop),
+      queuePending: q?.pending ?? null,
+      queueJobs: jobs,
+      mipmapPending: q?.mipmapPending ?? null,
+      warm: {
+        phase: warm?.phase ?? null,
+        done: Boolean(warm?.done),
+        liveAt: warm?._liveAt ?? null,
+        liveStepsTotal: warm?._liveSteps?.length ?? null
+      },
+      blackHoleActive: Boolean(this._blackHoleActive),
+      blackHolePhase: seq?.phase ?? null,
+      rigHeight: this.cameraRig?.state?.height ?? null,
+      rigSettled: this.cameraRig?.state?.isSettled ?? null,
+      worldVisible: Boolean(this.world?.visible)
+    };
+  }
+
+  /**
    * DEV — reads back real GPU pixel data for a named material's `.map`
    * (or `slot`) via a framebuffer, at a few sample points, so we can tell
    * whether the chunk-uploaded texture actually holds real image data or
@@ -3702,14 +3745,38 @@ export class StageExperience {
     return state;
   }
 
+  /**
+   * The drop to Bust waits only on Bust's own readiness (`bustReady`): its
+   * mesh/texture compile, its textures uploaded, its lantern shadow and the
+   * wet-floor cube baked. The other three stops' live compile, every hop
+   * transition, and the CRT glass env step are real work but not Bust
+   * dependencies — they keep running in the background (still `warmVignette0`
+   * ticks, just past the point that unblocks landing) until `done`.
+   */
+  _bustWarmReady() {
+    return Boolean(this._vignette0Warm?.bustReady || this._vignette0Warm?.done);
+  }
+
   /** Mark intro done once the spring pageload descent settles. */
   _tickIntroFromCameraRig() {
-    if (this._introMotionComplete || !this.cameraRig) return;
+    if (this._introMotionComplete || !this.cameraRig) {
+      // Bust's own readiness already unblocked the drop (see _bustWarmReady)
+      // — nothing else keeps ticking warmVignette0 once intro motion is
+      // marked complete, so without this the other three stops' live
+      // compile, every hop transition, and the CRT env step would simply
+      // never run and _vignette0Warm.done would never become true. Keep
+      // draining it in the background, same per-step skipBeauty/frameCause
+      // care as before, until it actually finishes.
+      if (this._vignette0Warm && !this._vignette0Warm.done && !this._blackHoleActive) {
+        this.warmVignette0();
+      }
+      return;
+    }
     if (this._blackHoleActive) return;
 
     if (this._descentPendingWarm) {
       this.warmVignette0();
-      if (!this._vignette0Warm.done) return;
+      if (!this._bustWarmReady()) return;
       this._descentPendingWarm = false;
       this.world.visible = true;
       this._introSpringArmed = true;
@@ -3717,12 +3784,12 @@ export class StageExperience {
     }
 
     // Aerial hold — Bust warm replaces the cold first frame. The 240 ms
-    // floor still applies; the drop waits until warmVignette0 finishes.
+    // floor still applies; the drop waits until Bust itself is ready.
     if (!this._introSpringArmed) {
       this.warmVignette0();
       if (!this._introHoldStartedAt) this._introHoldStartedAt = performance.now();
       const held = performance.now() - this._introHoldStartedAt >= INTRO_SPRING_HOLD_MS;
-      if (held && this._vignette0Warm.done) {
+      if (held && this._bustWarmReady()) {
         this._introSpringArmed = true;
         this.cameraRig.armIntroDescent();
       }
@@ -5374,7 +5441,7 @@ export class StageExperience {
 
   _maybeShowEnter() {
     if (!this._enterArmed || this._enterShown || !this._blackHoleActive) return;
-    if (!this._vignette0Warm?.done) return;
+    if (!this._bustWarmReady()) return;
     const pending = this.chunkedTextures?.pending ?? 0;
     if (pending > 0 && !this._uploadStop) return;
     this._enterShown = true;
@@ -5425,8 +5492,8 @@ export class StageExperience {
       this.spotLight.castShadow = true;
       if (this.spotLight.shadow) this.spotLight.shadow.intensity = 1;
     }
-    const warmDone = Boolean(this._vignette0Warm?.done);
-    this.world.visible = warmDone;
+    const bustReady = this._bustWarmReady();
+    this.world.visible = bustReady;
     document.body.classList.remove("is-black-hole");
     document.getElementById("bh-enter")?.setAttribute("hidden", "");
     this._hostPost?.({ type: "dom", blackHole: false, enterVisible: false });
@@ -5450,7 +5517,7 @@ export class StageExperience {
     s.isSettled = false;
     rig._introActive = true;
     rig.poseSuspended = false;
-    if (this._vignette0Warm?.done) {
+    if (bustReady) {
       this._introSpringArmed = true;
       rig.armIntroDescent();
     } else {

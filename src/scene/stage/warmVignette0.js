@@ -40,6 +40,9 @@ export function createVignette0WarmState() {
   return {
     phase: "wait",
     done: false,
+    // True once Bust's own live step finishes — the drop's only real
+    // dependency. "done" still means every stop's live warm has finished.
+    bustReady: false,
     meshes: 0,
     meshAt: 0,
     drawAt: 0,
@@ -146,24 +149,39 @@ export function stepVignette0Warm(stage, state) {
     stage._skipBeauty = true;
     state.phase = "live";
     state._liveAt = 0;
-    state._liveSteps = liveSteps();
+    const live = liveSteps();
+    state._liveSteps = live.steps;
+    state._bustStepCount = live.bustStepCount;
     state._liveReady = false;
     return state;
   }
 
   if (state.phase === "live") {
-    if (!state._modelsWait) state._modelsWait = performance.now();
-    if (!liveModelsReady(stage) && performance.now() - state._modelsWait < 25000) {
-      return state;
-    }
     const steps = state._liveSteps || [];
+    const pastBust = state._liveAt >= (state._bustStepCount ?? 0);
+    if (state._liveAt === (state._bustStepCount ?? 0)) state.bustReady = true;
+    // liveModelsReady needs the other three stops mounted — real dependencies
+    // for their own steps below, but not for Bust's own step above, which
+    // runs (and can finish) without waiting on them at all.
+    if (pastBust) {
+      if (!state._modelsWait) state._modelsWait = performance.now();
+      if (!liveModelsReady(stage) && performance.now() - state._modelsWait < 25000) {
+        return state;
+      }
+    }
     if (state._liveAt >= steps.length) {
       state.phase = "extra-textures";
       return state;
     }
     const step = steps[state._liveAt];
     stage._skipBeauty = true;
-    stage._frameCause = "compile";
+    // Only a "scene" step does real synchronous compile/draw work worth
+    // flagging — the other kinds are cheap bookkeeping, and setting
+    // _frameCause = "compile" unconditionally here starved the chunk-texture
+    // queue (every upload branch treats that as "don't touch this frame")
+    // for as long as this whole sequence ran, not just the frames that
+    // actually needed it.
+    if (step.kind === "scene") stage._frameCause = "compile";
     if (step.kind === "env") {
       const desktop = stage.vignettes?.[1]?.instance;
       if (!desktop?.glassMesh || !stage.liveEnv) {
@@ -262,25 +280,38 @@ function finish(state) {
   state._textureList = null;
 }
 
+/**
+ * Bust (stop 0) is the only dependency the aerial drop has — tree, lawn,
+ * lantern, its own textures, the lantern shadow, and the wet-floor cube are
+ * all handled earlier (the "textures"/"shadow"/"probe" phases). This one
+ * step is its only "live" dependency, and it is placed first and run
+ * without waiting on the other three stops. Everything after it (the other
+ * stops' own live compile, every hop transition, the hole/smaa/edge/duo/
+ * lens/tier warms) is real work but none of it gates landing on Bust — it
+ * keeps running in the background post-land, the same deferred-after-land
+ * spirit as PC/Sidekick/Archaeology's own GPU_HOLD_LAYER integration.
+ * @returns {{ bustStepCount: number, steps: object[] }}
+ */
 function liveSteps() {
-  const steps = [{ kind: "env" }];
-  for (let stop = 0; stop < 4; stop += 1) {
-    steps.push({ kind: "scene", stop, hop: false, from: stop });
+  const bust = [{ kind: "scene", stop: 0, hop: false, from: 0 }];
+  const deferred = [{ kind: "env" }];
+  for (let stop = 1; stop < 4; stop += 1) {
+    deferred.push({ kind: "scene", stop, hop: false, from: stop });
   }
   for (let from = 0; from < 4; from += 1) {
     for (let to = 0; to < 4; to += 1) {
       if (from === to) continue;
-      steps.push({ kind: "scene", stop: to, hop: true, from });
+      deferred.push({ kind: "scene", stop: to, hop: true, from });
     }
   }
-  steps.push({ kind: "hole" }, { kind: "smaa" });
-  for (let stop = 0; stop < 4; stop += 1) steps.push({ kind: "edge", stop });
-  steps.push({ kind: "duo" }, { kind: "lens" });
+  deferred.push({ kind: "hole" }, { kind: "smaa" });
+  for (let stop = 0; stop < 4; stop += 1) deferred.push({ kind: "edge", stop });
+  deferred.push({ kind: "duo" }, { kind: "lens" });
   for (let i = 0; i < FLOOR_MP_NOTCHES.length; i += 1) {
-    steps.push({ kind: "tier", notch: FLOOR_MP_NOTCHES[i] });
+    deferred.push({ kind: "tier", notch: FLOOR_MP_NOTCHES[i] });
   }
-  steps.push({ kind: "restore" });
-  return steps;
+  deferred.push({ kind: "restore" });
+  return { bustStepCount: bust.length, steps: [...bust, ...deferred] };
 }
 
 function poseShadows(stage, _stop, _castPoint) {
