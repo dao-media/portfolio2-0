@@ -174,7 +174,28 @@ export function stepVignette0Warm(stage, state) {
       return state;
     }
     const step = steps[state._liveAt];
-    stage._skipBeauty = true;
+    // DEV — settle-window black-frame investigation: a precise log of which
+    // step ran when, independent of external poll timing (`debugLiveStepLog`).
+    if (!stage._liveStepLog) stage._liveStepLog = [];
+    if (stage._liveStepLog.length < 400) {
+      stage._liveStepLog.push({
+        tMs: Math.round(performance.now()),
+        liveAt: state._liveAt,
+        kind: step.kind,
+        stop: step.stop ?? null,
+        notch: step.notch ?? null
+      });
+    }
+    // Skipping the real composited frame is only free while the world isn't
+    // visible yet (the original pre-land hidden warm-up). Once landed,
+    // _tickIntroFromCameraRig keeps draining this same "live" sequence in
+    // the background every tick — with canvas preserveDrawingBuffer left at
+    // its WebGL default (false), skipping the beauty render even one tick
+    // while the browser has already presented/discarded the backbuffer
+    // produces a real black frame, not a merely-stale one. Every step below
+    // already restores camera/visibility/uniform state synchronously before
+    // returning, so it's safe to let the beauty pass run this same tick.
+    stage._skipBeauty = !stage.world?.visible;
     // Only a "scene" step does real synchronous compile/draw work worth
     // flagging — the other kinds are cheap bookkeeping, and setting
     // _frameCause = "compile" unconditionally here starved the chunk-texture
@@ -566,6 +587,11 @@ function warmTier(stage, notch) {
   const ratio = Math.max(0.2, Math.min(cap, Math.sqrt((notch * 1e6) / area)));
   const dw = Math.max(1, Math.round(w * ratio));
   const dh = Math.max(1, Math.round(h * ratio));
+  // Real size to restore to below — the actual current CSS size * live DPR,
+  // same formula restoreSequenceSize uses for the final "restore" step.
+  const realRatio = (stage._fullPixelRatio || 1) * (stage._renderScale || 1);
+  const realW = Math.max(1, Math.round(w * realRatio));
+  const realH = Math.max(1, Math.round(h * realRatio));
   stage.post?.setDrawSize(dw, dh);
   const renderer = stage.renderer;
   const input = stage.post?.composer?.inputBuffer;
@@ -582,6 +608,15 @@ function warmTier(stage, notch) {
   }
   renderer?.setRenderTarget(prev);
   renderer?.getContext?.()?.finish?.();
+  // One "tier" step runs per tick across several notches before the final
+  // "restore" step ever runs — every notch but the last used to leave the
+  // composer sized for its own offscreen warm-render until then. With the
+  // live-phase beauty render no longer unconditionally skipped post-land
+  // (see the _skipBeauty fix above), that stale small size was rendering as
+  // a real, visible, wrongly-sized (near-black) frame on every intervening
+  // tick. Restore immediately — this function owns the resize, so it owns
+  // undoing it before any other code can render at the wrong size.
+  stage.post?.setDrawSize(realW, realH);
 }
 
 function restoreSequenceSize(stage) {

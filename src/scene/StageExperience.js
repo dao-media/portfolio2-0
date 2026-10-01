@@ -457,6 +457,7 @@ export class StageExperience {
     this._installChunkedUploads();
     this._installGlProbe();
     this._installProgramLog();
+    this._installContextLossLog();
     this._floorMp = null;
     this._floorUnderSec = 0;
     this._floorIgnoreNext = false;
@@ -501,6 +502,11 @@ export class StageExperience {
     this._introSettleUntil = 0;
     this._introHeavyEffectsAfter = 0;
     this._introIntegrationActive = false;
+    /** True once _releaseIntroDeferredWork has finished a full pass with
+     *  nothing still holding — the actual "safe to reveal" signal, since
+     *  _introIntegrationActive itself drops to false between stillHolding
+     *  retries too. */
+    this._introIntegrationSettled = false;
     this._introDeferredRunning = false;
     this._introAssetsWarmed = false;
     this._introSpringArmed = this.reducedMotion;
@@ -2184,7 +2190,16 @@ export class StageExperience {
     const visible = Boolean(this.introComplete || this._blackHoleActive);
     if (canvasChanged) {
       if (visible) {
-        this._skipBeauty = true;
+        // Not _skipBeauty: renderer.setPixelRatio / post.setSize already
+        // reallocate render targets synchronously, so the beauty pass right
+        // after is safe at the new size. Skipping it here used to assume a
+        // dropped frame is free (reuse last pixels) — with this canvas's
+        // preserveDrawingBuffer left at the WebGL default (false), skipping
+        // instead risks a real black frame the instant the browser has
+        // already discarded the backbuffer since the last present. The
+        // governor changes DPR level repeatedly under load (exactly the
+        // post-land settle window), so this path used to fire several times
+        // in quick succession — each one a visible black flash.
         this._floorIgnoreNext = true;
         this._frameCause = "resize";
       }
@@ -2196,7 +2211,6 @@ export class StageExperience {
     }
     const allocated = this.post?.setDrawSize(dw, dh) === true;
     if (visible && allocated) {
-      this._skipBeauty = true;
       this._floorIgnoreNext = true;
       this._frameCause = "resize";
     }
@@ -2298,6 +2312,55 @@ export class StageExperience {
       warmVignette0: this.debugWarmVignette0(),
       landFrameMs: this._landFrameMs.slice(),
       frameBudget: this.frameBudget?.dump?.() ?? null
+    };
+  }
+
+  /**
+   * DEV — one cheap combined sample for the settle-window black-frame /
+   * pop-in investigation (`window.__stageDebug("debugSettleProbe")`,
+   * polled tightly from outside). Everything a single poll can show about
+   * *why* a frame might go dark or pop a new object in: canvas/drawing-
+   * buffer size (resize), governor DPR step, restFidelity key (lantern
+   * shadow / wet-probe bake identity), model-reveal opacity, neon tube
+   * emissive per stop, chunk-queue + mipmap depth, live program count
+   * (compiles), and the black-hole/rig state to place it on the timeline.
+   */
+  debugSettleProbe() {
+    const draw = new THREE.Vector2();
+    this.renderer.getDrawingBufferSize(draw);
+    const gov = this.perfGovernor;
+    const q = this.chunkedTextures;
+    return {
+      tMs: Math.round(performance.now()),
+      drawingBuffer: { width: draw.x, height: draw.y },
+      pixelRatio: +this.pixelRatio.toFixed(3),
+      governorLevel: gov?.level ?? null,
+      governorDprMul: gov?.profile?.dprMul ?? null,
+      floorMpNotch: this._floorMp ?? null,
+      restFidelityKey: this._restFidelityKey,
+      modelRevealOpacity: +((this._modelRevealOpacity ?? 0).toFixed(3)),
+      neonTubeEmissive: this.vignettes.map((vig) => vig.tube?.material?.emissiveIntensity ?? 0),
+      chunkPending: q?.pending ?? 0,
+      chunkMipmapPending: q?.mipmapPending ?? 0,
+      programCount: this.renderer?.info?.programs?.length ?? null,
+      geometries: this.renderer?.info?.memory?.geometries ?? null,
+      textures: this.renderer?.info?.memory?.textures ?? null,
+      worldVisible: Boolean(this.world?.visible),
+      blackHoleActive: Boolean(this._blackHoleActive),
+      rigHeight: this.cameraRig?.state?.height ?? null,
+      rigSettled: Boolean(this.cameraRig?.state?.isSettled),
+      introComplete: Boolean(this.introComplete),
+      introMotionComplete: Boolean(this._introMotionComplete),
+      enterShown: Boolean(this._enterShown),
+      contextLoss: this._contextLossLog?.length ?? 0,
+      liveAt: this._vignette0Warm?._liveAt ?? null,
+      liveStepKind: this._vignette0Warm?._liveSteps?.[this._vignette0Warm?._liveAt]?.kind ?? null,
+      liveStepStop: this._vignette0Warm?._liveSteps?.[this._vignette0Warm?._liveAt]?.stop ?? null,
+      liveStepNotch: this._vignette0Warm?._liveSteps?.[this._vignette0Warm?._liveAt]?.notch ?? null,
+      warmPhase: this._vignette0Warm?.phase ?? null,
+      warmDone: Boolean(this._vignette0Warm?.done),
+      frameCause: this._frameCause ?? null,
+      skipBeauty: Boolean(this._skipBeauty)
     };
   }
 
@@ -3189,6 +3252,43 @@ export class StageExperience {
       states.set(key, bucket);
     }
     return [...states.values()].sort((a, b) => b.count - a.count).slice(0, 20);
+  }
+
+  /**
+   * DEV — webglcontextlost/restored are the one unambiguous "this canvas
+   * actually died" signal, distinct from a merely-dark frame. Timestamped
+   * against performance.now() so a report can place it exactly against the
+   * settle timeline (`debugSettleProbe`) and against GPU memory via
+   * `renderer.info.memory` at the moment of loss.
+   */
+  _installContextLossLog() {
+    this._contextLossLog = [];
+    const canvas = this.renderer?.domElement;
+    if (!canvas) return;
+    canvas.addEventListener("webglcontextlost", (event) => {
+      event.preventDefault();
+      const mem = this.renderer?.info?.memory ?? null;
+      const entry = { type: "lost", tMs: Math.round(performance.now()), memory: mem };
+      this._contextLossLog.push(entry);
+      console.error("[StageExperience] webglcontextlost", entry);
+    });
+    canvas.addEventListener("webglcontextrestored", () => {
+      const entry = { type: "restored", tMs: Math.round(performance.now()) };
+      this._contextLossLog.push(entry);
+      console.error("[StageExperience] webglcontextrestored", entry);
+    });
+  }
+
+  /** DEV — `window.__stageDebug("debugContextLossLog")`. */
+  debugContextLossLog() {
+    return this._contextLossLog ?? [];
+  }
+
+  /** DEV — `window.__stageDebug("debugLiveStepLog")`: which warmVignette0
+   *  "live" step ran at which performance.now(), for the settle-window
+   *  black-frame investigation. */
+  debugLiveStepLog() {
+    return this._liveStepLog ?? [];
   }
 
   _installGlProbe() {
@@ -4108,11 +4208,13 @@ export class StageExperience {
     }
 
     if (stillHolding) {
-      // Models hadn't finished loading — try again shortly.
+      // Models hadn't finished loading — try again shortly. Reveal stays
+      // gated (_introIntegrationSettled stays false) across this retry gap.
       window.setTimeout(() => this._scheduleIntroDeferredWork(), 400);
       return;
     }
 
+    this._introIntegrationSettled = true;
     window.setTimeout(() => {
       this._flushIntroDeferredWork();
     }, INTRO_HEAVY_EFFECTS_DELAY_MS);
@@ -4352,8 +4454,17 @@ export class StageExperience {
 
     // Only reveal once intro motion is done and at least one model is mounted.
     if (!this._introMotionComplete) return;
-    // Don't start the fade while materials are still being prepared off-screen.
-    if (this._introIntegrationActive && this._modelRevealOpacity <= 0) return;
+    // Don't tick the fade at all — not just "don't start" — until every
+    // vignette's own integration (mount + _compileThenShow) has finished a
+    // full pass. All four roots share one opacity value; the previous guard
+    // (`&& this._modelRevealOpacity <= 0`) only blocked the very first tick,
+    // so once Desktop's early compile let opacity start climbing, Sidekick
+    // and Archaeology — compiled later in the same async pipeline — kept
+    // getting their shaders built live while already partially visible,
+    // the exact "heavy pop-in as the camera settles" pattern (confirmed via
+    // a settle-window capture: ~100 new programs compiling while opacity
+    // ramped 0.35 -> 0.78, each a visible hitch).
+    if (!this._introIntegrationSettled) return;
 
     if (this._modelRevealOpacity < 1) {
       const cappedDt = Math.min(Math.max(dt, 0), 1 / 24);
