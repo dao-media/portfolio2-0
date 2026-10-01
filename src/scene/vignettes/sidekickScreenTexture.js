@@ -202,7 +202,7 @@ export function configureSidekickScreenMaterial(material) {
   material.roughness = 0.38;
   material.color.setHex(0xffffff);
   material.emissive.setHex(0xffffff);
-  material.emissiveIntensity = 0.9;
+  material.emissiveIntensity = 0.3;
   if (material.map) {
     material.emissiveMap = material.map;
   }
