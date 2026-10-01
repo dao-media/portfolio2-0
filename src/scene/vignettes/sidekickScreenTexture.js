@@ -206,7 +206,13 @@ export function configureSidekickScreenMaterial(material) {
   if (material.map) {
     material.emissiveMap = material.map;
   }
-  material.toneMapped = false;
+  // toneMapped was false here: the emissive+metalness fix above already
+  // makes the LCD read bright enough in the dark on its own, and an
+  // untone-mapped material writes its raw (often >1) value straight past
+  // the renderer's HDR compression — every other material in the scene
+  // gets tone-mapped before bloom/display, so this screen alone clipped
+  // hard to white instead of rolling off like everything around it
+  // ("Sidekick screen blown out"). Tone-mapped like the rest of the scene.
   material.side = THREE.DoubleSide;
   material.polygonOffset = true;
   material.polygonOffsetFactor = -2;
