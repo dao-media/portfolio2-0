@@ -5,7 +5,7 @@ import * as THREE from "three";
 // itself, keeping CameraRig the sole owner of that. Lives outside CameraRig
 // because it needs the scene's mesh list for raycasting, a dependency
 // CameraRig otherwise has no reason to carry.
-export function createVignetteClick({ camera, meshes, cameraRig }) {
+export function createVignetteClick({ camera, meshes, cameraRig, getRect }) {
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
 
@@ -23,7 +23,14 @@ export function createVignetteClick({ camera, meshes, cameraRig }) {
   function handleClick(e) {
     const s = cameraRig.state;
 
-    const rect = e.currentTarget.getBoundingClientRect();
+    // Real clicks reach this via the stage's relayed pointer event (a plain
+    // object posted from the page-side canvas listener, see
+    // StageExperience._hostPointerEvent) — it never carries a real
+    // `currentTarget`, since OffscreenCanvas in the worker never dispatches
+    // a native event of its own. getRect() (StageExperience._getCanvasRect)
+    // gives the same rect without depending on the event having one.
+    const rect = getRect ? getRect() : e.currentTarget?.getBoundingClientRect();
+    if (!rect) return;
     ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(ndc, camera);

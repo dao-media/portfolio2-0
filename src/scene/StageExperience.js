@@ -696,7 +696,8 @@ export class StageExperience {
     this.vignetteClick = createVignetteClick({
       camera: this.camera,
       meshes: this.vignettes.map((vig) => vig.group),
-      cameraRig: this.cameraRig
+      cameraRig: this.cameraRig,
+      getRect: () => this._getCanvasRect()
     });
 
     this._lastCameraIndex = 0;
