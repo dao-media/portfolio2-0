@@ -485,7 +485,11 @@ export function startStageHost(canvas, options = {}) {
         dirty.crt = false;
         pageTrigger = "screen:crt";
         const b0 = performance.now();
-        const bitmap = await createImageBitmap(myspace.canvas);
+        // WebGL ignores texture.flipY for an ImageBitmap-sourced texture here
+        // (confirmed: toggling SCREEN_MAP_CRT.flipY has no visible effect) —
+        // flip the bitmap itself at creation time instead, the one place
+        // this image's orientation is actually decided.
+        const bitmap = await createImageBitmap(myspace.canvas, { imageOrientation: "flipY" });
         rememberPage("bitmap:crt", performance.now() - b0);
         const p0 = performance.now();
         worker.postMessage(
