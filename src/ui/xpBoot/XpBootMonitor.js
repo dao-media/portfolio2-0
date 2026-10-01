@@ -227,6 +227,7 @@ export class XpBootMonitor {
       () => {
         this.screen._drawScanlines?.();
         this.screen.texture.needsUpdate = true;
+        this.screen._emitFrame?.();
       }
     );
 
@@ -434,6 +435,7 @@ export class XpBootMonitor {
 
     this.screen._drawScanlines?.();
     this.screen.texture.needsUpdate = true;
+    this.screen._emitFrame?.();
   }
 
   async _captureToScreen() {
@@ -471,6 +473,7 @@ export class XpBootMonitor {
       }
       this.screen._drawScanlines?.();
       this.screen.texture.needsUpdate = true;
+      this.screen._emitFrame?.();
     } catch (error) {
       console.warn("[XpBootMonitor] Capture failed:", error);
       this._paintCaptureFallback();
@@ -493,6 +496,7 @@ export class XpBootMonitor {
 
     this.screen._drawScanlines?.();
     this.screen.texture.needsUpdate = true;
+    this.screen._emitFrame?.();
   }
 
   /** Boot screen + sliding progress blocks — canvas only, no html-to-image. */
@@ -509,6 +513,7 @@ export class XpBootMonitor {
     this._paintBootProgressBar(nowMs);
     this.screen._drawScanlines?.();
     this.screen.texture.needsUpdate = true;
+    this.screen._emitFrame?.();
   }
 
   /** Match .xp-boot-bar CSS — three blocks sliding across a bordered track. */
@@ -560,6 +565,7 @@ export class XpBootMonitor {
     }
     this.screen._drawScanlines?.();
     this.screen.texture.needsUpdate = true;
+    this.screen._emitFrame?.();
   }
 
   /** Cheap RAF paint for the boot progress bar — never html-to-image. */
