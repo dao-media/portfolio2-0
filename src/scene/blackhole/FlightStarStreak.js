@@ -16,49 +16,71 @@ export const STREAK_SPAWN_AHEAD = 90;
 export const STREAK_RECYCLE_BEHIND = 6;
 /** Stars fade out inside this distance from the camera so nothing balloons up close. */
 export const STREAK_NEAR_FADE_DISTANCE = 2;
-/** Hard cap on rendered point size, device pixels before the pixelRatio multiply. */
-export const STREAK_MAX_SIZE_PX = 3;
-export const STREAK_MIN_SIZE_PX = 1;
+/** Nominal (far) point size range, CSS px before the pixelRatio multiply — matches StarField.js's scale so this near layer doesn't read larger than the far sky it streams in front of. */
+export const STREAK_MAX_SIZE_PX = 1.5;
+export const STREAK_MIN_SIZE_PX = 0.5;
+/** Sprite falloff, same meaning as StarField.js's STAR_FIELD_SPRITE_SOFTNESS. */
+export const STREAK_SPRITE_SOFTNESS = 0.16;
+/** Same anti-pop floor as StarField.js's STAR_FIELD_MIN_RENDER_PX. */
+export const STREAK_MIN_RENDER_PX = 2;
 
 const StreakShader = {
   uniforms: {
     uPixelRatio: { value: 1 },
     uNearFadeDistance: { value: STREAK_NEAR_FADE_DISTANCE },
     uMaxBrightness: { value: 0.85 },
-    uLayerFade: { value: 0 }
+    uLayerFade: { value: 0 },
+    uSpriteSoftness: { value: STREAK_SPRITE_SOFTNESS },
+    uMinRenderPx: { value: STREAK_MIN_RENDER_PX }
   },
   vertexShader: /* glsl */ `
     uniform float uPixelRatio;
     uniform float uNearFadeDistance;
+    uniform float uMinRenderPx;
     attribute float aSize;
+    attribute float aBright;
     attribute vec3 aColor;
     varying vec3 vColor;
     varying float vAlpha;
+    varying float vMag;
     void main() {
       vColor = aColor;
+      vMag = aBright;
       vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
       float camDist = length(mvPosition.xyz);
       float nearFade = smoothstep(0.0, max(uNearFadeDistance, 0.01), camDist);
-      vAlpha = nearFade;
       // Perspective size falloff, then clamp — never lets a close star swell.
       float size = (aSize * 40.0) / max(-mvPosition.z, 0.4);
-      gl_PointSize = max(1.0, min(size, aSize) * uPixelRatio);
+      float intendedPx = max(min(size, aSize) * uPixelRatio, 0.01);
+      // Same anti-pop treatment as StarField.js: never render sub-pixel —
+      // scale alpha down instead, so a far, "small" streak star stays small
+      // and dim without aliasing as the camera moves.
+      float renderedPx = max(intendedPx, uMinRenderPx);
+      gl_PointSize = renderedPx;
+      float sizeRatio = intendedPx / renderedPx;
+      vAlpha = nearFade * sizeRatio * sizeRatio;
       gl_Position = projectionMatrix * mvPosition;
+      // Same far-plane pin as StarField.js and the reveal field, so all
+      // three sky layers sit at the same depth and none can be clipped.
+      gl_Position.z = gl_Position.w * 0.99999;
     }
   `,
   fragmentShader: /* glsl */ `
     uniform float uMaxBrightness;
     uniform float uLayerFade;
+    uniform float uSpriteSoftness;
     varying vec3 vColor;
     varying float vAlpha;
+    varying float vMag;
     void main() {
-      vec2 coord = gl_PointCoord - vec2(0.5);
-      float dist = dot(coord, coord);
-      float core = exp(-dist * 18.0);
-      if (core < 0.04) discard;
+      // Same hard-core/soft-edge sprite as StarField.js.
+      float r = length(gl_PointCoord - vec2(0.5));
+      float edge0 = max(0.0, 0.5 - uSpriteSoftness);
+      float core = 1.0 - smoothstep(edge0, 0.5, r);
+      if (core < 0.02) discard;
       float alpha = core * vAlpha * uLayerFade;
       if (alpha < 0.003) discard;
-      gl_FragColor = vec4(vColor * uMaxBrightness, alpha);
+      gl_FragColor = vec4(vColor * uMaxBrightness * vMag, alpha);
     }
   `
 };
@@ -84,6 +106,7 @@ export function createFlightStarStreak(count = STREAK_COUNT) {
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
   const sizes = new Float32Array(count);
+  const brights = new Float32Array(count);
 
   for (let i = 0; i < count; i += 1) {
     const i3 = i * 3;
@@ -95,12 +118,15 @@ export function createFlightStarStreak(count = STREAK_COUNT) {
     colors[i3] = col.r;
     colors[i3 + 1] = col.g;
     colors[i3 + 2] = col.b;
-    sizes[i] = STREAK_MIN_SIZE_PX + Math.pow(Math.random(), 2) * (STREAK_MAX_SIZE_PX - STREAK_MIN_SIZE_PX);
+    // Brightness carries the star-to-star variation, not size (see StarField.js).
+    sizes[i] = STREAK_MIN_SIZE_PX + Math.pow(Math.random(), 6) * (STREAK_MAX_SIZE_PX - STREAK_MIN_SIZE_PX);
+    brights[i] = 0.3 + Math.pow(Math.random(), 1.8) * 0.7;
   }
 
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
   geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
+  geometry.setAttribute("aBright", new THREE.BufferAttribute(brights, 1));
 
   const material = new THREE.ShaderMaterial({
     name: "FlightStarStreak",

@@ -1,27 +1,18 @@
-import * as THREE from "three";
 import { BLACK_HOLE_HORIZON_FRAC, BLACK_HOLE_WORLD_DIAMETER } from "./BlackHoleModel.js";
 
 /**
- * Black-hole flight utilities only — lensing math and the aerial-drop sky
- * pitch. The galactic-band dome that used to live here (a soft procedural
- * haze sphere, `createMilkyWayDome`/`updateMilkyWayDome`) has been removed:
- * it painted a grey gradient band behind the real star points and, being
+ * Black-hole flight utilities only — lensing math. The galactic-band dome
+ * that used to live here (a soft procedural haze sphere,
+ * `createMilkyWayDome`/`updateMilkyWayDome`) has been removed: it painted a
+ * grey gradient band behind the real star points and, being
  * `toneMapped: false`, could clear the bloom threshold and blur into haze.
  * The band is now made of real stars only — see {@link ../blackhole/StarField.js}.
+ * The aerial-drop sky pitch that used to live here has also been removed:
+ * stars are rendered at infinity (rotation-only projection, see
+ * StarField.js and ProceduralStarfield.js) and must not visibly respond to
+ * a camera translation at all, which is what that pitch existed to fake.
  */
 
-/**
- * World dome on the vignette ring, meters from the stage origin.
- * The ring camera sits about 28 m out, so this shell curves overhead and
- * shifts as the camera orbits. Far side stays inside CAM_FAR (220).
- */
-export const SKY_DOME_RADIUS = 110;
-/**
- * Ring band, as the Y component of a sky direction — kept for the cursor
- * hover star trail's shader (ProceduralStarfield.js), which still compiles
- * this band branch even though it never sets aBand > 0.5.
- */
-export const RING_BAND_ELEV = 0.24;
 /**
  * View-elevation sine of the horizon blend on the landed vignettes.
  * The night sky is black at {@link SKY_HORIZON_LOW} (just under the
@@ -65,32 +56,6 @@ export const BLACK_HOLE_LENS_APPEAR_DISTANCE = 54;
  * ramps up, capped at 2.4.
  */
 export const BLACK_HOLE_LENS_FALLOFF = 1.8;
-
-const _dropAxis = new THREE.Vector3();
-
-/**
- * Pitch applied to the sky while the aerial drop is in flight.
- * The intro quaternion is frozen, so a pure height change does not
- * turn the camera. This angle is the bust's own vertical slide,
- * atan(remaining descent / look distance), and it is 0 at rest.
- * Negative pitches the sky down at the apex so it rises as the camera falls.
- * @param {number} descent meters still above rest height
- * @param {number} lookDistance horizontal meters from camera to the look point
- */
-export function introSkyDropPitch(descent, lookDistance) {
-  const drop = Math.max(descent, 0);
-  if (drop < 0.02) return 0;
-  return -Math.atan2(drop, Math.max(lookDistance, 1));
-}
-
-/**
- * Camera right axis, the hinge for {@link introSkyDropPitch}.
- * @param {THREE.Camera} camera
- * @param {THREE.Vector3} [target]
- */
-export function skyDropAxis(camera, target = _dropAxis) {
-  return target.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
-}
 
 /**
  * Annulus radii and strength from camera-to-hole distance.

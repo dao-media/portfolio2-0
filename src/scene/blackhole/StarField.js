@@ -3,15 +3,18 @@ import { BLACK_HOLE_CENTER } from "../camera/BlackHoleCameraSequence.js";
 import { blackHoleLensFromCamera, SKY_HORIZON_HIGH, SKY_HORIZON_LOW } from "./MilkyWayNebulaShader.js";
 
 /**
- * One far sky, shared by the vignette ring and the black-hole flight. The
- * shell is re-centered on the camera every frame with a fixed world
- * orientation — the same object, the same draw, with no ring/flight branch
- * to fall out of sync at the handoff. Made of real star points only; there
- * is no dome, gradient, or haze layer behind them (see MilkyWayNebulaShader.js
- * and NebulaCloudCluster.js's removal for what used to paint that band).
+ * One far sky, shared by the vignette ring and the black-hole flight. Stars
+ * are at infinity: the vertex shader transforms each star's fixed world
+ * direction by the camera's rotation only (never its position), so the sky
+ * has zero parallax under any translation — drop, hop, zoom, or cursor
+ * shear, exactly like real stars that far away. The same object, the same
+ * draw, with no ring/flight branch to fall out of sync at the handoff. Made
+ * of real star points only; there is no dome, gradient, or haze layer
+ * behind them (see MilkyWayNebulaShader.js and NebulaCloudCluster.js's
+ * removal for what used to paint that band).
  */
 
-/** Shell radius, meters from the camera. Stays inside CAM_FAR (220). */
+/** Historical shell radius — stars are now rendered at infinity (rotation-only projection, no draw distance), so this no longer feeds the shader. Kept as a labeled constant for debugStarFieldGeometry's diagnostic output. */
 export const STAR_FIELD_RADIUS = 170;
 /** Uniform-over-the-sphere population. */
 export const STAR_FIELD_BASE_COUNT = 6000;
@@ -25,15 +28,27 @@ export const STAR_FIELD_BAND_SIGMA_DEG = 8;
 export const STAR_FIELD_CORE_SWELL = 2.2;
 /** Core swell angular half-width along the band, degrees. */
 export const STAR_FIELD_CORE_WIDTH_DEG = 22;
-/** Power-law exponent for base-field brightness (higher = more skewed dim). */
+/** Power-law exponent for base-field per-star brightness (higher = more skewed dim). Size no longer carries this variation — see STAR_FIELD_SIZE_EXPONENT. */
 export const STAR_FIELD_BASE_EXPONENT = 1.7;
-/** Power-law exponent for band brightness — higher than the base field so band stars read smaller/dimmer. */
+/** Power-law exponent for band brightness — higher than the base field so band stars read dimmer on average. */
 export const STAR_FIELD_BAND_EXPONENT = 3.1;
-/** Peak raw fragment brightness (color × vBright × core). Kept under 1 so no star alone can clear the bloom threshold (1.0). */
+/** Dimmest a star's own magnitude can be (0..1, multiplies color before uMaxBrightness). */
+export const STAR_FIELD_MIN_BRIGHT = 0.3;
+/** Peak raw fragment brightness (color × vBright × magnitude × core). Kept under 1 so no star alone can clear the bloom threshold (1.0). */
 export const STAR_FIELD_MAX_BRIGHTNESS = 0.92;
-/** Point size range, device pixels before the pixelRatio multiply. */
-export const STAR_FIELD_MIN_SIZE_PX = 1;
-export const STAR_FIELD_MAX_SIZE_PX = 8;
+/** Point size range, CSS px before the pixelRatio multiply. Most stars sit near the floor; size barely varies — brightness (aBright) carries the variation instead, so the field doesn't read as a scatter of discs. */
+export const STAR_FIELD_MIN_SIZE_PX = 0.5;
+export const STAR_FIELD_MAX_SIZE_PX = 1.5;
+/** Power-law exponent for size: higher skews harder toward minSizePx (most stars small, a few up to max). */
+export const STAR_FIELD_SIZE_EXPONENT = 6;
+/** Sprite falloff: fraction of the point's radius that's a soft feather (the rest is a flat, fully-opaque core) — a small value reads as a point, not a disc. */
+export const STAR_FIELD_SPRITE_SOFTNESS = 0.16;
+/** Point sprites below this many device px alias as the camera rotates (sub-pixel coverage flickers on/off) — never rendered smaller; alpha is scaled down instead so a "small" star still reads small and dim without popping. */
+export const STAR_FIELD_MIN_RENDER_PX = 2;
+/** Twinkle: per-star brightness modulation, ± this fraction of base brightness. 0 disables. */
+export const STAR_FIELD_TWINKLE_AMOUNT = 0.12;
+/** Twinkle rate multiplier — each star's own random rate (0.3–1.5 Hz, baked into aFreq) times this. */
+export const STAR_FIELD_TWINKLE_SPEED = 1;
 /** Seconds for the horizon fade to move from off to on (or back) at the ring/flight handoff. */
 export const STAR_FIELD_HORIZON_FADE_TIME = 1.1;
 
@@ -60,11 +75,13 @@ const StarFieldShader = {
     uLensActive: { value: 0 },
     uHorizonFade: { value: 0 },
     uPixelRatio: { value: 1 },
-    uDropPitch: { value: 0 },
-    uDropAxis: { value: new THREE.Vector3(1, 0, 0) },
     uMaxBrightness: { value: STAR_FIELD_MAX_BRIGHTNESS },
     uMinSizePx: { value: STAR_FIELD_MIN_SIZE_PX },
-    uMaxSizePx: { value: STAR_FIELD_MAX_SIZE_PX }
+    uMaxSizePx: { value: STAR_FIELD_MAX_SIZE_PX },
+    uSpriteSoftness: { value: STAR_FIELD_SPRITE_SOFTNESS },
+    uMinRenderPx: { value: STAR_FIELD_MIN_RENDER_PX },
+    uTwinkleAmount: { value: STAR_FIELD_TWINKLE_AMOUNT },
+    uTwinkleSpeed: { value: STAR_FIELD_TWINKLE_SPEED }
   },
   vertexShader: /* glsl */ `
     uniform vec3 uCameraPos;
@@ -73,96 +90,110 @@ const StarFieldShader = {
     uniform float uLensOuter;
     uniform float uLensStrength;
     uniform float uLensActive;
-    uniform float uDropPitch;
-    uniform vec3 uDropAxis;
     uniform float uPixelRatio;
     uniform float uMinSizePx;
     uniform float uMaxSizePx;
+    uniform float uMinRenderPx;
+    uniform float uTwinkleAmount;
+    uniform float uTwinkleSpeed;
     uniform float uTime;
 
     attribute float aSize;
+    attribute float aBright;
     attribute vec3 aColor;
     attribute float aPhase;
+    attribute float aFreq;
 
     varying vec3 vColor;
     varying float vAlpha;
     varying float vBright;
+    varying float vMag;
     varying float vPhase;
     varying float vElev;
 
     void main() {
       vColor = aColor;
       vPhase = aPhase;
-      // Star direction is fixed in world space. The shell itself is
-      // re-centered on the camera every frame (see updateStarField), so this
-      // direction never parallaxes with camera translation — a world-locked
-      // sky, exactly, on both the ring and the flight.
+      vMag = aBright;
+      // Star direction is fixed in world space — these stars are at
+      // infinity, so only the direction is ever meaningful.
       vec3 skyDir = normalize(position);
-
-      // Aerial drop only — the shell is glued to the camera during the
-      // intro's vertical settle, so pitch it there; once landed this stays 0.
-      if (abs(uDropPitch) > 0.0001) {
-        float c = cos(uDropPitch);
-        float s = sin(uDropPitch);
-        skyDir = normalize(skyDir * c + cross(uDropAxis, skyDir) * s + uDropAxis * dot(uDropAxis, skyDir) * (1.0 - c));
-      }
       vElev = skyDir.y;
-      vec3 worldPos = uCameraPos + skyDir * ${STAR_FIELD_RADIUS.toFixed(1)};
 
-      // Same annulus lensing as the flight's black-hole approach.
+      // Same annulus lensing as before, now on direction only — a star at
+      // infinity has no distance for the bend math to use, only an angle
+      // to the hole (a real, finite-distance object).
       if (uLensActive > 0.5 && uLensOuter > 0.002 && uLensStrength > 0.001) {
-        vec3 camToStar = worldPos - uCameraPos;
         vec3 camToHole = uBlackHolePos - uCameraPos;
         float holeDist = length(camToHole);
-        float starDist = length(camToStar);
-        if (holeDist > 0.5 && starDist > 0.5 && dot(camToStar, camToHole) > holeDist * holeDist * 0.9) {
+        if (holeDist > 0.5) {
           vec3 holeDir = camToHole / holeDist;
-          vec3 starDir = camToStar / starDist;
-          float cosA = clamp(dot(starDir, holeDir), -1.0, 1.0);
+          float cosA = clamp(dot(skyDir, holeDir), -1.0, 1.0);
           float ang = acos(cosA);
           if (ang > uLensInner && ang < uLensOuter) {
             float u = (ang - uLensInner) / max(uLensOuter - uLensInner, 1e-4);
             float onset = smoothstep(0.0, 0.08, u);
             float tight = smoothstep(1.0, 0.9, u);
             float bend = onset * tight * uLensStrength * 0.053;
-            vec3 tangent = starDir - holeDir * cosA;
+            vec3 tangent = skyDir - holeDir * cosA;
             float tLen = length(tangent);
             if (tLen > 1e-5) {
               vec3 outDir = tangent / tLen;
               float newAng = ang + bend;
-              vec3 bent = normalize(holeDir * cos(newAng) + outDir * sin(newAng));
-              worldPos = uCameraPos + bent * starDist;
+              skyDir = normalize(holeDir * cos(newAng) + outDir * sin(newAng));
             }
           }
         }
       }
 
-      vec4 mvPosition = modelViewMatrix * vec4(worldPos, 1.0);
-      // Shimmer only — size is fixed so stars never blink in and out.
-      vBright = 0.70 + 0.20 * sin(uTime * 5.5 + aPhase);
+      // Rotation-only projection: transform the direction by the camera's
+      // rotation alone (never its position), so this field has zero
+      // parallax under any translation — drop, hop, zoom, or cursor shear.
+      vec3 viewDir = mat3(viewMatrix) * skyDir;
+      // Twinkle: a slow, per-star, never-zero brightness wobble — each star
+      // has its own random rate (aFreq, 0.3-1.5 Hz) and phase, so the field
+      // doesn't pulse in unison. uTwinkleAmount = 0 disables it outright.
+      vBright = 1.0 + uTwinkleAmount * sin(uTime * aFreq * uTwinkleSpeed * 6.28318 + aPhase);
       float px = clamp(aSize, uMinSizePx, uMaxSizePx);
-      gl_PointSize = max(1.0, px * uPixelRatio);
-      vAlpha = 1.0;
-      gl_Position = projectionMatrix * mvPosition;
+      // Sub-pixel point sprites alias as the camera rotates: a star under
+      // ~1 device px covers a pixel inconsistently frame to frame, reading
+      // as pop-in/pop-out rather than a steady dim point. Never render
+      // smaller than uMinRenderPx; instead scale alpha by the squared ratio
+      // of intended to rendered size, so a "small" star still reads small
+      // and dim through reduced coverage, not through sub-pixel geometry.
+      float intendedPx = max(px * uPixelRatio, 0.01);
+      float renderedPx = max(intendedPx, uMinRenderPx);
+      gl_PointSize = renderedPx;
+      float sizeRatio = intendedPx / renderedPx;
+      vAlpha = sizeRatio * sizeRatio;
+      gl_Position = projectionMatrix * vec4(viewDir, 1.0);
+      // Pin every sky point to the far plane — depthWrite is already off;
+      // depthTest stays on so the black-hole disk still occludes stars.
+      gl_Position.z = gl_Position.w * 0.99999;
     }
   `,
   fragmentShader: /* glsl */ `
     uniform float uHorizonFade;
     uniform float uMaxBrightness;
+    uniform float uSpriteSoftness;
     varying vec3 vColor;
     varying float vAlpha;
     varying float vBright;
+    varying float vMag;
     varying float vElev;
 
     void main() {
-      vec2 coord = gl_PointCoord - vec2(0.5);
-      float dist = dot(coord, coord);
-      float core = exp(-dist * 18.0);
-      if (core < 0.04) discard;
+      // Hard, flat core out to (0.5 - softness), feathering only in the
+      // outer softness-wide ring — a point, not a disc, even at a few
+      // device pixels across.
+      float r = length(gl_PointCoord - vec2(0.5));
+      float edge0 = max(0.0, 0.5 - uSpriteSoftness);
+      float core = 1.0 - smoothstep(edge0, 0.5, r);
+      if (core < 0.02) discard;
       float horizon = mix(1.0, smoothstep(${SKY_HORIZON_LOW.toFixed(3)}, ${SKY_HORIZON_HIGH.toFixed(3)}, vElev), uHorizonFade);
       float alpha = core * vAlpha * horizon;
       if (alpha < 0.003) discard;
-      gl_FragColor = vec4(vColor * vBright * uMaxBrightness, alpha);
+      gl_FragColor = vec4(vColor * vBright * vMag * uMaxBrightness, alpha);
     }
   `
 };
@@ -187,7 +218,9 @@ function buildAttributes(tuning) {
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
   const sizes = new Float32Array(count);
+  const brights = new Float32Array(count);
   const phases = new Float32Array(count);
+  const freqs = new Float32Array(count);
 
   const tiltRad = (tuning.bandTiltDeg * Math.PI) / 180;
   // Plane normal for the band's great circle, tilted off vertical.
@@ -216,8 +249,11 @@ function buildAttributes(tuning) {
     colors[i3 + 2] = col.b;
     sizes[i] =
       tuning.minSizePx +
-      Math.pow(Math.random(), tuning.baseExponent) * (tuning.maxSizePx - tuning.minSizePx);
+      Math.pow(Math.random(), tuning.sizeExponent) * (tuning.maxSizePx - tuning.minSizePx);
+    brights[i] =
+      tuning.minBright + Math.pow(Math.random(), tuning.baseExponent) * (1 - tuning.minBright);
     phases[i] = Math.random() * Math.PI * 2;
+    freqs[i] = 0.3 + Math.random() * 1.2;
   }
 
   for (let j = 0; j < bandCount; j += 1) {
@@ -247,15 +283,19 @@ function buildAttributes(tuning) {
     colors[i3] = col.r;
     colors[i3 + 1] = col.g;
     colors[i3 + 2] = col.b;
-    // Mostly smaller and dimmer than the base field — a steeper power law
-    // biases the draw toward the low end, and the size ceiling is lower.
-    const bandMaxSize = tuning.minSizePx + (tuning.maxSizePx - tuning.minSizePx) * 0.55;
+    // Same size distribution as the base field — brightness carries the
+    // band/base distinction now, not size (a steeper power law biases the
+    // band's own magnitude draw toward dim).
     sizes[i] =
-      tuning.minSizePx + Math.pow(Math.random(), tuning.bandExponent) * (bandMaxSize - tuning.minSizePx);
+      tuning.minSizePx +
+      Math.pow(Math.random(), tuning.sizeExponent) * (tuning.maxSizePx - tuning.minSizePx);
+    brights[i] =
+      tuning.minBright + Math.pow(Math.random(), tuning.bandExponent) * (1 - tuning.minBright);
     phases[i] = Math.random() * Math.PI * 2;
+    freqs[i] = 0.3 + Math.random() * 1.2;
   }
 
-  return { positions, colors, sizes, phases, count };
+  return { positions, colors, sizes, brights, phases, freqs, count };
 }
 
 /**
@@ -264,11 +304,13 @@ function buildAttributes(tuning) {
 export function createStarField(overrides = {}) {
   const tuning = { ...DEFAULT_TUNING, ...overrides };
   const geometry = new THREE.BufferGeometry();
-  const { positions, colors, sizes, phases, count } = buildAttributes(tuning);
+  const { positions, colors, sizes, brights, phases, freqs, count } = buildAttributes(tuning);
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
   geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
+  geometry.setAttribute("aBright", new THREE.BufferAttribute(brights, 1));
   geometry.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
+  geometry.setAttribute("aFreq", new THREE.BufferAttribute(freqs, 1));
 
   const material = new THREE.ShaderMaterial({
     name: "StarField",
@@ -305,19 +347,25 @@ export function rebuildStarField(field, overrides) {
   if (!field) return;
   const tuning = { ...field.userData.tuning, ...overrides };
   field.userData.tuning = tuning;
-  const { positions, colors, sizes, phases, count } = buildAttributes(tuning);
+  const { positions, colors, sizes, brights, phases, freqs, count } = buildAttributes(tuning);
   field.geometry.dispose();
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
   geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
+  geometry.setAttribute("aBright", new THREE.BufferAttribute(brights, 1));
   geometry.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
+  geometry.setAttribute("aFreq", new THREE.BufferAttribute(freqs, 1));
   field.geometry = geometry;
   field.userData.baseCount = Math.max(0, Math.round(tuning.baseCount));
   field.userData.bandCount = count - field.userData.baseCount;
   field.material.uniforms.uMaxBrightness.value = tuning.maxBrightness;
   field.material.uniforms.uMinSizePx.value = tuning.minSizePx;
   field.material.uniforms.uMaxSizePx.value = tuning.maxSizePx;
+  field.material.uniforms.uSpriteSoftness.value = tuning.spriteSoftness;
+  field.material.uniforms.uMinRenderPx.value = tuning.minRenderPx;
+  field.material.uniforms.uTwinkleAmount.value = tuning.twinkleAmount;
+  field.material.uniforms.uTwinkleSpeed.value = tuning.twinkleSpeed;
 }
 
 export const DEFAULT_TUNING = {
@@ -330,8 +378,14 @@ export const DEFAULT_TUNING = {
   baseExponent: STAR_FIELD_BASE_EXPONENT,
   bandExponent: STAR_FIELD_BAND_EXPONENT,
   maxBrightness: STAR_FIELD_MAX_BRIGHTNESS,
+  minBright: STAR_FIELD_MIN_BRIGHT,
   minSizePx: STAR_FIELD_MIN_SIZE_PX,
-  maxSizePx: STAR_FIELD_MAX_SIZE_PX
+  maxSizePx: STAR_FIELD_MAX_SIZE_PX,
+  sizeExponent: STAR_FIELD_SIZE_EXPONENT,
+  spriteSoftness: STAR_FIELD_SPRITE_SOFTNESS,
+  minRenderPx: STAR_FIELD_MIN_RENDER_PX,
+  twinkleAmount: STAR_FIELD_TWINKLE_AMOUNT,
+  twinkleSpeed: STAR_FIELD_TWINKLE_SPEED
 };
 
 /**
@@ -342,19 +396,17 @@ export const DEFAULT_TUNING = {
  * @param {{
  *   horizonFadeOn?: boolean,
  *   lensActive?: boolean,
- *   pixelRatio?: number,
- *   dropPitch?: number,
- *   dropAxis?: THREE.Vector3
+ *   pixelRatio?: number
  * }} [opts]
  */
 export function updateStarField(field, camera, time, dt, opts = {}) {
   const uniforms = field?.material?.uniforms;
   if (!uniforms || !camera) return;
-  field.position.copy(camera.position);
+  // No per-frame re-centering: the shader projects by camera rotation only,
+  // so this object stays at the scene origin permanently (set once at
+  // creation) and can never slide out of sync with the camera's own move.
   uniforms.uTime.value = time;
   uniforms.uCameraPos.value.copy(camera.position);
-  uniforms.uDropPitch.value = opts.dropPitch || 0;
-  if (opts.dropAxis) uniforms.uDropAxis.value.copy(opts.dropAxis);
   if (Number.isFinite(opts.pixelRatio)) uniforms.uPixelRatio.value = opts.pixelRatio;
 
   // Horizon fade ramps rather than snaps, so it does not pop at the

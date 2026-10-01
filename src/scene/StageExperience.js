@@ -26,9 +26,8 @@ import { LiveStageEnvironment } from "./stage/LiveStageEnvironment.js";
 import { buildStageStudioRoom } from "./stage/StageStudioRoom.js";
 import { buildStageFloor } from "./stage/StageFloor.js";
 import { createCursorStarTrail, updateCursorStarTrail } from "./blackhole/CursorStarTrail.js";
-import { introSkyDropPitch, skyDropAxis } from "./blackhole/MilkyWayNebulaShader.js";
-import { createStarField, rebuildStarField, updateStarField } from "./blackhole/StarField.js";
-import { createFlightStarStreak, updateFlightStarStreak } from "./blackhole/FlightStarStreak.js";
+import { createStarField, rebuildStarField, updateStarField, STAR_FIELD_RADIUS } from "./blackhole/StarField.js";
+import { createFlightStarStreak, updateFlightStarStreak, STREAK_SPAWN_AHEAD } from "./blackhole/FlightStarStreak.js";
 import {
   loadWetFloorTextures,
   WetFloorSystem
@@ -1331,6 +1330,52 @@ export class StageExperience {
   }
 
   /**
+   * DEV — `window.__stageDebug("debugStarFieldGeometry")`. Reports the sky
+   * shell/streak/camera numbers needed to diagnose the black-hole star hole:
+   * shell radius vs. camera near/far, frustumCulled flags, black-hole
+   * sequence phase/distance, and the lens/horizon-fade uniform values
+   * actually in effect on StarField this frame.
+   */
+  debugStarFieldGeometry() {
+    const seq = this.blackHoleSeq;
+    const su = this.starField?.material?.uniforms;
+    const fu = this.flightStarStreak?.material?.uniforms;
+    return {
+      cameraNear: this.camera?.near ?? null,
+      cameraFar: this.camera?.far ?? null,
+      cameraPos: this.camera ? [this.camera.position.x, this.camera.position.y, this.camera.position.z] : null,
+      cameraQuat: this.camera
+        ? [this.camera.quaternion.x, this.camera.quaternion.y, this.camera.quaternion.z, this.camera.quaternion.w]
+        : null,
+      rigHeight: this.cameraRig?.state?.height ?? null,
+      rigSettled: this.cameraRig?.state?.isSettled ?? null,
+      starFieldRadius: STAR_FIELD_RADIUS,
+      starField: {
+        frustumCulled: this.starField?.frustumCulled ?? null,
+        visible: this.starField?.visible ?? null,
+        boundingSphereRadius: this.starField?.geometry?.boundingSphere?.radius ?? null,
+        uHorizonFade: su?.uHorizonFade?.value ?? null,
+        uLensActive: su?.uLensActive?.value ?? null,
+        uLensInner: su?.uLensInner?.value ?? null,
+        uLensOuter: su?.uLensOuter?.value ?? null,
+        uLensStrength: su?.uLensStrength?.value ?? null
+      },
+      flightStarStreak: {
+        frustumCulled: this.flightStarStreak?.frustumCulled ?? null,
+        visible: this.flightStarStreak?.visible ?? null,
+        spawnAheadDistance: STREAK_SPAWN_AHEAD,
+        uLayerFade: fu?.uLayerFade?.value ?? null
+      },
+      blackHole: {
+        active: Boolean(this._blackHoleActive),
+        phase: seq?.phase ?? null,
+        distanceToCenter: seq ? seq.position.distanceTo(BLACK_HOLE_CENTER) : null,
+        restParallaxBlend: seq?.restParallaxBlend?.() ?? null
+      }
+    };
+  }
+
+  /**
    * POV spotlight — parented to camera; aim refreshed each frame toward the
    * active vignette look target (or LOOK as a fallback before the rig exists).
    */
@@ -1890,6 +1935,25 @@ export class StageExperience {
     return state;
   }
 
+  /**
+   * DEV — live cursor-trail knobs: timeWindow (seconds of path kept),
+   * headRadius/taperExponent (per-sample circle size and falloff), and
+   * maxLength (path-span clamp, px before pixelRatio). No rebuild needed —
+   * updateCursorStarTrail reads these off the trail's own userData each tick.
+   * @param {{ timeWindow?: number, headRadius?: number, taperExponent?: number, maxLength?: number }} [partial]
+   */
+  setCursorTrailParams(partial = {}) {
+    const trail = this.cursorStarTrail;
+    if (!trail) return null;
+    Object.assign(trail.userData.tuning, partial);
+    console.log("[StarFieldTuner] cursor trail params:", JSON.stringify(trail.userData.tuning));
+    return trail.userData.tuning;
+  }
+
+  getCursorTrailParams() {
+    return this.cursorStarTrail?.userData?.tuning ?? null;
+  }
+
   _logStarFieldTuning() {
     console.log("[StarFieldTuner] Shift+S — current StarField tuning:", JSON.stringify(this.getStarFieldParams()));
     console.log(
@@ -1899,8 +1963,9 @@ export class StageExperience {
         fadeDistance: this.flightStarStreak?.material.uniforms.uNearFadeDistance.value ?? null
       })
     );
+    console.log("[StarFieldTuner] cursor trail:", JSON.stringify(this.getCursorTrailParams()));
     console.log(
-      '[StarFieldTuner] tune via window.__stageDebug("setStarFieldParams", {baseCount, bandRatio, bandSigmaDeg, bandTiltDeg, coreSwellChance, coreWidthDeg, baseExponent, bandExponent, maxBrightness, minSizePx, maxSizePx}) or "setFlightStreakParams", {density, fadeDistance}'
+      '[StarFieldTuner] tune via window.__stageDebug("setStarFieldParams", {baseCount, bandRatio, bandSigmaDeg, bandTiltDeg, coreSwellChance, coreWidthDeg, baseExponent, bandExponent, maxBrightness, minBright, minSizePx, maxSizePx, sizeExponent, spriteSoftness, minRenderPx, twinkleAmount, twinkleSpeed}), "setFlightStreakParams", {density, fadeDistance}, or "setCursorTrailParams", {timeWindow, headRadius, taperExponent, maxLength}'
     );
   }
 
@@ -3601,21 +3666,6 @@ export class StageExperience {
     });
   }
 
-  /**
-   * Sky pitch for the aerial drop. Zero during the flight, on the ring, and
-   * once height has landed — ring hops and cursor parallax stay fixed.
-   * @returns {{ pitch: number, axis: THREE.Vector3 }}
-   */
-  _introSkyDrop() {
-    const rig = this.cameraRig;
-    const axis = skyDropAxis(this.camera);
-    if (!rig?._introActive || rig.poseSuspended) {
-      return { pitch: 0, axis };
-    }
-    const lookDist = Math.max(rig.restRadius - rig.vignetteRadius, 1);
-    const pitch = introSkyDropPitch(rig.state.height - rig.restHeight, lookDist);
-    return { pitch, axis };
-  }
 
   debugWarmVignette0() {
     const warm = this._vignette0Warm;
@@ -5683,7 +5733,6 @@ export class StageExperience {
     this._tickBlackHoleCursorShear(dt);
     this._tickCursorStarTrail(dt, t);
     this.cameraRig?.update(dt);
-    const skyDrop = this._introSkyDrop();
     if (this.starField) {
       // Defensive, matching the old milky-way-dome/starfield pattern this
       // replaced: warmVignette0's per-stop compile passes (hideSceneExcept)
@@ -5698,9 +5747,7 @@ export class StageExperience {
       updateStarField(this.starField, this.camera, t, dt, {
         horizonFadeOn: !this._blackHoleActive,
         lensActive: this._blackHoleActive,
-        pixelRatio,
-        dropPitch: skyDrop.pitch,
-        dropAxis: skyDrop.axis
+        pixelRatio
       });
     }
     if (this.flightStarStreak) {

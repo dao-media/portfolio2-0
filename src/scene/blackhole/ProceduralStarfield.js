@@ -1,6 +1,16 @@
 import * as THREE from "three";
 import { BLACK_HOLE_CENTER } from "../camera/BlackHoleCameraSequence.js";
-import { blackHoleLensFromCamera, RING_BAND_ELEV, SKY_DOME_RADIUS, SKY_HORIZON_HIGH } from "./MilkyWayNebulaShader.js";
+import { blackHoleLensFromCamera, SKY_HORIZON_HIGH } from "./MilkyWayNebulaShader.js";
+import {
+  STAR_FIELD_MIN_SIZE_PX,
+  STAR_FIELD_MAX_SIZE_PX,
+  STAR_FIELD_SIZE_EXPONENT,
+  STAR_FIELD_MIN_BRIGHT,
+  STAR_FIELD_SPRITE_SOFTNESS,
+  STAR_FIELD_MIN_RENDER_PX,
+  STAR_FIELD_TWINKLE_AMOUNT,
+  STAR_FIELD_TWINKLE_SPEED
+} from "./StarField.js";
 
 /**
  * This module now serves the cursor hover star trail only (see
@@ -9,14 +19,18 @@ import { blackHoleLensFromCamera, RING_BAND_ELEV, SKY_DOME_RADIUS, SKY_HORIZON_H
  * StarField.js, a single object shared by the ring and the black-hole
  * flight. Do not add the far-sky field back here; wire it through
  * StarField.js instead.
+ *
+ * Stars here are at infinity: the vertex shader transforms each star's
+ * fixed world DIRECTION by the camera's rotation only (mat3(viewMatrix)),
+ * never by camera position. A real star that far away does not visibly
+ * move under a translation as small as a camera drop, hop, zoom, or cursor
+ * shear — only the camera's own rotation changes where it sits on screen.
  */
 
-/** Distant shell radius for the reveal-trail's own field, meters. */
+/** Distant shell radius the reveal-trail's directions are generated on, meters — direction only, not a draw distance (see the rotation-only projection below). */
 const MILKY_WAY_DISTANCE = 24000;
-/** Meters a trail star jumps ahead when it falls behind the camera. */
-const STARFIELD_WRAP_DEPTH = 250;
-/** Draw distance for the trail's points — a shell around the camera. */
-const SKY_POINT_DISTANCE = 170;
+/** Cursor-trail ring-buffer size (see CursorStarTrail.js) — shared here so the shader's fixed-size uniform arrays match it exactly. */
+export const CURSOR_TRAIL_SAMPLE_COUNT = 16;
 
 const STAR_PALETTE = [
   new THREE.Color(0x9bb0ff),
@@ -35,22 +49,19 @@ const StarfieldShader = {
     uLensInner: { value: 0 },
     uLensOuter: { value: 0 },
     uLensStrength: { value: 0 },
-    uCamZ: { value: 0 },
-    uWrap: { value: 0 },
-    uMirror: { value: 0 },
     uHorizonFade: { value: 1 },
     uPixelRatio: { value: 1 },
-    uDropPitch: { value: 0 },
-    uDropAxis: { value: new THREE.Vector3(1, 0, 0) },
-    uWorldDome: { value: 0 },
     uReveal: { value: 0 },
     uMaskGain: { value: 0 },
-    uCursorPx: { value: new THREE.Vector2() },
-    uHeading: { value: new THREE.Vector2(1, 0) },
     uViewport: { value: new THREE.Vector2(1, 1) },
-    uTrailLength: { value: 80 },
-    uTrailHalf: { value: 24 },
-    uBend: { value: 0 }
+    uPathPx: { value: Array.from({ length: CURSOR_TRAIL_SAMPLE_COUNT }, () => new THREE.Vector2()) },
+    uPathAge: { value: new Array(CURSOR_TRAIL_SAMPLE_COUNT).fill(1) },
+    uHeadRadius: { value: 30 },
+    uTaperExp: { value: 1.6 },
+    uSpriteSoftness: { value: STAR_FIELD_SPRITE_SOFTNESS },
+    uMinRenderPx: { value: STAR_FIELD_MIN_RENDER_PX },
+    uTwinkleAmount: { value: STAR_FIELD_TWINKLE_AMOUNT },
+    uTwinkleSpeed: { value: STAR_FIELD_TWINKLE_SPEED }
   },
   vertexShader: /* glsl */ `
     uniform float uTime;
@@ -59,125 +70,87 @@ const StarfieldShader = {
     uniform float uLensInner;
     uniform float uLensOuter;
     uniform float uLensStrength;
-    uniform float uCamZ;
-    uniform float uWrap;
-    uniform float uMirror;
     uniform float uHorizonFade;
     uniform float uPixelRatio;
-    uniform float uDropPitch;
-    uniform vec3 uDropAxis;
-    uniform float uWorldDome;
     uniform float uReveal;
     uniform float uMaskGain;
-    uniform vec2 uCursorPx;
-    uniform vec2 uHeading;
     uniform vec2 uViewport;
-    uniform float uTrailLength;
-    uniform float uTrailHalf;
-    uniform float uBend;
+    uniform vec2 uPathPx[${CURSOR_TRAIL_SAMPLE_COUNT}];
+    uniform float uPathAge[${CURSOR_TRAIL_SAMPLE_COUNT}];
+    uniform float uHeadRadius;
+    uniform float uTaperExp;
+    uniform float uSpriteSoftness;
+    uniform float uMinRenderPx;
+    uniform float uTwinkleAmount;
+    uniform float uTwinkleSpeed;
 
     attribute float aSize;
+    attribute float aBright;
     attribute vec3 aColor;
     attribute float aPhase;
-    attribute float aBand;
+    attribute float aFreq;
 
     varying vec3 vColor;
     varying float vAlpha;
     varying float vBright;
+    varying float vMag;
 
     void main() {
       vColor = aColor;
-      vec3 worldPos = position;
-      // The flight copy fills the downhill view with field stars. The belt
-      // stays on its own arc so it is not drawn twice.
-      if (uMirror > 0.5 && aBand > 0.5) {
-        vBright = 0.0;
-        vAlpha = 0.0;
-        gl_PointSize = 0.0;
-        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-        return;
-      }
-      if (uMirror > 0.5) worldPos.y = -worldPos.y;
-      float skyR = length(worldPos);
-      // Celestial direction. The flight draws it on a shell around the
-      // camera. The ring draws it on the world dome.
-      vec3 skyDir = normalize(worldPos);
-      // Belt stars are a cloud in both skies. On the ring they sit on a
-      // full circle at RING_BAND_ELEV so the band crosses every stop.
-      if (aBand > 0.5) {
-        float h1 = fract(sin(aPhase * 127.1 + aSize * 311.7) * 43758.5453);
-        float h2 = fract(sin(aPhase * 269.5 + aSize * 183.3) * 12578.1459);
-        if (uWorldDome > 0.5) {
-          float elev = ${RING_BAND_ELEV.toFixed(3)} + (h1 - 0.5) * 0.1;
-          float ring = sqrt(max(0.0, 1.0 - elev * elev));
-          skyDir = vec3(cos(aPhase) * ring, elev, sin(aPhase) * ring);
-        }
-        vec3 axis = abs(skyDir.y) > 0.92 ? vec3(1.0, 0.0, 0.0) : vec3(-skyDir.z, 0.0, skyDir.x);
-        axis = normalize(axis);
-        vec3 side = normalize(cross(skyDir, axis));
-        skyDir = normalize(skyDir + side * (h1 - 0.5) * 0.28 + axis * (h2 - 0.5) * 0.1);
-      }
-      // Aerial drop only, and only while the sky is glued to the camera.
-      // On the ring the shell is world-fixed, so the drop shifts it by itself.
-      if (uWorldDome < 0.5 && abs(uDropPitch) > 0.0001) {
-        float c = cos(uDropPitch);
-        float s = sin(uDropPitch);
-        skyDir = normalize(skyDir * c + cross(uDropAxis, skyDir) * s + uDropAxis * dot(uDropAxis, skyDir) * (1.0 - c));
-      }
-      worldPos = uWorldDome > 0.5
-        ? skyDir * ${SKY_DOME_RADIUS.toFixed(1)}
-        : uCameraPos + skyDir * ${SKY_POINT_DISTANCE.toFixed(1)};
+      vMag = aBright;
+      // Celestial direction — stars here are at infinity, so only the
+      // direction is ever meaningful; there is no "position" to speak of.
+      vec3 skyDir = normalize(position);
 
-      // Flight-only recycle for nearby stars. The galactic belt sits at
-      // MILKY_WAY_DISTANCE and must not wrap — that would smear the band.
-      if (uWrap > 0.5 && skyR < 2000.0 && worldPos.y > 8.0 && worldPos.z > uCamZ + 10.0) {
-        worldPos.z -= ${STARFIELD_WRAP_DEPTH.toFixed(1)};
-      }
-
-      // Annulus: outside the event horizon, tight to the ring. Bend uses
-      // strength, which stays shut until halfway in.
+      // Lensing bends the apparent direction only — a star at infinity has
+      // no distance for the bend math to use, only an angle to the hole.
       if (uLensOuter > 0.002 && uLensStrength > 0.001) {
-        vec3 camToStar = worldPos - uCameraPos;
         vec3 camToHole = uBlackHolePos - uCameraPos;
         float holeDist = length(camToHole);
-        float starDist = length(camToStar);
-        if (holeDist > 0.5 && starDist > 0.5 && dot(camToStar, camToHole) > holeDist * holeDist * 0.9) {
+        if (holeDist > 0.5) {
           vec3 holeDir = camToHole / holeDist;
-          vec3 starDir = camToStar / starDist;
-          float cosA = clamp(dot(starDir, holeDir), -1.0, 1.0);
+          float cosA = clamp(dot(skyDir, holeDir), -1.0, 1.0);
           float ang = acos(cosA);
           if (ang > uLensInner && ang < uLensOuter) {
             float u = (ang - uLensInner) / max(uLensOuter - uLensInner, 1e-4);
             float onset = smoothstep(0.0, 0.08, u);
             float tight = smoothstep(1.0, 0.9, u);
             float bend = onset * tight * uLensStrength * 0.053;
-            vec3 tangent = starDir - holeDir * cosA;
+            vec3 tangent = skyDir - holeDir * cosA;
             float tLen = length(tangent);
             if (tLen > 1e-5) {
               vec3 outDir = tangent / tLen;
               float newAng = ang + bend;
-              vec3 bent = normalize(holeDir * cos(newAng) + outDir * sin(newAng));
-              worldPos = uCameraPos + bent * starDist;
+              skyDir = normalize(holeDir * cos(newAng) + outDir * sin(newAng));
             }
           }
         }
       }
 
-      vec4 mvPosition = modelViewMatrix * vec4(worldPos, 1.0);
-      float camDist = length(mvPosition.xyz);
-      // Brightness shimmer only. Size stays put so stars don't blink in and out.
-      vBright = 0.78 + 0.22 * sin(uTime * 5.5 + aPhase);
-      float size = (aSize * 120.0) / max(-mvPosition.z, 0.4);
-      gl_PointSize = clamp(size * uPixelRatio, 0.0, 9.0);
+      // Rotation-only projection: transform the direction by the camera's
+      // rotation alone (never its position), so this field has zero
+      // parallax under any translation — drop, hop, zoom, or cursor shear.
+      vec3 viewDir = mat3(viewMatrix) * skyDir;
+      vBright = 1.0 + uTwinkleAmount * sin(uTime * aFreq * uTwinkleSpeed * 6.28318 + aPhase);
+      // Same anti-pop treatment as StarField.js: never render sub-pixel,
+      // scale alpha down instead so small stars stay small and dim without
+      // aliasing as the camera rotates.
+      float intendedPx = max(aSize * uPixelRatio, 0.01);
+      float renderedPx = max(intendedPx, uMinRenderPx);
+      gl_PointSize = renderedPx;
+      float sizeRatio = intendedPx / renderedPx;
 
-      float nearFade = smoothstep(0.4, 2.5, camDist);
       float elev = skyDir.y;
       float horizonFade = mix(1.0, smoothstep(0.0, ${SKY_HORIZON_HIGH.toFixed(3)}, elev), uHorizonFade);
-      vAlpha = nearFade * horizonFade;
-      gl_Position = projectionMatrix * mvPosition;
+      vAlpha = horizonFade * sizeRatio * sizeRatio;
+      gl_Position = projectionMatrix * vec4(viewDir, 1.0);
+      // Same far-plane pin as StarField.js and FlightStarStreak.js, so all
+      // three sky layers sit at the same depth and none can be clipped.
+      gl_Position.z = gl_Position.w * 0.99999;
 
-      // Hidden field. Same stars as the sky; a soft candle-flame smudge
-      // uncovers them. The mask moves. The star directions do not.
+      // Hidden field. Same stars as the sky; a smudge uncovers them along
+      // wherever the cursor's actual recent path went. The mask moves. The
+      // star directions do not.
       if (uReveal > 0.5) {
         if (gl_Position.w <= 0.0 || uMaskGain < 0.001) {
           vAlpha = 0.0;
@@ -188,52 +161,41 @@ const StarfieldShader = {
             (ndc.x * 0.5 + 0.5) * uViewport.x,
             (0.5 - ndc.y * 0.5) * uViewport.y
           );
-          vec2 delta = starPx - uCursorPx;
-          vec2 side = vec2(-uHeading.y, uHeading.x);
-          float along = dot(delta, -uHeading);
-          float acrossSigned = dot(delta, side);
-          float u = along / max(uTrailLength, 1.0);
-          // Trajectory arc: a real flame trailing a turning light doesn't
-          // stay straight behind it, it bends — lagging the turn and curving
-          // progressively more toward the tip. uBend is signed angular
-          // velocity of the cursor's heading (see CursorStarTrail.js);
-          // pow(u, 1.3) makes the offset grow from the wick (u=0, no bend)
-          // out to the tip, like a whip.
-          float bendOffset = uBend * pow(clamp(u, 0.0, 1.0), 1.3) * uTrailHalf * 2.2;
-          float across = abs(acrossSigned - bendOffset);
-          // Candle-flame body: width(u) ~ sqrt(u) * exp(-k*u), the same
-          // rise-then-decay envelope a real flame's silhouette follows — a
-          // rounded base that bulges just above the wick, then tapers
-          // smoothly to a fine tip, instead of a straight-sided teardrop.
-          // 0.2398 normalizes the envelope's own peak (at u = 1/(2k)) to 1.
-          float k = 3.2;
-          float flicker = 1.0 + 0.05 * sin(uTime * 9.0 + across * 0.05);
-          float body = sqrt(max(u, 0.0001)) * exp(-k * u) * flicker;
-          // A sharp turn also flares the flame a touch, same as a real one
-          // guttering in a draft, on top of the steady taper.
-          float flare = 1.0 + 0.22 * abs(uBend) * smoothstep(0.0, 0.5, u);
-          float prof = clamp(body * flare / 0.2398, 0.0, 1.5);
-          float halfW = max(uTrailHalf * prof, 0.001);
-          float d = across / halfW;
-          float smudge = exp(-d * d * 1.35);
-          smudge *= smoothstep(-0.02, 0.05, u) * smoothstep(1.35, 0.9, u);
-          vAlpha *= smudge * uMaskGain;
+          // Smooth union of soft circles along the cursor's recent path —
+          // sample 0 is the newest (at/near the cursor), each older sample
+          // shrinks with age. The shape is whatever the path actually did:
+          // fast = long, slow = short, turning = curved. No synthetic bend.
+          float mask = 0.0;
+          for (int i = 0; i < ${CURSOR_TRAIL_SAMPLE_COUNT}; i += 1) {
+            float age = uPathAge[i];
+            if (age >= 1.0) continue;
+            float r = max(uHeadRadius * pow(1.0 - age, uTaperExp), 0.6);
+            float d = distance(starPx, uPathPx[i]);
+            float smudge = exp(-(d * d) / (r * r) * 1.35);
+            mask = max(mask, smudge);
+          }
+          float flicker = 1.0 + 0.05 * sin(uTime * 9.0 + starPx.x * 0.02 + starPx.y * 0.02);
+          vAlpha *= mask * flicker * uMaskGain;
           if (vAlpha < 0.025) gl_PointSize = 0.0;
         }
       }
     }
   `,
   fragmentShader: /* glsl */ `
+    uniform float uSpriteSoftness;
     varying vec3 vColor;
     varying float vAlpha;
     varying float vBright;
+    varying float vMag;
 
     void main() {
-      vec2 coord = gl_PointCoord - vec2(0.5);
-      float dist = dot(coord, coord);
-      float core = exp(-dist * 18.0);
-      if (core < 0.04) discard;
-      gl_FragColor = vec4(vColor * vBright, core * vAlpha);
+      // Same hard-core/soft-edge sprite as StarField.js, so a revealed star
+      // reads identically to the ones already in the sky around it.
+      float r = length(gl_PointCoord - vec2(0.5));
+      float edge0 = max(0.0, 0.5 - uSpriteSoftness);
+      float core = 1.0 - smoothstep(edge0, 0.5, r);
+      if (core < 0.02) discard;
+      gl_FragColor = vec4(vColor * vBright * vMag, core * vAlpha);
     }
   `
 };
@@ -268,8 +230,9 @@ export function createRevealStarfield(starCount = 24000) {
   const positions = new Float32Array(starCount * 3);
   const colors = new Float32Array(starCount * 3);
   const sizes = new Float32Array(starCount);
+  const brights = new Float32Array(starCount);
   const phases = new Float32Array(starCount);
-  const bands = new Float32Array(starCount);
+  const freqs = new Float32Array(starCount);
 
   for (let i = 0; i < starCount; i += 1) {
     const i3 = i * 3;
@@ -279,16 +242,23 @@ export function createRevealStarfield(starCount = 24000) {
     colors[i3] = col.r;
     colors[i3 + 1] = col.g;
     colors[i3 + 2] = col.b;
-    sizes[i] = Math.pow(Math.random(), 2) * 2.2 + 0.55;
+    // Same size/brightness distribution as StarField.js, so a revealed star
+    // matches the ones already in the sky — brightness carries the
+    // variation, size barely does.
+    sizes[i] =
+      STAR_FIELD_MIN_SIZE_PX +
+      Math.pow(Math.random(), STAR_FIELD_SIZE_EXPONENT) * (STAR_FIELD_MAX_SIZE_PX - STAR_FIELD_MIN_SIZE_PX);
+    brights[i] = STAR_FIELD_MIN_BRIGHT + Math.pow(Math.random(), 1.8) * (1 - STAR_FIELD_MIN_BRIGHT);
     phases[i] = Math.random() * Math.PI * 2;
-    bands[i] = 0;
+    freqs[i] = 0.3 + Math.random() * 1.2;
   }
 
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
   geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
+  geometry.setAttribute("aBright", new THREE.BufferAttribute(brights, 1));
   geometry.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
-  geometry.setAttribute("aBand", new THREE.BufferAttribute(bands, 1));
+  geometry.setAttribute("aFreq", new THREE.BufferAttribute(freqs, 1));
 
   const material = new THREE.ShaderMaterial({
     name: "RevealStarfield",
@@ -318,28 +288,23 @@ export function createRevealStarfield(starCount = 24000) {
 }
 
 /**
- * Uniform tick. Wrap is a shader flag (1 during the black-hole flight only).
+ * Uniform tick. uCameraPos is kept only for the lens's own angle-to-hole
+ * math (the hole is a real, finite-distance object) — it no longer offsets
+ * where any star is drawn; see the rotation-only projection above.
  * @param {THREE.Points} starfield
  * @param {THREE.Camera} camera
  * @param {number} time
- * @param {{ wrap?: boolean, horizonFade?: boolean, pixelRatio?: number, dropPitch?: number, dropAxis?: THREE.Vector3, worldDome?: boolean }} [opts]
+ * @param {{ lensActive?: boolean, horizonFade?: boolean, pixelRatio?: number }} [opts]
  */
 export function updateStarfield(starfield, camera, time, opts = {}) {
   const uniforms = starfield?.material?.uniforms;
   if (!uniforms) return;
   uniforms.uTime.value = time;
   uniforms.uCameraPos.value.copy(camera.position);
-  uniforms.uCamZ.value = camera.position.z;
-  uniforms.uWrap.value = opts.wrap ? 1 : 0;
-  uniforms.uDropPitch.value = opts.dropPitch || 0;
-  if (opts.dropAxis) uniforms.uDropAxis.value.copy(opts.dropAxis);
-  if (opts.worldDome != null && uniforms.uWorldDome) {
-    uniforms.uWorldDome.value = opts.worldDome ? 1 : 0;
-  }
-  if (opts.horizonFade != null && uniforms.uMirror.value < 0.5) {
+  if (opts.horizonFade != null) {
     uniforms.uHorizonFade.value = opts.horizonFade ? 1 : 0;
   }
-  const lens = opts.wrap
+  const lens = opts.lensActive
     ? blackHoleLensFromCamera(camera, uniforms.uBlackHolePos.value)
     : null;
   uniforms.uLensInner.value = lens ? lens.innerAngular : 0;

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { createRevealStarfield, updateStarfield } from "./ProceduralStarfield.js";
+import { createRevealStarfield, updateStarfield, CURSOR_TRAIL_SAMPLE_COUNT } from "./ProceduralStarfield.js";
 
 /**
  * Extra field stars uncovered by the cursor smudge. Same look as the sky.
@@ -7,29 +7,39 @@ import { createRevealStarfield, updateStarfield } from "./ProceduralStarfield.js
  * and not a handful of dots.
  */
 export const REVEAL_STAR_COUNT = 16000;
-/** Below this blob speed (px/s) the smudge closes. */
+/** Below this cursor speed (px/s) the trail stops sampling new points. */
 export const CURSOR_TRAIL_MIN_SPEED = 80;
-/** Flame length in pixels at a crawl and at full momentum — 2x the original. */
-export const CURSOR_TRAIL_LENGTH_MIN = 96;
-export const CURSOR_TRAIL_LENGTH_MAX = 336;
-/** Half-width of the belly, in pixels, at a crawl and at full momentum. */
-export const CURSOR_TRAIL_HALF_WIDTH_MIN = 12;
-export const CURSOR_TRAIL_HALF_WIDTH_MAX = 42;
+/** Seconds of recent cursor motion the trail keeps — also the sample max age. */
+export const CURSOR_TRAIL_TIME_WINDOW = 0.3;
+/** Head circle radius, in pixels before the pixelRatio multiply. */
+export const CURSOR_TRAIL_HEAD_RADIUS = 30;
+/** Per-sample radius falloff: headRadius * (1 - age/maxAge)^p. */
+export const CURSOR_TRAIL_TAPER_EXPONENT = 1.6;
+/** Path span clamp, in pixels before the pixelRatio multiply — trims the oldest samples once exceeded. */
+export const CURSOR_TRAIL_MAX_LENGTH = 336;
 
 /**
- * Dense sky, hidden until the teardrop smudge passes over it.
- * Star directions are fixed. Only the mask follows the blob.
+ * Dense sky, hidden until the path-sampled smudge passes over it.
+ * Star directions are fixed. Only the mask follows the cursor.
  */
 const _ndc = new THREE.Vector2();
 const _raycaster = new THREE.Raycaster();
 
 export function createCursorStarTrail() {
   const points = createRevealStarfield(REVEAL_STAR_COUNT);
-  points.userData.headingX = 1;
-  points.userData.headingY = 0;
-  points.userData.momentum = 0;
-  points.userData.bend = 0;
   points.userData.seeded = false;
+  // Ring buffer of recent {x, y, t} samples, newest last. t is this
+  // trail's own running clock (seconds), not wall time, so it survives
+  // frame-rate variation the same way the rest of the tick does.
+  points.userData.path = [];
+  points.userData.sampleTimer = 0;
+  points.userData.clock = 0;
+  points.userData.tuning = {
+    timeWindow: CURSOR_TRAIL_TIME_WINDOW,
+    headRadius: CURSOR_TRAIL_HEAD_RADIUS,
+    taperExponent: CURSOR_TRAIL_TAPER_EXPONENT,
+    maxLength: CURSOR_TRAIL_MAX_LENGTH
+  };
   return points;
 }
 
@@ -66,7 +76,11 @@ function seedRevealField(trail, camera) {
  *   height?: number,
  *   pixelRatio?: number,
  *   presence?: number,
- *   time?: number
+ *   time?: number,
+ *   timeWindow?: number,
+ *   headRadius?: number,
+ *   taperExponent?: number,
+ *   maxLength?: number
  * }} [opts]
  */
 export function updateCursorStarTrail(trail, camera, dt, opts = {}) {
@@ -84,59 +98,67 @@ export function updateCursorStarTrail(trail, camera, dt, opts = {}) {
     opts.width > 1 &&
     opts.height > 1;
 
-  const momentumTarget = canSeed ? Math.min(1, (speed - CURSOR_TRAIL_MIN_SPEED) / 720) : 0;
-  const momentumK = 1 - Math.exp(-(canSeed ? 7 : 4) * step);
-  trail.userData.momentum += (momentumTarget - trail.userData.momentum) * momentumK;
-  // Trajectory-driven arc: a flame trailing a moving, turning light doesn't
-  // just point opposite the heading, it bends — the tail lags the turn and
-  // curves behind it. Signed heading rotation this step (the cross product
-  // of the old and new heading, i.e. angular velocity) drives that bend;
-  // it decays on its own timescale so a snap-turn arcs and eases back
-  // straight rather than snapping the shape instantly.
-  let bendTarget = 0;
-  if (canSeed) {
-    const prevHX = trail.userData.headingX;
-    const prevHY = trail.userData.headingY;
-    const inv = 1 / speed;
-    const turn = 1 - Math.exp(-9 * step);
-    let nhx = prevHX + (opts.vx * inv - prevHX) * turn;
-    let nhy = prevHY + (opts.vy * inv - prevHY) * turn;
-    const hLen = Math.hypot(nhx, nhy) || 1;
-    nhx /= hLen;
-    nhy /= hLen;
-    trail.userData.headingX = nhx;
-    trail.userData.headingY = nhy;
-    const angularRate = (prevHX * nhy - prevHY * nhx) / Math.max(step, 1 / 240);
-    bendTarget = Math.max(-1, Math.min(1, angularRate * 5.5));
-  }
-  const bendK = 1 - Math.exp(-6 * step);
-  trail.userData.bend += (bendTarget - trail.userData.bend) * bendK;
-
   if (canSeed && !trail.userData.seeded) seedRevealField(trail, camera);
 
-  const momentum = trail.userData.momentum;
-  const open = canSeed || momentum > 0.04;
+  const tuning = trail.userData.tuning;
+  const timeWindow = Math.max(0.05, opts.timeWindow ?? tuning.timeWindow);
+  const headRadius = Math.max(1, opts.headRadius ?? tuning.headRadius);
+  const taperExponent = Math.max(0.1, opts.taperExponent ?? tuning.taperExponent);
+  const maxLength = Math.max(1, opts.maxLength ?? tuning.maxLength);
+
+  const now = (trail.userData.clock += step);
+  const path = trail.userData.path;
+
+  // Sample at a fixed rate, not per event, so the buffer represents a real
+  // time window of motion rather than however many pointermove events fired.
+  const sampleInterval = timeWindow / (CURSOR_TRAIL_SAMPLE_COUNT - 1);
+  trail.userData.sampleTimer += step;
+  if (canSeed && trail.userData.sampleTimer >= sampleInterval) {
+    trail.userData.sampleTimer = 0;
+    path.push({ x: opts.x, y: opts.y, t: now });
+    while (path.length > CURSOR_TRAIL_SAMPLE_COUNT) path.shift();
+  }
+
+  // Age out samples past the window regardless of activity — a stopped
+  // cursor shrinks to nothing on its own rather than holding a stale shape.
+  while (path.length && now - path[0].t > timeWindow) path.shift();
+
+  // Max-length clamp: trim the oldest samples until the path span (start to
+  // head) is back within bounds, scaled by pixelRatio like the old teardrop was.
+  const pixelRatio = opts.pixelRatio || 1;
+  const maxLenPx = maxLength * pixelRatio;
+  while (path.length > 2) {
+    const head = path[path.length - 1];
+    const tail = path[0];
+    if (Math.hypot(head.x - tail.x, head.y - tail.y) <= maxLenPx) break;
+    path.shift();
+  }
+
+  const open = canSeed || path.length > 0;
   trail.visible = open;
   uniforms.uMaskGain.value = open ? 1 : 0;
   if (!open) return;
 
   updateStarfield(trail, camera, opts.time ?? 0, {
-    wrap: true,
+    lensActive: true,
     horizonFade: false,
-    pixelRatio: opts.pixelRatio,
-    worldDome: false
+    pixelRatio
   });
 
-  const length = CURSOR_TRAIL_LENGTH_MIN + (CURSOR_TRAIL_LENGTH_MAX - CURSOR_TRAIL_LENGTH_MIN) * momentum;
-  const halfWidth =
-    CURSOR_TRAIL_HALF_WIDTH_MIN +
-    (CURSOR_TRAIL_HALF_WIDTH_MAX - CURSOR_TRAIL_HALF_WIDTH_MIN) * momentum;
-  uniforms.uCursorPx.value.set(opts.x || 0, opts.y || 0);
-  uniforms.uHeading.value.set(trail.userData.headingX, trail.userData.headingY);
   uniforms.uViewport.value.set(opts.width || 1, opts.height || 1);
-  uniforms.uTrailLength.value = length;
-  uniforms.uTrailHalf.value = halfWidth;
-  // Scaled by momentum so a slow or stopped cursor doesn't hold a residual
-  // arc — the bend is something the flame does while it's actually moving.
-  uniforms.uBend.value = trail.userData.bend * momentum;
+  uniforms.uHeadRadius.value = headRadius * pixelRatio;
+  uniforms.uTaperExp.value = taperExponent;
+
+  const pathPx = uniforms.uPathPx.value;
+  const pathAge = uniforms.uPathAge.value;
+  for (let i = 0; i < CURSOR_TRAIL_SAMPLE_COUNT; i += 1) {
+    // Newest sample first, so the head (age 0) sits at the cursor.
+    const s = path[path.length - 1 - i];
+    if (s) {
+      pathPx[i].set(s.x, s.y);
+      pathAge[i] = Math.min(1, (now - s.t) / timeWindow);
+    } else {
+      pathAge[i] = 1; // sentinel: shader skips age >= 1
+    }
+  }
 }
