@@ -2622,6 +2622,19 @@ export class StageExperience {
     );
   }
 
+  /**
+   * Chunk-queue time budget, by phase — never a row count. The black-screen
+   * window between the spiral ending and the aerial drop arming (world
+   * hidden, `_descentPendingWarm`) is the one that matters most: nothing is
+   * visible, so drain as fast as the frame can afford, same spirit as the
+   * fader/hold budgets below but much larger.
+   */
+  _chunkUploadBudgetMs() {
+    if (this._descentPendingWarm) return 40;
+    if (this._chunkUploadsAllowed()) return 6; // hold
+    return 4; // fader / XP gate / approach dolly, when visible and moving
+  }
+
   _dropFloorNotch() {
     if (this._vignette0Warm && !this._vignette0Warm.done) return;
     if ((this.clock?.elapsedTime ?? 0) < (this._floorResizeAt ?? 0)) return;
@@ -5953,19 +5966,49 @@ export class StageExperience {
     this._tickWaterCursorRim();
 
     this._tickCursorDof(dt);
-    if (
+    if (this._descentPendingWarm && this.chunkedTextures?.pending) {
+      // Black screen between the spiral ending and the drop arming: the
+      // world is hidden (nothing presented), and the drop is waiting on
+      // warmVignette0 alone. warmVignette0's own "live" step sequence sets
+      // _frameCause = "compile" on every tick it runs — the same guard the
+      // other branches use to avoid competing with a visible frame — which
+      // starved this queue completely for the whole window (measured: rows
+      // remaining did not move for 30+ s). Nothing is visible here, so that
+      // guard buys nothing; drain both queues as fast as the time budget
+      // allows instead.
+      const budgetMs = this._chunkUploadBudgetMs();
+      const uploadT0 = performance.now();
+      let lastResult = null;
+      while (performance.now() - uploadT0 < budgetMs && this.chunkedTextures.pending) {
+        lastResult = this.chunkedTextures.step(this.renderer);
+        if (!lastResult) break;
+      }
+      const uploadMs = performance.now() - uploadT0;
+      if (uploadMs > (this._uploadPeakMs || 0)) this._uploadPeakMs = uploadMs;
+      if (lastResult) this._frameCause = `texture-blackscreen-${lastResult}`;
+      const mipT0 = performance.now();
+      while (performance.now() - mipT0 < budgetMs && this.chunkedTextures.mipmapPending) {
+        if (!this.chunkedTextures.stepMipmap(this.renderer)) break;
+      }
+    } else if (
       this._frameCause !== "compile" &&
       this._chunkUploadsAllowed() &&
       this.chunkedTextures?.pending
     ) {
+      // Budgeted by time, not row count (CHUNK_TEXTURE_ROWS is a per-step
+      // tile size, not a per-frame cap) — a frame that can afford it drains
+      // more than one row-strip.
+      const budgetMs = this._chunkUploadBudgetMs();
       const uploadT0 = performance.now();
-      const uploaded = this.chunkedTextures.step(this.renderer);
+      let lastResult = null;
+      while (performance.now() - uploadT0 < budgetMs && this.chunkedTextures.pending) {
+        lastResult = this.chunkedTextures.step(this.renderer);
+        if (!lastResult) break;
+        if (lastResult === "alloc") this._skipBeauty = true;
+      }
       const uploadMs = performance.now() - uploadT0;
       if (uploadMs > (this._uploadPeakMs || 0)) this._uploadPeakMs = uploadMs;
-      if (uploaded) {
-        this._frameCause = `texture-${uploaded}`;
-        if (uploaded === "alloc") this._skipBeauty = true;
-      }
+      if (lastResult) this._frameCause = `texture-${lastResult}`;
     } else if (
       this._frameCause !== "compile" &&
       !this._chunkUploadsAllowed() &&
