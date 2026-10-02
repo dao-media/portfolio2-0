@@ -2495,6 +2495,18 @@ export class StageExperience {
       this._floorIgnoreNext = true;
       this._frameCause = "resize";
     }
+    // Pass E+ item 2: this was only ever wired to `_onResize` (a literal
+    // window/viewport resize) — a megapixel-budget or governor-driven DPR
+    // change (every path that lands here) never resized the Bust-only
+    // packed-depth target (`EdgeSilhouetteSdf.depthRT`), leaving it stuck at
+    // whichever drawing-buffer size was active at the last real window
+    // resize. Its own doc comment says it "must match drawing-buffer size"
+    // (used to line bust depth up with FogDepthCapture) — a stale size reads
+    // as exactly the reported symptom: grass/bust silhouette sampling a
+    // depth texture at the wrong UV scale (ragged edges, grass blades
+    // collapsing to a flat disc) at any budget other than the one active
+    // when the page/canvas was last literally resized.
+    this.edgeGlitch?.setSize?.(dw, dh);
     this._publishPixelBudget();
     // The hole hides the stage. Don't rebuild shadow maps on this owner.
     // A floor notch keeps the baked shadow map; disposing it is another stall.
@@ -6022,9 +6034,30 @@ export class StageExperience {
   debugRenderTargetStats() {
     const fog = this.volumetricFog?.fogTarget;
     const input = this.post?.composer?.inputBuffer;
+    const output = this.post?.composer?.outputBuffer;
+    const bustDepth = this.edgeGlitch?.sdf?.depthRT;
+    const draw = new THREE.Vector2();
+    this.renderer.getDrawingBufferSize(draw);
+    const rt = (t) =>
+      t
+        ? {
+            w: t.width,
+            h: t.height,
+            depthW: t.depthTexture?.image?.width ?? null,
+            depthH: t.depthTexture?.image?.height ?? null
+          }
+        : null;
     return {
+      drawingBuffer: { w: draw.x, h: draw.y },
+      pixelBudgetMp: this._pixelBudgetMp,
       fog: fog ? { w: fog.width, h: fog.height } : null,
-      input: input ? { w: input.width, h: input.height } : null
+      input: rt(input),
+      output: rt(output),
+      // Pass E+ item 2: this is the target `_applyRenderScale` was missing
+      // (see its own comment) — compare its w/h to drawingBuffer above; a
+      // mismatch after a megapixel-budget change (not a window resize) is
+      // exactly the bug.
+      bustSilhouetteDepth: bustDepth ? { w: bustDepth.width, h: bustDepth.height } : null
     };
   }
 
