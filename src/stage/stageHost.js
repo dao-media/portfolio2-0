@@ -831,6 +831,12 @@ export function startStageHost(canvas, options = {}) {
       if (window.__mailTrace.length > 24) window.__mailTrace.shift();
     }
 
+    if (msg.type === "crtLive") {
+      pageTrigger = `crtLive:${msg.action || "msg"}`;
+      if (msg.action === "screenRect") hud.crtLive?.setScreenRect(msg.rect);
+      else if (msg.action === "live") hud.crtLive?.setLive(Boolean(msg.live));
+    }
+
     if (msg.type === "duo") {
       pageTrigger = `duo:${msg.action || "msg"}`;
       if (msg.action === "openMail") duoMail.open();

@@ -1,5 +1,6 @@
 import { MySpaceScreen } from "./MySpaceScreen.js";
 import { MySpacePanel } from "./MySpacePanel.js";
+import { CrtLiveDesktop } from "./CrtLiveDesktop.js";
 
 export class HUDController {
   constructor() {
@@ -9,9 +10,17 @@ export class HUDController {
 
     this.mySpaceScreen = new MySpaceScreen();
     this.mySpacePanel = new MySpacePanel();
+    this.crtLive = new CrtLiveDesktop(this.mySpaceScreen);
 
     this.mySpaceScreen.setChangeHandler((item) => {
       this.mySpacePanel.syncFromScreen(item);
+      // Navigation reaching here can originate from the canvas raycast hit
+      // path (hover/click on the 3D quad) while the live overlay is also
+      // showing — keep it in lockstep the same way the mobile panel does.
+      if (this.crtLive.isLive) {
+        this.crtLive.pageView.setView(this.mySpaceScreen.view, this.mySpaceScreen.selectedId);
+        this.crtLive.pageView.setScrollTop(0);
+      }
     });
     this.mySpaceScreen.setPoweredOnHandler(() => {
       this.updateMySpacePanelForVignette(this._vignetteIndex);

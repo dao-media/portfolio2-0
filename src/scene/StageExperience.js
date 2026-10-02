@@ -387,6 +387,10 @@ export class StageExperience {
    * @param {HTMLCanvasElement} canvas
    */
   constructor(canvas, options = {}) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[StageExperience] build commit ${typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : "unknown"}`
+    );
     this.canvas = canvas;
     this._inWorker = Boolean(options.worker || globalThis.__STAGE_WORKER);
     this._hostPost = typeof options.postMessage === "function" ? options.postMessage : null;
@@ -4703,7 +4707,17 @@ export class StageExperience {
           getCamera: () => this.camera,
           reducedMotion: this.reducedMotion,
           onAligned: () => this._snapAllVignettesToFloor(),
-          stageLights: this.stageLights
+          stageLights: this.stageLights,
+          getCanvasRect: () => this._getCanvasRect(),
+          onCrtScreenRect: (rect) => this._publishCrtLiveScreenRect(rect),
+          onCrtLiveChange: (live) => {
+            this._crtLiveState = live;
+            if (!this._inWorker) {
+              this.hud?.crtLive?.setLive(live);
+              return;
+            }
+            this._hostPost?.({ type: "crtLive", action: "live", live });
+          }
         });
         instances.push({ def, group, angle, stageDeg, instance: desktop });
       } else if (index === 2) {
@@ -5157,6 +5171,65 @@ export class StageExperience {
     return this.canvas.getBoundingClientRect();
   }
 
+  /**
+   * Pass C — bridge `DesktopVignette`'s CRT content-quad screen-rect to the
+   * host, same double-gated (0.5px) pattern as the Duo Mail `screenRect`
+   * bridge: `DesktopVignette` already gated once at the source, this gates
+   * again before a worker `postMessage` (cheap to re-check, expensive to
+   * spam the host with no-op rects every frame).
+   * @param {{ left: number, top: number, width: number, height: number, corners: [number, number][], contentW: number, contentH: number } | null} rect
+   */
+  _publishCrtLiveScreenRect(rect) {
+    if (!this._inWorker) {
+      this.hud?.crtLive?.setScreenRect(rect);
+      return;
+    }
+    if (!rect) {
+      if (this._crtLiveRectNull) return;
+      this._crtLiveRectNull = true;
+      this._hostPost?.({ type: "crtLive", action: "screenRect", rect: null });
+      return;
+    }
+    const msg = this._crtLiveRectMsg || (this._crtLiveRectMsg = {
+      type: "crtLive",
+      action: "screenRect",
+      rect: {
+        left: 0,
+        top: 0,
+        width: 0,
+        height: 0,
+        corners: [[0, 0], [0, 0], [0, 0], [0, 0]],
+        contentW: 0,
+        contentH: 0
+      }
+    });
+    const slot = msg.rect;
+    if (
+      this._crtLiveRectLive &&
+      !this._crtLiveRectNull &&
+      Math.abs(slot.left - rect.left) < 0.5 &&
+      Math.abs(slot.top - rect.top) < 0.5 &&
+      Math.abs(slot.width - rect.width) < 0.5 &&
+      Math.abs(slot.height - rect.height) < 0.5 &&
+      cornersWithin(slot.corners, rect.corners, 0.5)
+    ) {
+      return;
+    }
+    slot.left = rect.left;
+    slot.top = rect.top;
+    slot.width = rect.width;
+    slot.height = rect.height;
+    for (let i = 0; i < 4; i += 1) {
+      slot.corners[i][0] = rect.corners[i][0];
+      slot.corners[i][1] = rect.corners[i][1];
+    }
+    slot.contentW = rect.contentW;
+    slot.contentH = rect.contentH;
+    this._crtLiveRectNull = false;
+    this._crtLiveRectLive = true;
+    this._hostPost?.(msg);
+  }
+
   _hostPointerEvent(msg) {
     const event = this._hostEvent || (this._hostEvent = {
       clientX: 0,
@@ -5333,7 +5406,12 @@ export class StageExperience {
    */
   _syncWaterCursorUiChrome(clientX, clientY) {
     if (!this.waterCursor?.setUiChromeSuppressed) return;
-    const over = this._pointerOverDuoUiChrome(clientX, clientY);
+    // Pass C: `this._crtLiveState` is computed worker-side every frame
+    // (DesktopVignette._updateCrtLiveOverlay) without needing DOM access, so
+    // unlike `_pointerOverDuoUiChrome` it works correctly in worker mode —
+    // broad suppression (not a precise content-rect hit-test) is fine since
+    // "live" already implies the camera is close in on the CRT.
+    const over = this._pointerOverDuoUiChrome(clientX, clientY) || this._crtLiveState === true;
     this.waterCursor.setUiChromeSuppressed(over);
   }
 
@@ -5772,6 +5850,16 @@ export class StageExperience {
       canStartBoot: Boolean(desktop?.mySpace?.xpBoot?.canStartBoot),
       isBooting: Boolean(desktop?.mySpace?.xpBoot?.isBooting)
     };
+  }
+
+  /** DEV — Pass C CRT live-DOM eligibility, as last computed by `DesktopVignette`. */
+  debugCrtLiveState() {
+    return { live: Boolean(this._crtLiveState) };
+  }
+
+  /** DEV — the commit this worker bundle was built from (`vite.config.js`'s `__BUILD_COMMIT__`), so a stale cached/unreloaded worker is a one-line check against `git rev-parse --short HEAD`. */
+  debugVersion() {
+    return { commit: typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : "unknown" };
   }
 
   /** DEV — render-target sizes after a hop cycle (zero-size = a resize bug). */

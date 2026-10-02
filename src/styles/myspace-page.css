@@ -576,3 +576,57 @@
     z-index: 10;
   }
 }
+
+/* CRT live DOM overlay (Pass C) — the MySpace page as a real, clickable
+   element, perspective-mapped onto the 3D content quad's own projected
+   corners. Outer root stays pointer-events:none (matches the Duo Mail
+   overlay pattern) so only the positioned page itself — once shown —
+   captures clicks/wheel; everything else (canvas, other overlays) stays
+   reachable the rest of the time. */
+#crt-live-root {
+  position: fixed;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+}
+
+.crt-live__page {
+  position: fixed;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  background: #fff;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+  /* `quadToMatrix3d` assumes this untransformed box starts at (0,0). */
+  margin: 0;
+}
+
+.crt-live__page.is-shown {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.crt-live__page .ms-root {
+  width: 100%;
+  height: 100%;
+}
+
+/* Thin fresnel-ish sheen echoing the 3D glass shell's look (CrtGlassMaterial)
+   — the live DOM sits in front of that shader in paint order, so it needs
+   its own, purely cosmetic, non-interactive highlight. */
+.crt-live__glare {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.1) 0%,
+    rgba(255, 255, 255, 0.03) 18%,
+    rgba(255, 255, 255, 0) 38%,
+    rgba(255, 255, 255, 0) 80%,
+    rgba(255, 255, 255, 0.05) 100%
+  );
+}

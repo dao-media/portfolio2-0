@@ -15,6 +15,7 @@ import {
   SCREEN_MAP_PLANE
 } from "./screenTextureMap.js";
 import { CRT_CONTENT_PLANE } from "./crtBezelOpening.js";
+import { buildIeLayout } from "../../ui/myspace/ieChrome.js";
 import {
   PARALLAX_DAMP_ZONE_IDS,
   SCROLL_CAPTURE_MESH_IDS
@@ -43,6 +44,33 @@ import { spanFrame } from "../stage/frameBudget.js";
 
 const MODEL_URL = "/assets/models/pc-source/pc-from-source.glb";
 
+/**
+ * Pass C — CRT live DOM overlay. The inner content rect (excludes the IE
+ * browser chrome, which stays canvas-only) in `CRT_CONTENT_PLANE`'s own
+ * canvas-pixel space. `buildIeLayout` is pure math (no DOM) — safe to run
+ * here even though this file is worker-side in every real build; it's the
+ * exact function `MySpaceScreen`'s own canvas layout uses, so the content
+ * sub-rect this computes is pixel-identical to the host's.
+ */
+const CRT_LIVE_CONTENT_RECT = buildIeLayout({
+  x: 0,
+  y: 0,
+  w: CRT_CONTENT_PLANE.canvasWidth,
+  h: CRT_CONTENT_PLANE.canvasHeight
+}).content;
+
+const _crtLocal = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+const _crtWorld = new THREE.Vector3();
+const _crtNdc = new THREE.Vector3();
+
+/** All 4 points within `eps` px on both axes — a perspective quad is not a rect. */
+function crtCornersWithin(a, b, eps) {
+  for (let i = 0; i < 4; i += 1) {
+    if (Math.abs(a[i][0] - b[i][0]) >= eps || Math.abs(a[i][1] - b[i][1]) >= eps) return false;
+  }
+  return true;
+}
+
 export const desktopVignetteMeta = {
   name: "Retro Desktop",
   tint: 0x7ad0ff,
@@ -70,6 +98,13 @@ export class DesktopVignette {
     this.renderer = deps.renderer ?? null;
     this.loadingManager = deps.loadingManager ?? null;
     this.reducedMotion = deps.reducedMotion ?? false;
+    /** Pass C — CRT live DOM overlay hooks. */
+    this.getCanvasRect = deps.getCanvasRect ?? null;
+    this.onCrtScreenRect = deps.onCrtScreenRect ?? null;
+    this.onCrtLiveChange = deps.onCrtLiveChange ?? null;
+    this._crtLive = false;
+    this._crtRectSent = null;
+    this._crtRectNull = true;
     this._modelLoadStarted = false;
     this.interactives = [];
     /** Flattened phosphor / glass host (`pc-Mesh_2`) — no live content. */
@@ -131,7 +166,7 @@ export class DesktopVignette {
   /** @param {THREE.PerspectiveCamera} _camera
    *  @param {number} focusBlend
    *  @param {{ isActive?: boolean, transitioning?: boolean }} [_opts] */
-  updateFocus(_camera, focusBlend, _opts = {}) {
+  updateFocus(camera, focusBlend, _opts = {}) {
     this._focusBlend = focusBlend;
     const focus = THREE.MathUtils.clamp(focusBlend, 0, 1);
     const eased = focus * focus;
@@ -144,6 +179,123 @@ export class DesktopVignette {
     }
     this._syncPowerLedState();
     this._syncScreenGlow();
+    this._updateCrtLiveOverlay(camera, focusBlend, _opts);
+  }
+
+  /**
+   * Pass C — drive the CRT live DOM overlay. Eligible only once the camera
+   * has fully settled into the Desktop zoom (not merely active/current) and
+   * MySpace has actually reached the desktop (powered on, boot sequence —
+   * which stays canvas-only — finished). Posts screen-space corners every
+   * frame while eligible (0.5px-gated, same pattern as the Duo Mail
+   * overlay's `screenRect`) so parallax/cursor sway keeps it aligned; posts
+   * the live/not-live edge only once per transition.
+   */
+  _updateCrtLiveOverlay(camera, focusBlend, opts) {
+    if (!this.onCrtScreenRect && !this.onCrtLiveChange) return;
+    const poweredOn = Boolean(this.mySpace?.isPoweredOn);
+    const booting = Boolean(this.mySpace?.xpBoot?.isBooting);
+    const eligible = Boolean(opts?.isActive) && focusBlend >= 0.999 && poweredOn && !booting;
+
+    if (eligible !== this._crtLive) {
+      this._crtLive = eligible;
+      this.onCrtLiveChange?.(eligible);
+    }
+
+    if (!this._crtLive) {
+      this._publishCrtScreenRect(null);
+      return;
+    }
+    const canvasRect = this.getCanvasRect?.();
+    this._publishCrtScreenRect(
+      canvasRect ? this._computeCrtScreenRect(camera, canvasRect) : null
+    );
+  }
+
+  /**
+   * Project the content quad's inner content sub-rect (excludes IE chrome)
+   * into client pixels — same technique as `DuoFabSystem`'s screen-corner
+   * projection, but with EXACT known local corners (no vertex sampling):
+   * the quad's own geometry is a known rect, so its canvas-pixel-space
+   * sub-rect maps to local quad space by simple linear interpolation
+   * (exact, since the quad is planar), then to world via `matrixWorld`.
+   */
+  _computeCrtScreenRect(camera, canvasRect) {
+    const quad = this.screenMesh;
+    if (!quad || !camera || !canvasRect) return null;
+    quad.updateWorldMatrix(true, false);
+
+    const rect = CRT_LIVE_CONTENT_RECT;
+    const cw = CRT_CONTENT_PLANE.canvasWidth;
+    const ch = CRT_CONTENT_PLANE.canvasHeight;
+    const toLocal = (px, py, out) => {
+      const lx = (px / cw - 0.5) * CRT_CONTENT_PLANE.width;
+      const ly = (0.5 - py / ch) * CRT_CONTENT_PLANE.height;
+      out.set(lx, ly, 0);
+    };
+    // TL, TR, BR, BL of the content sub-rect, in that order.
+    toLocal(rect.x, rect.y, _crtLocal[0]);
+    toLocal(rect.x + rect.w, rect.y, _crtLocal[1]);
+    toLocal(rect.x + rect.w, rect.y + rect.h, _crtLocal[2]);
+    toLocal(rect.x, rect.y + rect.h, _crtLocal[3]);
+
+    const corners = [];
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < 4; i += 1) {
+      _crtWorld.copy(_crtLocal[i]).applyMatrix4(quad.matrixWorld);
+      _crtNdc.copy(_crtWorld).project(camera);
+      const cx = (_crtNdc.x * 0.5 + 0.5) * canvasRect.width + canvasRect.left;
+      const cy = (-_crtNdc.y * 0.5 + 0.5) * canvasRect.height + canvasRect.top;
+      if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
+      corners.push([cx, cy]);
+      minX = Math.min(minX, cx);
+      maxX = Math.max(maxX, cx);
+      minY = Math.min(minY, cy);
+      maxY = Math.max(maxY, cy);
+    }
+    return {
+      left: minX,
+      top: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+      corners,
+      contentW: rect.w,
+      contentH: rect.h
+    };
+  }
+
+  _publishCrtScreenRect(rect) {
+    if (!this.onCrtScreenRect) return;
+    if (!rect) {
+      if (this._crtRectNull) return;
+      this._crtRectNull = true;
+      this.onCrtScreenRect(null);
+      return;
+    }
+    const prev = this._crtRectSent;
+    if (
+      prev &&
+      !this._crtRectNull &&
+      Math.abs(prev.left - rect.left) < 0.5 &&
+      Math.abs(prev.top - rect.top) < 0.5 &&
+      Math.abs(prev.width - rect.width) < 0.5 &&
+      Math.abs(prev.height - rect.height) < 0.5 &&
+      crtCornersWithin(prev.corners, rect.corners, 0.5)
+    ) {
+      return;
+    }
+    this._crtRectSent = {
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+      corners: rect.corners.map((c) => [c[0], c[1]])
+    };
+    this._crtRectNull = false;
+    this.onCrtScreenRect(rect);
   }
 
   playPowerOn() {

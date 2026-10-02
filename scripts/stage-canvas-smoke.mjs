@@ -27,7 +27,17 @@ function isIgnorableConsoleError(text, location) {
   // "Failed to load resource" text never includes the URL — only
   // msg.location() does — so the favicon 404 has to be matched there.
   if (/favicon\.ico/i.test(location?.url ?? "")) return true;
-  return /Failed to load resource:.*favicon/i.test(text);
+  if (/Failed to load resource:.*favicon/i.test(text)) return true;
+  // html-to-image tries to inline @font-face rules from every loaded
+  // stylesheet (including cross-origin ones like Google Fonts) so a
+  // captured page's fonts survive outside the live DOM; reading
+  // `cssRules` off a cross-origin sheet throws per same-origin policy
+  // even with the stylesheet's own `crossorigin` set correctly. A known,
+  // long-standing html-to-image limitation (bonsaibrain/html-to-image#52,
+  // and similar) — it catches the throw itself and continues the capture
+  // without that font embedded; pre-existing noise, not something Pass C's
+  // CRT live-DOM overlay introduced or that affects any rendered output.
+  return /Failed to read the 'cssRules' property from 'CSSStyleSheet'/.test(text);
 }
 
 function isFatalWebglConsole(text) {
@@ -340,6 +350,74 @@ try {
     } else {
       console.log("✓ CRT reached XP boot after Desktop zoom");
     }
+
+    // Pass C: finish the XP boot sequence — login needs a click on the
+    // account tile, whose hit region is in CRT canvas-pixel space (raycast
+    // target, re-derived from screen pixels each time the camera moves).
+    // `window.__hud` (DEV-only, same gate as the worker's own `window.__stage`)
+    // reaches the real host-side MySpaceScreen directly — far more reliable
+    // here than re-deriving a screen-pixel click target for a canvas-drawn
+    // hit region; `isMonitorBooting` also never clears once boot starts
+    // (`xpBoot._bootStarted` latches), so `isPoweredOn` alone is the actual
+    // "reached the desktop" signal.
+    for (let i = 0; i < 50; i += 1) {
+      const clicked = await page.evaluate(() => {
+        const screen = window.__hud?.getMySpaceScreen?.();
+        const region = screen?.hitRegions?.find((r) => r.id === "__login-admin");
+        if (!region) return false;
+        screen.xpBoot.handlePointer(region.x + region.w / 2, region.y + region.h / 2);
+        return true;
+      });
+      if (clicked) break;
+      await page.waitForTimeout(200);
+    }
+    let reachedDesktop = false;
+    for (let i = 0; i < 150; i += 1) {
+      const crt = await dbg(page, "debugCrtBootState");
+      if (crt?.isPoweredOn) {
+        reachedDesktop = true;
+        break;
+      }
+      await page.waitForTimeout(200);
+    }
+    if (!reachedDesktop) {
+      fail("XP boot never reached the MySpace desktop");
+    } else {
+      let live = false;
+      for (let i = 0; i < 25; i += 1) {
+        const state = await dbg(page, "debugCrtLiveState");
+        if (state?.live) {
+          live = true;
+          break;
+        }
+        await page.waitForTimeout(200);
+      }
+      if (!live) {
+        fail("CRT live DOM overlay never went live after reaching the MySpace desktop");
+      } else {
+        // The fade-in transition + first screenRect-driven matrix3d position.
+        await page.waitForTimeout(300);
+        const link = page.locator('#crt-live-root [data-ms-link]:not([data-ms-link="__back"])').first();
+        const before = await link.count();
+        if (before === 0) {
+          fail("CRT live DOM overlay has no clickable links once live");
+        } else {
+          // Click accuracy: a real Playwright click computes its point from
+          // the element's actual (matrix3d-transformed) bounding box, so
+          // this only passes if the homography really lines the DOM up with
+          // the quad the user is looking at.
+          await link.click();
+          await page.waitForTimeout(200);
+          const back = await page.locator('#crt-live-root [data-ms-link="__back"]').count();
+          if (back === 0) {
+            fail("Clicking a live MySpace link did not navigate (no back link in detail view)");
+          } else {
+            console.log("✓ CRT live DOM overlay click navigated correctly");
+          }
+        }
+      }
+    }
+
     await page.mouse.click(10, 10);
     await page.waitForTimeout(400);
   }

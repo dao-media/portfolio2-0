@@ -5,6 +5,7 @@ function boot() {
   const canvas = document.getElementById("scene-canvas");
   if (!canvas) return;
   const hud = new HUDController();
+  if (import.meta.env.DEV) window.__hud = hud;
   startStageHost(canvas, { hud });
 }
 

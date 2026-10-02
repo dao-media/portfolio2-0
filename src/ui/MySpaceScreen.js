@@ -322,6 +322,21 @@ export class MySpaceScreen {
     this.pageView.setScrollTop(this.scrollY);
   }
 
+  /**
+   * Reconcile scroll position after the live CRT DOM overlay (real native
+   * scroll) hands control back to the canvas texture. The captured bitmap
+   * is already current — navigation already re-captures it — so this is a
+   * resync + repaint, not a fresh `html-to-image` run.
+   * @param {number} scrollTop
+   */
+  syncScrollFromLive(scrollTop) {
+    if (this.xpBoot?.active) return;
+    const next = Math.max(0, Math.min(this.maxScroll, scrollTop || 0));
+    this.scrollY = next;
+    this.pageView.setScrollTop(next);
+    if (this._pageBitmap) this._paintFrame(this._pageBitmap);
+  }
+
   handleWheel(deltaY) {
     const maxScroll = this.maxScroll;
     if (maxScroll <= 0) return false;

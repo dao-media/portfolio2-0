@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { execSync } from "node:child_process";
 import { defineConfig } from "vite";
 import { finalizeFogConfig } from "./scripts/fog-tuner-finalize.mjs";
 import { finalizeEdgeGlitchConfig } from "./scripts/edge-glitch-tuner-finalize.mjs";
@@ -189,7 +190,26 @@ function wetFloorFinalizePlugin() {
   };
 }
 
+/**
+ * Commit the running worker bundle was built from — read once at Vite
+ * startup (dev server boot / production build), not per-request, so
+ * restarting the dev server after a `git pull` is what actually refreshes
+ * it. `debugVersion()` surfaces this so a stale worker (cached bundle, a
+ * dev server that hasn't picked up the latest commit) is a one-line check
+ * instead of a guess.
+ */
+function readBuildCommit() {
+  try {
+    return execSync("git rev-parse --short HEAD", { cwd: __dirname }).toString().trim();
+  } catch {
+    return "unknown";
+  }
+}
+
 export default defineConfig({
+  define: {
+    __BUILD_COMMIT__: JSON.stringify(readBuildCommit())
+  },
   plugins: [
     fogFinalizePlugin(),
     edgeGlitchFinalizePlugin(),
