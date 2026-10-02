@@ -202,6 +202,19 @@ function readWorkRenderScale(search) {
   return 1;
 }
 
+/**
+ * Pass B item 3 — AO prototype, off by default. `?ao=1` (or `ao=true`)
+ * enables N8AO on the composer; any other value, or its absence, leaves it
+ * off. Prototype only — not wired to a persisted setting.
+ */
+function readAoEnabled(search) {
+  const params = new URLSearchParams(
+    search != null ? search : window.location.search
+  );
+  const v = params.get("ao");
+  return v === "1" || v === "true";
+}
+
 /** Tail of three r172 WebGLPrograms.getProgramCacheKey, last token first in the split. */
 const PROGRAM_KEY_TAIL = [
   "precision",
@@ -391,6 +404,7 @@ export class StageExperience {
     }
     this._renderScale = readWorkRenderScale(this._inWorker ? this._search : undefined);
     this.pixelRatio = this._fullPixelRatio * this._renderScale;
+    this._aoEnabled = readAoEnabled(this._inWorker ? this._search : undefined);
 
     if (this._inWorker) {
       this._crtPlaceholder = new WorkerCrtPlaceholder();
@@ -618,6 +632,7 @@ export class StageExperience {
         bloom: !this.reducedMotion,
         volumetricPass: this.volumetricFog,
         edgeGlitchPass: this._edgeGlitchPass,
+        aoEnabled: this._aoEnabled,
         width: this._viewportCssSize().w,
         height: this._viewportCssSize().h
       }

@@ -8,18 +8,20 @@ import {
   SMAAEffect,
   SMAAPreset
 } from "postprocessing";
+import { N8AOPostPass } from "n8ao";
 import { BLACK_HOLE_MSAA, CURSOR_DOF, NEON_BLOOM } from "./constants.js";
 import { installComposerSizePool } from "./composerSizePool.js";
 import { FilmGrainEffect } from "./FilmGrainEffect.js";
 import { PortalAwareRenderPass } from "../vignettes/PortalAwareRenderPass.js";
 
 /**
- * One live composer: PortalAwareRenderPass → volumetric fog → (optional)
- * EdgeGlitchPass → SMAA → cursor depth of field → bloom → (optional) film grain.
- * Rest AA is SMAA (multisampling 0). The black-hole sequence disables SMAA
- * and turns on MSAA. Grain defaults to **0** and stays last so it is not bloomed.
- * Depth of field stays disabled while CURSOR_DOF.enabled is false.
- * Do not add a second composer.
+ * One live composer: PortalAwareRenderPass → (optional, `?ao=1`) N8AO →
+ * volumetric fog → (optional) EdgeGlitchPass → SMAA → cursor depth of
+ * field → bloom → (optional) film grain. Rest AA is SMAA (multisampling 0).
+ * The black-hole sequence disables SMAA and turns on MSAA. Grain defaults
+ * to **0** and stays last so it is not bloomed. Depth of field stays
+ * disabled while CURSOR_DOF.enabled is false. AO is a fidelity prototype,
+ * off by default — see `options.aoEnabled`. Do not add a second composer.
  */
 export class PostPass {
   /**
@@ -32,7 +34,8 @@ export class PostPass {
    *   scene?: THREE.Scene,
    *   volumetricPass?: import("../neon/VolumetricFogPass.js").VolumetricFogPass | null,
    *   edgeGlitchPass?: import("../edgeGlitch/EdgeGlitchPass.js").EdgeGlitchPass | null,
-   *   edgeTubeGlitchPass?: import("../edgeGlitch/EdgeGlitchPass.js").EdgeGlitchPass | null
+   *   edgeTubeGlitchPass?: import("../edgeGlitch/EdgeGlitchPass.js").EdgeGlitchPass | null,
+   *   aoEnabled?: boolean
    * }} [options]
    */
   constructor(renderer, pixelRatio, grain = 0, camera, options = {}) {
@@ -63,6 +66,26 @@ export class PostPass {
     );
     // Stencil must clear each frame or Equal content smears outside the opening.
     this.renderPass.clearPass.setClearFlags(true, true, true);
+
+    // Fidelity prototype (§20 Pass B item 3) — off by default, `?ao=1`.
+    // Not in the DO-NOT list: governor/megapixel values, bloom threshold,
+    // lights and environmentIntensity are all untouched; this only adds an
+    // optional extra pass to the existing composer.
+    this.aoPass = options.aoEnabled
+      ? new N8AOPostPass(
+          this._scene ?? new THREE.Scene(),
+          camera,
+          options.width || 1,
+          options.height || 1
+        )
+      : null;
+    if (this.aoPass) {
+      this.aoPass.configuration.halfRes = true;
+      this.aoPass.configuration.aoRadius = 1.5;
+      this.aoPass.configuration.intensity = 3;
+      this.aoPass.configuration.distanceFalloff = 1;
+    }
+
     const bloomScale = NEON_BLOOM.resolutionScale ?? 0.5;
     // mipmapBlur: false — Kawase/mipmap path intermittently outputs a full-black
     // frame when the camera translates every frame (stop-0 parallax). Kernel
@@ -100,10 +123,15 @@ export class PostPass {
     this.grainPass = new EffectPass(camera, this.grainEffect);
 
     this.composer.addPass(this.renderPass);
+    if (this.aoPass) {
+      this.composer.addPass(this.aoPass);
+    }
     if (this.volumetricPass) {
       this.composer.addPass(this.volumetricPass);
     }
     // fog → EdgeGlitch → SMAA → depth of field → bloom → grain
+    // (AO, when enabled, sits right after the render pass so bloom reads
+    // occluded color, not the other way around.)
     if (this.edgeGlitchPass) {
       this.composer.addPass(this.edgeGlitchPass);
     }
@@ -341,5 +369,6 @@ export class PostPass {
     // edgeTubeGlitchEffect is owned by EdgeGlitchSystem
     this.grainEffect.dispose();
     this.volumetricPass?.dispose?.();
+    this.aoPass?.dispose?.();
   }
 }
