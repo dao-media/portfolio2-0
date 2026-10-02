@@ -958,21 +958,46 @@ export class StageExperience {
       if (!ctx) return null;
       ctx.drawImage(img, 0, 0, sampleW, sampleH);
       const data = ctx.getImageData(0, 0, sampleW, sampleH).data;
-      let min = 1;
+      const lums = new Array(sampleW * sampleH);
       let sum = 0;
-      let count = 0;
-      for (let i = 0; i < data.length; i += 4) {
+      for (let i = 0, j = 0; i < data.length; i += 4, j += 1) {
         const lum = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 255;
-        if (lum < min) min = lum;
+        lums[j] = lum;
         sum += lum;
-        count += 1;
       }
-      const stats = { min: +min.toFixed(3), mean: count ? +(sum / count).toFixed(3) : null };
+      lums.sort((a, b) => a - b);
+      const p5Index = Math.max(0, Math.floor(lums.length * 0.05) - 1);
+      const stats = {
+        min: +lums[0].toFixed(3),
+        p5: +lums[p5Index].toFixed(3),
+        mean: lums.length ? +(sum / lums.length).toFixed(3) : null
+      };
       tex.userData.__lumStats = stats;
       return stats;
     } catch {
       return null;
     }
+  }
+
+  /**
+   * WebGL has no API to read back a texture's actual allocated internal
+   * format from the GPU (desktop GL's `glGetTexLevelParameter` has no WebGL
+   * equivalent) — this instead replicates three.js r172's own deterministic
+   * `colorSpace`/`type`/`format` → internal-format mapping
+   * (`WebGLTextures.getInternalFormat`, uncompressed RGBA8-family path,
+   * which is what every texture here uses) and reports whether the texture
+   * has actually been uploaded yet (`allocated`) — the Pass A class of bug
+   * (colorSpace set after upload, so the wrong format is already baked in)
+   * shows up as `allocated: true` with a `colorSpace` that doesn't match
+   * what the texture was uploaded under; `allocated: false` means nothing
+   * has claimed a GL object for it yet and this is purely prospective.
+   * @param {THREE.Texture | null | undefined} tex
+   */
+  _textureGlInternalFormat(tex) {
+    if (!tex?.isTexture) return null;
+    const allocated = Boolean(this.renderer?.properties?.get(tex)?.__webglTexture);
+    const format = tex.colorSpace === THREE.SRGBColorSpace ? "SRGB8_ALPHA8" : "RGBA8";
+    return { format, colorSpace: tex.colorSpace ?? null, allocated };
   }
 
   /**
@@ -1090,7 +1115,11 @@ export class StageExperience {
           hasAoMap: Boolean(mat?.aoMap),
           aoMapIntensity: typeof mat?.aoMapIntensity === "number" ? +mat.aoMapIntensity.toFixed(3) : null,
           hasUv2: Boolean(obj.geometry?.attributes?.uv2 ?? obj.geometry?.attributes?.uv1),
-          baseColorLum: this._textureLuminanceStats(mat?.map)
+          baseColorLum: this._textureLuminanceStats(mat?.map),
+          vertexColors: Boolean(mat?.vertexColors),
+          hasGeometryColorAttr: Boolean(obj.geometry?.attributes?.color),
+          mapColorSpace: mat?.map?.colorSpace ?? null,
+          mapGlInternalFormat: this._textureGlInternalFormat(mat?.map)
         });
       }
     });
@@ -1101,6 +1130,115 @@ export class StageExperience {
       parentedInGroup: Boolean(root.parent),
       meshCount: meshes.length,
       meshes
+    };
+  }
+
+  /**
+   * DEV — isolate a named root under the real stage lighting (hide every
+   * other mesh, reframe the camera tight on it, paint one frame, freeze the
+   * tick) so it can be screenshotted without the camera rig fighting direct
+   * positioning. Pair with `debugUnframeRoot` to restore. Re-added twice now
+   * (Pass B, Pass B2) for the same "is this prop actually readable" check —
+   * kept as permanent tooling this time instead of a throwaway.
+   * `window.__stageDebug("debugFrameRoot", 3, "cuneiform-tablet-root")`.
+   */
+  debugFrameRoot(vignetteIndex, rootName) {
+    const group = this.vignettes?.[vignetteIndex]?.group;
+    if (!group) return { error: "no such vignette" };
+    let root = null;
+    group.traverse((obj) => {
+      if (!root && obj.name === rootName) root = obj;
+    });
+    if (!root) return { found: false, rootName };
+    const box = new THREE.Box3().setFromObject(root);
+    if (box.isEmpty()) return { error: "empty bounds" };
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const radius = Math.max(size.x, size.y, size.z) * 0.5 || 0.1;
+    const fovRad = (this.camera.fov * Math.PI) / 180;
+    const dist = (radius / Math.sin(fovRad / 2)) * 1.4;
+
+    if (!this._debugFrameSaved) {
+      this._debugFrameSaved = {
+        camPos: this.camera.position.clone(),
+        camQuat: this.camera.quaternion.clone(),
+        visibility: []
+      };
+      this.scene.traverse((obj) => {
+        if (!obj.isMesh && !obj.isLine && !obj.isPoints) return;
+        this._debugFrameSaved.visibility.push({ obj, visible: obj.visible });
+      });
+    }
+    this.scene.traverse((obj) => {
+      if (!obj.isMesh && !obj.isLine && !obj.isPoints) return;
+      let underRoot = false;
+      let p = obj;
+      while (p) {
+        if (p === root) { underRoot = true; break; }
+        p = p.parent;
+      }
+      obj.visible = underRoot;
+    });
+    this.camera.position.copy(center).addScaledVector(this.camera.getWorldDirection(new THREE.Vector3()), -dist);
+    this.camera.lookAt(center);
+    this.camera.updateMatrixWorld();
+    const prevTarget = this.renderer.getRenderTarget();
+    this.renderer.setRenderTarget(null);
+    this.renderer.render(this.scene, this.camera);
+    this.renderer.setRenderTarget(prevTarget);
+    return { ok: true };
+  }
+
+  /** DEV — restores what `debugFrameRoot` hid/moved, and resumes the tick. */
+  debugUnframeRoot() {
+    const saved = this._debugFrameSaved;
+    if (!saved) return { ok: false };
+    this.camera.position.copy(saved.camPos);
+    this.camera.quaternion.copy(saved.camQuat);
+    this.camera.updateMatrixWorld();
+    for (const { obj, visible } of saved.visibility) obj.visible = visible;
+    this._debugFrameSaved = null;
+    return { ok: true };
+  }
+
+  /** DEV — screen-space CSS-pixel center/box for a named root's world AABB (identifying a prop on screen without guessing from a screenshot). `window.__stageDebug("debugRootScreenBox", 3, "cuneiform-tablet-root")`. */
+  debugRootScreenBox(vignetteIndex, rootName) {
+    const group = this.vignettes?.[vignetteIndex]?.group;
+    if (!group) return { error: "no such vignette" };
+    let root = null;
+    group.traverse((obj) => {
+      if (!root && obj.name === rootName) root = obj;
+    });
+    if (!root) return { found: false, rootName };
+    const box = new THREE.Box3().setFromObject(root);
+    if (box.isEmpty()) return { found: true, error: "empty bounds" };
+    const canvasRect = this._getCanvasRect();
+    const corners = [];
+    for (let xi = 0; xi < 2; xi += 1) {
+      for (let yi = 0; yi < 2; yi += 1) {
+        for (let zi = 0; zi < 2; zi += 1) {
+          const v = new THREE.Vector3(
+            xi ? box.max.x : box.min.x,
+            yi ? box.max.y : box.min.y,
+            zi ? box.max.z : box.min.z
+          ).project(this.camera);
+          corners.push([
+            (v.x * 0.5 + 0.5) * canvasRect.width + canvasRect.left,
+            (-v.y * 0.5 + 0.5) * canvasRect.height + canvasRect.top
+          ]);
+        }
+      }
+    }
+    const xs = corners.map((c) => c[0]);
+    const ys = corners.map((c) => c[1]);
+    return {
+      found: true,
+      left: Math.min(...xs),
+      top: Math.min(...ys),
+      right: Math.max(...xs),
+      bottom: Math.max(...ys),
+      centerX: (Math.min(...xs) + Math.max(...xs)) / 2,
+      centerY: (Math.min(...ys) + Math.max(...ys)) / 2
     };
   }
 
@@ -6246,6 +6384,10 @@ export class StageExperience {
   }
 
   _animate() {
+    if (this._debugFrameSaved) {
+      requestAnimationFrame(this._animate);
+      return;
+    }
     this.frameBudget?.begin();
     const wall = performance.now();
     const since = this._rafEnd ? wall - this._rafEnd : 0;
