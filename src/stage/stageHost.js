@@ -606,6 +606,63 @@ export function startStageHost(canvas, options = {}) {
     window.__duoLive = true;
   }
 
+  /**
+   * Pass F — flight-recorder pill (Shift+D in the worker toggles it; the
+   * worker has no DOM, so the page owns the actual element). Clicking the
+   * pill fetches the full dump over the existing debug-call bridge and
+   * downloads it as .json — the "Shift+D+click to save" UX from the spec,
+   * read as "Shift+D opens the pill, clicking the pill saves."
+   */
+  let flightPillEl = null;
+  function updateFlightPill(msg) {
+    if (!msg.visible) {
+      flightPillEl?.remove();
+      flightPillEl = null;
+      return;
+    }
+    if (!flightPillEl) {
+      flightPillEl = document.createElement("button");
+      flightPillEl.type = "button";
+      flightPillEl.id = "flight-recorder-pill";
+      flightPillEl.style.cssText = [
+        "position:fixed",
+        "right:12px",
+        "bottom:12px",
+        "z-index:999999",
+        "font:11px/1.4 ui-monospace,monospace",
+        "color:#eafff2",
+        "background:rgba(10,20,16,0.82)",
+        "border:1px solid rgba(255,255,255,0.25)",
+        "border-radius:8px",
+        "padding:6px 10px",
+        "cursor:pointer",
+        "pointer-events:auto"
+      ].join(";");
+      flightPillEl.addEventListener("click", async () => {
+        flightPillEl.textContent = "flight: saving…";
+        try {
+          const dump = await window.__stageDebug("flightDump");
+          const blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `flight-recorder-${Date.now()}.json`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        } catch (err) {
+          console.warn("[FlightRecorder] save failed:", err);
+        }
+      });
+      document.body.appendChild(flightPillEl);
+    }
+    const counts = Object.entries(msg.counts || {})
+      .map(([k, v]) => `${k}:${v}`)
+      .join(" ") || "none yet";
+    flightPillEl.textContent = `flight #${msg.frameCount ?? 0} — ${counts} (click to save)`;
+  }
+
   function duoShellVersion(shell) {
     const text = (shell.textContent || "").replace(/\s+/g, " ").trim();
     return `${text.length}:${text.slice(0, 120)}`;
@@ -774,6 +831,10 @@ export function startStageHost(canvas, options = {}) {
     if (msg.type === "hud") {
       if (typeof msg.fps === "number") hud.setFps(msg.fps);
       if (msg.readout) hud.setReadout(msg.readout);
+    }
+
+    if (msg.type === "flight") {
+      updateFlightPill(msg);
     }
 
     if (msg.type === "dom") {

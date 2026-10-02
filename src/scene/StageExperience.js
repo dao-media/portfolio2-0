@@ -111,6 +111,7 @@ import {
   setGroupRenderOpacity,
   warmMeshesChunked
 } from "./stage/stageModelReveal.js";
+import { FlightRecorder, noteFlight, readFlightEnabled, setActiveFlightRecorder } from "./stage/flightRecorder.js";
 import { createFrameBudget, setActiveFrameBudget, spanFrame, tagFrame } from "./stage/frameBudget.js";
 import { createStageLightRig } from "./stage/StageLightRig.js";
 import {
@@ -409,6 +410,9 @@ export class StageExperience {
     this._renderScale = readWorkRenderScale(this._inWorker ? this._search : undefined);
     this.pixelRatio = this._fullPixelRatio * this._renderScale;
     this._aoEnabled = readAoEnabled(this._inWorker ? this._search : undefined);
+    this._flightEnabled = readFlightEnabled(this._inWorker ? this._search : undefined);
+    /** @type {FlightRecorder | null} set once `this.renderer` exists, below. */
+    this._flight = null;
 
     if (this._inWorker) {
       this._crtPlaceholder = new WorkerCrtPlaceholder();
@@ -504,6 +508,7 @@ export class StageExperience {
     this._floorIgnoreNext = false;
     this._resizeSkipScene = false;
     this._skipBeauty = false;
+    this._hasPresentedFrame = false;
     this._flushShadowBake = false;
     this._frameCause = "render";
     this._lastCause = "render";
@@ -513,6 +518,31 @@ export class StageExperience {
     this._installGapProbe();
     this._floorPostT = 0;
     this._bakeScratch = new THREE.WebGLRenderTarget(4, 4, { depthBuffer: true });
+
+    // Pass F — flight recorder, `?flight=1`. Root getters are lazy closures;
+    // `this.vignettes`/`this.neon`/`this.blackHole` don't exist yet at this
+    // point in the constructor, only by the time a frame actually ticks.
+    if (this._flightEnabled) {
+      this._flight = new FlightRecorder({
+        renderer: this.renderer,
+        roots: [
+          { label: "bust", get: () => this.vignettes?.[0]?.instance?.bustRoot ?? null },
+          { label: "tree", get: () => this.vignettes?.[0]?.instance?.appleRoot ?? null },
+          { label: "lawn", get: () => this.vignettes?.[0]?.instance?.grassRoot ?? null },
+          { label: "lantern", get: () => this.neon?.entries?.[0]?.tube ?? null },
+          { label: "black-hole", get: () => this.blackHole?.group ?? null },
+          { label: "pc", get: () => this.vignettes?.[1]?.instance?.pcRoot ?? null },
+          { label: "sidekick", get: () => this.vignettes?.[2]?.instance?.sidekickRoot ?? null },
+          { label: "ptolemy", get: () => this.vignettes?.[3]?.instance?.group?.getObjectByName?.("ptolemy-root") ?? null },
+          { label: "ishtar-gate", get: () => this.vignettes?.[3]?.instance?.group?.getObjectByName?.("ishtar-gate-root") ?? null },
+          { label: "lucy", get: () => this.vignettes?.[3]?.instance?.group?.getObjectByName?.("lucy-root") ?? null },
+          { label: "cuneiform-tablet", get: () => this.vignettes?.[3]?.instance?.group?.getObjectByName?.("cuneiform-tablet-root") ?? null }
+        ]
+      });
+      setActiveFlightRecorder(this._flight);
+      // eslint-disable-next-line no-console
+      console.log("[FlightRecorder] enabled via ?flight=1 — window.__stageDebug(\"flightDump\") to read back, Shift+D for the on-screen pill.");
+    }
 
     const view = this._viewportCssSize();
     this.camera = new THREE.PerspectiveCamera(
@@ -2361,6 +2391,27 @@ export class StageExperience {
   }
 
   /**
+   * Pass F — Shift+D toggles the flight-recorder pill. The pill itself is a
+   * page-side DOM element (`stageHost.js` owns it, since the worker has no
+   * DOM); clicking it calls `flightDump()` over the existing debug-call
+   * bridge and downloads the result as .json. A no-op (logged) when
+   * `?flight=1` wasn't on this load, so the shortcut is always safe to press.
+   */
+  _toggleFlightPill() {
+    if (!this._flight) {
+      console.log('[FlightRecorder] not enabled — reload with ?flight=1 to use Shift+D.');
+      return;
+    }
+    this._flightPillVisible = !this._flightPillVisible;
+    const summary = this._flight.pillSummary();
+    if (this._inWorker) {
+      this._hostPost?.({ type: "flight", visible: this._flightPillVisible, ...summary });
+    } else {
+      console.log("[FlightRecorder] Shift+D —", JSON.stringify(summary));
+    }
+  }
+
+  /**
    * Subject root for accent lights (extend per stop later).
    * @param {number} index
    * @returns {THREE.Object3D | null}
@@ -2403,6 +2454,14 @@ export class StageExperience {
 
   debugFrameBudget() {
     return this.frameBudget?.dump() ?? null;
+  }
+
+  /**
+   * Pass F — `window.__stageDebug("flightDump")`. Returns `{ enabled: false }`
+   * when the recorder wasn't started (no `?flight=1` on this load).
+   */
+  flightDump() {
+    return this._flight?.dump() ?? { enabled: false };
   }
 
   debugWorkQuality() {
@@ -2468,6 +2527,7 @@ export class StageExperience {
       this.post && (this.post.drawWidth !== dw || this.post.drawHeight !== dh)
     );
     if (!canvasChanged && !drawChanged) return;
+    noteFlight("resize", { canvasChanged, drawChanged, dw, dh, canvasRatio: +canvasRatio.toFixed(3) });
     const visible = Boolean(this.introComplete || this._blackHoleActive);
     if (canvasChanged) {
       if (visible) {
@@ -4574,7 +4634,12 @@ export class StageExperience {
         const baked = this.wetFloor.update?.(time, { probeWorld: neonPos, hideExtra: [] });
         if (baked) {
           this._frameCause = "wet-bake";
-          this._skipBeauty = true;
+          // Pass F: confirmed via the flight recorder that this single-frame
+          // skip produces a real black flash (BLACK trigger, luminance
+          // dropping to 0) when it fires post-land during a hop, not just a
+          // harmless repeated frame — same `_hasPresentedFrame` rule as
+          // warmVignette0.js's bakes.
+          this._skipBeauty = !this._hasPresentedFrame;
         }
       }
       return;
@@ -5222,6 +5287,13 @@ export class StageExperience {
         if (tag === "INPUT" || tag === "TEXTAREA" || event.target?.isContentEditable) return;
         event.preventDefault();
         this._logStarFieldTuning();
+        return;
+      }
+      if (event.key.toLowerCase() === "d" && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        const tag = event.target?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || event.target?.isContentEditable) return;
+        event.preventDefault();
+        this._toggleFlightPill();
         return;
       }
       if (event.key === "Escape") {
@@ -6446,6 +6518,7 @@ export class StageExperience {
       return;
     }
     this.frameBudget?.begin();
+    this._flight?.beginFrame();
     const wall = performance.now();
     const since = this._rafEnd ? wall - this._rafEnd : 0;
     const tasks = this._gapTasks?.splice(0, this._gapTasks.length) || [];
@@ -6633,6 +6706,9 @@ export class StageExperience {
           this._hostPost?.({ type: "hud", fps, readout });
         }
       }
+      if (this._flightPillVisible && this._flight && this._inWorker) {
+        this._hostPost?.({ type: "flight", visible: true, ...this._flight.pillSummary() });
+      }
     }
 
     const glitchCost = this._edgeGlitchCostActive();
@@ -6783,11 +6859,17 @@ export class StageExperience {
     if (this._flushShadowBake) {
       this._flushShadowBake = false;
       this._frameCause = "shadow-bake";
+      // Pass F: this was the other confirmed source of a real black flash
+      // (flight recorder: BLACK trigger, luminance -> 0) on a frame that had
+      // already landed and presented real content — same fix as the wet-bake
+      // and warmVignette0.js sites.
+      const skipThisBakeFrame = !this._hasPresentedFrame;
+      noteFlight("bake", { kind: "shadow-flush", skipsBeauty: skipThisBakeFrame });
       const prevTarget = this.renderer.getRenderTarget();
       this.renderer.setRenderTarget(this._bakeScratch);
       this._withoutGrassShadows(() => this.renderer.render(this.scene, this.camera));
       this.renderer.setRenderTarget(prevTarget);
-      this._skipBeauty = true;
+      this._skipBeauty = skipThisBakeFrame;
     }
     this._markPre("tail", preT);
     this._lastPreMs = performance.now() - workT0;
@@ -6797,10 +6879,16 @@ export class StageExperience {
     this._snapshotGl();
     const beautyT0 = performance.now();
     const revealNow = Boolean(this._revealPending);
+    const skippedBeautyThisFrame = this._skipBeauty;
     if (!this._skipBeauty) {
       this.post.render(this.scene, this.camera, t, {
         grainStrength: this._postGrainStrength
       });
+      // Pass F — latches once, on the first real beauty frame this session
+      // ever presents (effectively frame 1), and never goes false again. See
+      // warmVignette0.js's "live" phase for why this replaced `world.visible`
+      // as the "is it safe to skip" check.
+      this._hasPresentedFrame = true;
     }
     if (this._pendingFrameReadback && !this._skipBeauty) {
       const { x, y, w, h, resolve } = this._pendingFrameReadback;
@@ -6837,6 +6925,24 @@ export class StageExperience {
     this._lastWaterMs = performance.now() - waterT0;
     this._lastWorkMs = performance.now() - workT0;
     this._lastCause = this._frameCause;
+    if (this._flight) {
+      const draw = new THREE.Vector2();
+      this.renderer.getDrawingBufferSize(draw);
+      this._flight.endFrame({
+        frameMs,
+        governorLevel: this.perfGovernor?.level ?? null,
+        pixelRatio: this.pixelRatio,
+        drawingBuffer: { w: draw.x, h: draw.y },
+        frameCause: this._lastCause,
+        skipBeauty: skippedBeautyThisFrame,
+        chunkPending: this.chunkedTextures?.pending ?? null,
+        chunkMipmapPending: this.chunkedTextures?.mipmapPending ?? null,
+        worldVisible: Boolean(this.world?.visible),
+        warmPhase: this._vignette0Warm?.phase ?? null,
+        warmLiveAt: this._vignette0Warm?._liveAt ?? null,
+        warmLiveKind: this._vignette0Warm?._liveSteps?.[this._vignette0Warm?._liveAt]?.kind ?? null
+      });
+    }
     this._frameCause = "render";
     this._publishFloor(dt);
     this.frameBudget?.end(dt);

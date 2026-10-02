@@ -95,6 +95,10 @@ export function stepVignette0Warm(stage, state) {
       state.phase = state.textures > 0 ? "textures" : "shadow";
       return state;
     }
+    // Still free here — this phase always completes before `bustReady` can
+    // ever go true (nothing has unblocked the drop yet, so nothing real is
+    // on screen). See the "live" phase below for the site that actually
+    // needed the fix (Pass F).
     stage._skipBeauty = true;
     stage._frameCause = "compile";
     state._compilePending = true;
@@ -195,7 +199,26 @@ export function stepVignette0Warm(stage, state) {
     // produces a real black frame, not a merely-stale one. Every step below
     // already restores camera/visibility/uniform state synchronously before
     // returning, so it's safe to let the beauty pass run this same tick.
-    stage._skipBeauty = !stage.world?.visible;
+    //
+    // Pass F: `world.visible` was the wrong proxy for "has anything real
+    // been shown yet" — it races with `_bustWarmReady()` at black-hole
+    // spiral-complete (`_onBlackHoleSpiralComplete` sets
+    // `world.visible = bustReady`, which is often still false at that exact
+    // instant; the real `world.visible = true` only lands later, inside
+    // `_tickIntroFromCameraRig`'s `_descentPendingWarm` branch). The flight
+    // recorder caught a 150+-frame stretch of this skip with `world.visible`
+    // already toggled back to a presented, on-screen Bust scene — the "live"
+    // phase's later steps (env/smaa/duo waits) kept re-deriving the skip
+    // from `world.visible` long after a real frame had already been shown,
+    // reproducing the reported "entire Bust scene disappears for ~1.2s"
+    // symptom. `state.bustReady` is the actual invariant for this specific
+    // phase: false only for Bust's own step (0), before which nothing real
+    // is on screen yet and the drop itself is still blocked on this same
+    // sequence (skipping stays genuinely free, same perf envelope as
+    // before); true for every step after it, by which point the drop has
+    // already unblocked and Bust is already presented — so none of them may
+    // ever skip again, no matter what `world.visible` says at that instant.
+    stage._skipBeauty = !state.bustReady;
     // Only a "scene" step does real synchronous compile/draw work worth
     // flagging — the other kinds are cheap bookkeeping, and setting
     // _frameCause = "compile" unconditionally here starved the chunk-texture

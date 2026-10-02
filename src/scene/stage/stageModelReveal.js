@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { tagFrame } from "./frameBudget.js";
+import { noteFlight } from "./flightRecorder.js";
 
 /**
  * Set uniform opacity on every mesh under a vignette root (for silent mount + fade-in).
@@ -155,8 +156,14 @@ export function hideSceneExcept(scene, root) {
     obj.visible = false;
     hidden.push(obj);
   });
+  noteFlight("hideSceneExcept", {
+    root: root?.name || "(unnamed)",
+    hiddenCount: hidden.length,
+    hiddenNames: hidden.slice(0, 8).map((obj) => obj.name || "(unnamed)")
+  });
   return () => {
     for (const obj of hidden) obj.visible = true;
+    noteFlight("hideSceneExcept-restore", { root: root?.name || "(unnamed)", restoredCount: hidden.length });
   };
 }
 
@@ -171,6 +178,7 @@ export function hideSceneExcept(scene, root) {
  */
 export async function compileHeldRoot(renderer, scene, camera, root) {
   if (!renderer || !scene || !camera) return;
+  noteFlight("compileHeldRoot-start", { root: root?.name || "(unnamed)" });
   const mask = camera.layers.mask;
   const prevTarget = renderer.getRenderTarget();
   const prevAutoClear = renderer.autoClear;
@@ -196,7 +204,9 @@ export async function compileHeldRoot(renderer, scene, camera, root) {
   renderer.autoClear = prevAutoClear;
   camera.layers.mask = mask;
   for (const light of lights) light.layers.disable(GPU_HOLD_LAYER);
+  noteFlight("compileHeldRoot-await", { root: root?.name || "(unnamed)" });
   await linked;
+  noteFlight("compileHeldRoot-resumed", { root: root?.name || "(unnamed)" });
   camera.layers.enable(GPU_HOLD_LAYER);
   for (const light of lights) light.layers.enable(GPU_HOLD_LAYER);
   const restoreDraw = root ? hideSceneExcept(scene, root) : null;
@@ -210,6 +220,7 @@ export async function compileHeldRoot(renderer, scene, camera, root) {
   renderer.autoClear = prevAutoClear;
   camera.layers.mask = mask;
   for (const light of lights) light.layers.disable(GPU_HOLD_LAYER);
+  noteFlight("compileHeldRoot-done", { root: root?.name || "(unnamed)" });
 }
 
 const GPU_TEXTURE_KEYS = [
@@ -283,6 +294,7 @@ export async function warmMeshesChunked(root, renderer, yieldFrame, onSlowTextur
         const t0 = performance.now();
         renderer.initTexture(tex);
         const ms = performance.now() - t0;
+        noteFlight("texture-upload", { root: root?.name || "(unnamed)", ms: Math.round(ms * 10) / 10 });
         if (gl) {
           const tf1 = performance.now();
           gl.finish();
