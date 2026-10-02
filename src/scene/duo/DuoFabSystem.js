@@ -628,10 +628,11 @@ export class DuoFabSystem {
       new THREE.Vector3(0, 0, 1)
     );
 
-    let bestFlat = null;
-    let bestScore = -Infinity;
-    let bestSigns = null;
-
+    // Build every flat (flipN × flipB) candidate with its heuristic score,
+    // instead of only keeping the single best — the lens-side check below
+    // needs to be able to fall through to a different candidate than the
+    // heuristic's favorite if that one fails geometrically.
+    const flatCandidates = [];
     for (const flipN of [1, -1]) {
       for (const flipB of [1, -1]) {
         const normal = axes.normal.clone().multiplyScalar(flipN);
@@ -654,31 +655,74 @@ export class DuoFabSystem {
         const b2 = bottom.clone().applyQuaternion(q);
         const r2 = right.clone().applyQuaternion(q);
         const score = n2.y * 3 + b2.z * 2 + r2.x;
-        if (score > bestScore) {
-          bestScore = score;
-          bestFlat = flat;
-          bestSigns = { flipN, flipB, n2: n2.toArray(), b2: b2.toArray(), r2: r2.toArray() };
-        }
+        flatCandidates.push({
+          flat,
+          score,
+          signs: { flipN, flipB, n2: n2.toArray(), b2: b2.toArray(), r2: r2.toArray() }
+        });
       }
     }
 
-    if (bestFlat) {
-      // PCA "bottom" is an unsigned short axis. The winning sign parks the
-      // hardware top on +Z (near). Ry(π) around the flattened normal swaps
-      // that for the hardware bottom before the tip, so the tilt stays.
+    if (flatCandidates.length) {
+      // PCA "bottom" is an unsigned short axis — nothing in the PCA itself
+      // says which physical edge (camera module vs. its opposite) a given
+      // sign combination actually lands on, and the heuristic score (biased
+      // toward "normal roughly up, right roughly +X") can't tell either —
+      // this is exactly the back-and-forth C25 flagged, re-deciding a Ry(π)
+      // by feel each time. Settle it empirically instead: for every
+      // (flipN, flipB) candidate, with and without an extra Ry(π), actually
+      // apply it to the live scene graph and measure where the camera-lens
+      // glass (`right_glass`/`left_glass` — this GLB has no mesh literally
+      // named "camera") lands relative to the HUD camera. Keep the
+      // highest-scoring candidate that puts the lens on the far side, so the
+      // opposite (hardware bottom) edge is the one that faces the viewer.
       const halfTurn = new THREE.Quaternion().setFromAxisAngle(_AXIS_Y, Math.PI);
-      const baked = bestFlat.clone();
-      baked.premultiply(halfTurn);
-      baked.premultiply(tipQ);
+      // Matches what the real "fully open" pose actually looks like at
+      // runtime: `tick()` premultiplies this spring-settled tilt on top of
+      // the slerped iso quaternion whenever `state !== "idle"` — measuring
+      // without it tests a pose the viewer never actually sees.
+      const mailFaceQ = new THREE.Quaternion().setFromAxisAngle(_AXIS_X, DUO_ISO_MAIL_FACE);
+      const tried = [];
+      let winner = null;
+      for (const cand of flatCandidates) {
+        for (const useHalfTurn of [false, true]) {
+          const q = cand.flat.clone();
+          if (useHalfTurn) q.premultiply(halfTurn);
+          q.premultiply(tipQ);
+          const qWithFace = q.clone().premultiply(mailFaceQ);
+          this.iso.quaternion.copy(qWithFace);
+          this.root.updateMatrixWorld(true);
+          this._refreshSkin();
+          const lens = this._measureOpenLensSide();
+          tried.push({ signs: cand.signs, score: cand.score, useHalfTurn, lens });
+          if (lens?.pass && (!winner || cand.score > winner.score)) {
+            winner = { quat: q, score: cand.score, signs: cand.signs, useHalfTurn, lens };
+          }
+        }
+      }
+
+      let baked;
+      if (winner) {
+        baked = winner.quat;
+      } else {
+        // No candidate's lens landed on the far side (lens mesh missing, or
+        // a degenerate PCA) — fall back to the original heuristic-best
+        // (with half-turn, its prior default) rather than guess blind.
+        const best = flatCandidates.reduce((a, b) => (b.score > a.score ? b : a));
+        baked = best.flat.clone().premultiply(halfTurn).premultiply(tipQ);
+        console.warn("[DuoFab] open iso lens-side check found no passing candidate", tried);
+      }
+
       this._isoOpenQuat.copy(baked);
       this._openIsoBaked = true;
       this._openIsoDebug = {
-        score: +bestScore.toFixed(3),
         tip: DUO_ISO_OPEN_TIP,
-        halfTurn: Math.PI,
-        signs: bestSigns,
         restNormal: axes.normal.toArray(),
-        restBottom: axes.bottom.toArray()
+        restBottom: axes.bottom.toArray(),
+        winner: winner
+          ? { score: +winner.score.toFixed(3), signs: winner.signs, useHalfTurn: winner.useHalfTurn, lens: winner.lens }
+          : null,
+        tried
       };
       console.info("[DuoFab] open iso baked from insight", this._openIsoDebug);
     } else {
@@ -709,6 +753,47 @@ export class DuoFabSystem {
     this._scrubFold(fold);
     this.root.updateMatrixWorld(true);
     this._refreshSkin();
+  }
+
+  /**
+   * Pass D — measures the CURRENT (live transform) world position of the
+   * camera-lens glass (`right_glass`/`left_glass` — this GLB has no mesh
+   * literally named "camera") against the HUD camera, under whatever pose
+   * is presently applied. Caller is responsible for posing the scene graph
+   * first (and restoring it after); this only measures. `pass: true` means
+   * the lens sits on the side of the phone AWAY from the HUD camera, i.e.
+   * the opposite (hardware bottom) edge faces the viewer.
+   * @returns {{ pass: boolean, lensDotView: number, lensCenterWorld: number[], phoneCenterWorld: number[] } | null}
+   */
+  _measureOpenLensSide() {
+    const target = this.armature ?? this.model;
+    if (!target) return null;
+    const lensNames = ["right_glass", "left_glass"];
+    const lensPos = new THREE.Vector3();
+    let lensN = 0;
+    target.traverse((obj) => {
+      if (!obj.isMesh || !obj.visible || !lensNames.includes(obj.name)) return;
+      obj.getWorldPosition(_V);
+      lensPos.add(_V);
+      lensN += 1;
+    });
+    if (!lensN) return null;
+    lensPos.multiplyScalar(1 / lensN);
+
+    const phoneBox = new THREE.Box3().setFromObject(target);
+    if (phoneBox.isEmpty()) return null;
+    const phoneCenter = phoneBox.getCenter(new THREE.Vector3());
+    const viewDir = new THREE.Vector3()
+      .subVectors(this.hudCamera.position, phoneCenter)
+      .normalize();
+    const lensDotView = lensPos.clone().sub(phoneCenter).dot(viewDir);
+
+    return {
+      pass: lensDotView < 0,
+      lensDotView: +lensDotView.toFixed(4),
+      lensCenterWorld: lensPos.toArray().map((n) => +n.toFixed(4)),
+      phoneCenterWorld: phoneCenter.toArray().map((n) => +n.toFixed(4))
+    };
   }
 
   /**
@@ -1788,6 +1873,109 @@ export class DuoFabSystem {
       entranceLog: this._entranceLog,
       entranceMovers: this._entranceMovers()
     };
+  }
+
+  /**
+   * Pass D — geometry-verified open-pose orientation check. The GLB has no
+   * mesh literally named "camera" — `right_glass`/`left_glass` (tiny,
+   * BLEND-material, under the live `Armature`, not the `_off`/`_screen` demo
+   * duplicates) are the camera-lens glass domes, the actual visible
+   * "camera protrusion." This measures their world position in the fully
+   * open pose and asserts they land on the far side (away from the HUD
+   * camera) along the phone's own normal — i.e. the edge *opposite* the
+   * camera module faces the viewer, as the hardware bottom should when the
+   * phone opens toward the Mail hologram tilt.
+   * `window.__stageDebug` isn't wired to DuoFabSystem directly; called via
+   * `StageExperience.debugDuoOrientation()`.
+   * @returns {Record<string, unknown>}
+   */
+  debugOpenOrientation() {
+    const target = this.armature ?? this.model;
+    if (!target) return { error: "no model" };
+    if (this._entrance !== "live") {
+      return { error: `not live yet (entrance=${this._entrance})` };
+    }
+
+    // `iso.quaternion` is only ever actually set inside `tick()` — it
+    // slerps closed→open AND premultiplies a separate spring-damped
+    // "mail face" tilt (`_isoMailFaceQ`/`_mailFaceT`) that targets 1 only
+    // once `state !== "idle"` and takes real simulated time to settle.
+    // Hand-setting transform pieces outside `tick()` (as an earlier version
+    // of this method did) leaves `iso.quaternion` at whatever it was before
+    // — not the actual open pose. Drive the real tick instead.
+    const savedState = this.state;
+    const savedHovered = this.hovered;
+    const savedWantHover = this._wantHover;
+    const savedHoverTarget = this._hoverTarget;
+    const savedHoverEnterT = this._hoverEnterT;
+    const savedHoverLeaveT = this._hoverLeaveT;
+    const savedMailFaceT = this._mailFaceT;
+    const savedMailFaceVel = this._mailFaceVel;
+
+    this.state = "mail";
+    for (let i = 0; i < 180; i += 1) this.tick(1 / 60, i / 60);
+
+    const lensNames = ["right_glass", "left_glass"];
+    const lensPos = new THREE.Vector3();
+    let lensN = 0;
+    const lensRows = [];
+    const allMeshRows = [];
+    target.traverse((obj) => {
+      if (!obj.isMesh || !obj.visible) return;
+      obj.getWorldPosition(_V);
+      allMeshRows.push({ name: obj.name, pos: _V.toArray().map((n) => +n.toFixed(4)) });
+      if (lensNames.includes(obj.name)) {
+        lensPos.add(_V);
+        lensN += 1;
+        lensRows.push({ name: obj.name, pos: _V.toArray().map((n) => +n.toFixed(4)) });
+      }
+    });
+
+    const phoneBox = new THREE.Box3().setFromObject(target);
+    const phoneCenter = phoneBox.getCenter(new THREE.Vector3());
+    const insight = this.insightScreens[0];
+    let screenNormal = null;
+    if (insight) {
+      insight.getWorldQuaternion(_Q);
+      screenNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(_Q).normalize();
+    }
+
+    const hudCamPos = this.hudCamera.position.clone();
+    const viewDir = hudCamPos.clone().sub(phoneCenter).normalize();
+
+    let result = { error: "no lens mesh found (right_glass/left_glass)" };
+    if (lensN > 0) {
+      lensPos.multiplyScalar(1 / lensN);
+      const lensOffset = lensPos.clone().sub(phoneCenter);
+      // Positive = lens sits on the HUD-camera-facing side (near); negative = far side.
+      const lensDotView = lensOffset.dot(viewDir);
+      const lensDotScreenNormal = screenNormal ? lensOffset.dot(screenNormal) : null;
+      const pass = lensDotView < 0;
+      result = {
+        pass,
+        lensCenterWorld: lensPos.toArray().map((n) => +n.toFixed(4)),
+        phoneCenterWorld: phoneCenter.toArray().map((n) => +n.toFixed(4)),
+        hudCameraWorld: hudCamPos.toArray().map((n) => +n.toFixed(4)),
+        lensDotView: +lensDotView.toFixed(4),
+        lensDotScreenNormal: lensDotScreenNormal == null ? null : +lensDotScreenNormal.toFixed(4),
+        lensRows,
+        message: pass
+          ? "camera module is on the FAR side — correct edge (bottom) faces the HUD camera"
+          : "camera module is on the NEAR side — WRONG edge (top) faces the HUD camera"
+      };
+    }
+    console.info("[DuoFab] debugOpenOrientation", result, { allMeshRows });
+
+    this.state = savedState;
+    this.hovered = savedHovered;
+    this._wantHover = savedWantHover;
+    this._hoverTarget = savedHoverTarget;
+    this._hoverEnterT = savedHoverEnterT;
+    this._hoverLeaveT = savedHoverLeaveT;
+    this._mailFaceT = savedMailFaceT;
+    this._mailFaceVel = savedMailFaceVel;
+    for (let i = 0; i < 180; i += 1) this.tick(1 / 60, i / 60);
+    return result;
   }
 
   /** @returns {boolean} */

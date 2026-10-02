@@ -5995,6 +5995,24 @@ export class StageExperience {
     return { live: Boolean(this._crtLiveState) };
   }
 
+  /** DEV — Pass D geometry-verified Duo open-pose orientation check (see `DuoFabSystem.debugOpenOrientation`). */
+  debugDuoOrientation() {
+    return this.duoFab?.debugOpenOrientation?.() ?? { error: "no duoFab" };
+  }
+
+  /** DEV — the open-iso bake's candidate search log (`DuoFabSystem._openIsoDebug`). */
+  debugDuoBakeInfo() {
+    return this.duoFab?._openIsoDebug ?? { error: "no bake info" };
+  }
+
+  /** DEV-TEMP — open the Duo into Mail (for visual screenshots), or close it back to idle. */
+  debugDuoSetOpen(open) {
+    if (!this.duoFab) return { error: "no duoFab" };
+    if (open) this.duoFab.openMail();
+    else this.duoFab.closeToIdle();
+    return { state: this.duoFab.state };
+  }
+
   /** DEV — the commit this worker bundle was built from (`vite.config.js`'s `__BUILD_COMMIT__`), so a stale cached/unreloaded worker is a one-line check against `git rev-parse --short HEAD`. */
   debugVersion() {
     return { commit: typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : "unknown" };
