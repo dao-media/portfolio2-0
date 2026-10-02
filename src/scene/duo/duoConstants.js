@@ -240,8 +240,15 @@ export const DUO_SCREEN_INSIGHT_COLOR = 0x5a8fa8;
 /**
  * Insight emissive while Mail is open — light Apple-Mail capture needs a modest
  * level so paper whites stay readable under HUD bloom.
+ * Pass D: raised from 0.32 — at that level the capture's near-white paper
+ * peaked at ~0.30 rendered luminance, comfortably under `DUO_HUD_BLOOM_THRESHOLD`
+ * (0.4) but reading as flat/faint rather than "glowing." 0.38 puts the
+ * brightest (near-white) capture pixels just under threshold — legible and
+ * bright without itself blooming; the soft halo around the phone still comes
+ * from the holo wash/plume (`DUO_HOLO_MAIL_WASH_SCALE` /
+ * `DUO_HUD_BLOOM_MAIL_SCALE` below), which are already tuned to cross it.
  */
-export const DUO_SCREEN_EMISSIVE_MAIL = 0.32;
+export const DUO_SCREEN_EMISSIVE_MAIL = 0.38;
 /**
  * Wash / slab opacity multiplier while Mail projects — subtle glass illumination
  * so the phone still reads as lit without burying the on-glass Mail UI.
@@ -249,6 +256,28 @@ export const DUO_SCREEN_EMISSIVE_MAIL = 0.32;
 export const DUO_HOLO_MAIL_WASH_SCALE = 0.28;
 /** HUD bloom strength scale while Mail projects (full bloom washes capture white). */
 export const DUO_HUD_BLOOM_MAIL_SCALE = 0.18;
+
+/**
+ * Pass D — Mail beam "screen is the source" readability. Beams are the SVG
+ * lines in `DuoMailOverlay` (gradient already runs bright-at-phone →
+ * transparent-at-panel; these add the animated flow on top). `BEAM_FLOW_SEC`
+ * is the dash-travel cycle length; `BEAM_DASH`/`BEAM_GAP` set the apparent
+ * "chunkiness" of the flow (small values read as a smooth gradient crawl,
+ * large ones as discrete dashes). Direction is fixed screen→hologram by the
+ * CSS animation's sign (see duo-mail.css) — never exposed as a sign flag, so
+ * it can't accidentally reverse.
+ */
+export const DUO_MAIL_BEAM_FLOW_SEC = 0.6;
+export const DUO_MAIL_BEAM_DASH_PX = 10;
+export const DUO_MAIL_BEAM_GAP_PX = 14;
+/**
+ * Hologram-vs-screen distinction: the panel (the "projection") renders at
+ * this opacity and saturation multiplier relative to its own authored
+ * colors, plus a scanline overlay — so it reads as a copy of the screen,
+ * not a second real UI.
+ */
+export const DUO_MAIL_HOLOGRAM_OPACITY = 0.92;
+export const DUO_MAIL_HOLOGRAM_SATURATION = 0.82;
 
 /** Closed cover wallpaper (desert lock art). */
 export const DUO_EXTERIOR_WALLPAPER_URL = "/assets/duo/exterior-lock.jpg";

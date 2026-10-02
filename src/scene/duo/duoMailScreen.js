@@ -73,6 +73,8 @@ function buildCaptureClone(source) {
     [data-duo-mail-capture-host] .duo-mail::before,
     [data-duo-mail-capture-host] .duo-mail::after { display:none !important; content:none !important; }
     [data-duo-mail-capture-host] .duo-mail__resize { display:none !important; }
+    [data-duo-mail-capture-host] .duo-mail__scanlines { display:none !important; }
+    [data-duo-mail-capture-host] .duo-mail { filter:none !important; }
     [data-duo-mail-capture-host] .duo-mail__chrome {
       background:#dfeef5 !important;
       backdrop-filter:none !important;

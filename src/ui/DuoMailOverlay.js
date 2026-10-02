@@ -1,9 +1,14 @@
 import { CASE_STUDIES } from "../content/caseStudies.js";
 import {
   DUO_MAIL_ASPECT,
+  DUO_MAIL_BEAM_DASH_PX,
+  DUO_MAIL_BEAM_FLOW_SEC,
+  DUO_MAIL_BEAM_GAP_PX,
   DUO_MAIL_EDGE_GLITCH_INTENSITY,
   DUO_MAIL_EDGE_GLITCH_OUTER_PX,
   DUO_MAIL_ENTRANCE_SEC,
+  DUO_MAIL_HOLOGRAM_OPACITY,
+  DUO_MAIL_HOLOGRAM_SATURATION,
   DUO_MAIL_LIST_FRAC,
   DUO_MAIL_PULSE_COUNT,
   DUO_MAIL_PULSE_OPACITY
@@ -127,6 +132,7 @@ export class DuoMailOverlay {
       </svg>
       <div class="duo-mail" role="dialog" aria-label="Dane's Projects">
         <div class="duo-mail__edge-glitch" aria-hidden="true"></div>
+        <div class="duo-mail__scanlines" aria-hidden="true"></div>
         <header class="duo-mail__chrome">
           <div class="duo-mail__traffic" role="group" aria-label="Close">
             <button type="button" class="duo-mail__traffic-btn duo-mail__traffic-btn--close" aria-label="Close"></button>
@@ -209,9 +215,32 @@ export class DuoMailOverlay {
     this._onPointerMove = (e) => this._onDragMove(e);
     this._onPointerUp = () => this._endDrag();
 
+    // Reduced motion: no beam flow animation (CSS gates on this class) —
+    // the brightness gradient (screen→panel, already static) stays either way.
+    this.root.classList.toggle("is-reduced-motion", Boolean(this._reducedMotion));
+    this.setMailProjectionParams({});
+
     this._renderList();
     this._renderPreview();
     this._bindProjectionSync();
+  }
+
+  /**
+   * Pass D live knobs — screen emissive lives on `DuoFabSystem`
+   * (`DUO_SCREEN_EMISSIVE_MAIL`, a material property, not CSS); these four
+   * are the ones that live in this overlay's own DOM/CSS.
+   * @param {{ beamFlowSec?: number, beamDashPx?: number, beamGapPx?: number, hologramOpacity?: number, hologramSaturation?: number }} params
+   */
+  setMailProjectionParams(params = {}) {
+    if (!this.root) return;
+    const style = this.root.style;
+    style.setProperty("--mail-beam-flow-sec", `${params.beamFlowSec ?? DUO_MAIL_BEAM_FLOW_SEC}s`);
+    const dash = params.beamDashPx ?? DUO_MAIL_BEAM_DASH_PX;
+    const gap = params.beamGapPx ?? DUO_MAIL_BEAM_GAP_PX;
+    style.setProperty("--mail-beam-dasharray", `${dash} ${gap}`);
+    style.setProperty("--mail-beam-cycle-px", String(dash + gap));
+    style.setProperty("--mail-holo-opacity", String(params.hologramOpacity ?? DUO_MAIL_HOLOGRAM_OPACITY));
+    style.setProperty("--mail-holo-saturation", String(params.hologramSaturation ?? DUO_MAIL_HOLOGRAM_SATURATION));
   }
 
   /** Keep glass capture locked to every live panel change (no debounce lag). */

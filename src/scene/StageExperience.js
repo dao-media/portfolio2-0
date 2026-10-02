@@ -6005,11 +6005,11 @@ export class StageExperience {
     return this.duoFab?._openIsoDebug ?? { error: "no bake info" };
   }
 
-  /** DEV-TEMP — open the Duo into Mail (for visual screenshots), or close it back to idle. */
+  /** DEV-TEMP — open the Duo into Mail (for visual screenshots), or close it back to idle. Goes through the real `_duoOpenMail`/`_duoCloseToIdle` path so the host DOM panel actually opens too, not just the worker-side state. */
   debugDuoSetOpen(open) {
     if (!this.duoFab) return { error: "no duoFab" };
-    if (open) this.duoFab.openMail();
-    else this.duoFab.closeToIdle();
+    if (open) this._duoOpenMail();
+    else this._duoCloseToIdle();
     return { state: this.duoFab.state };
   }
 
