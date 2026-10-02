@@ -160,6 +160,29 @@ const _EDGE_NEAR_BOX = new THREE.Box3();
 const EDGE_GLITCH_NEAR_NDC_PAD = 0.14;
 
 /**
+ * Pass B item 2 (washed-out blacks): Ptolemy, Ishtar and Lucy's materials
+ * all have `envMap: null`, so per-material `envMapIntensity` (set by
+ * `polishMesh`'s `forceLit` branch) is dead — r172 instead drives their
+ * ambient term off `scene.environmentIntensity` (0.6, do-not-touch) alone.
+ * Olmec reads correctly under the same neon with that same global, so the
+ * fix is per-prop: give just these roots the studio PMREM as their own
+ * `envMap` (see `_applyArchaeologyEnvMap`) so `envMapIntensity` finally
+ * takes effect, then tune it down until their darkest-5% matches Olmec's.
+ * Values picked by isolated-render A/B screenshots (hide everything but the
+ * one prop, reframe tight, compare): Ishtar's glazed-brick blue reads
+ * noticeably richer/less washed out already at 0.16, but the same 0.16
+ * crushed Ptolemy and Lucy into near-silhouettes and lost their carved
+ * detail, so they get a gentler 0.3. Olmec is left alone (still
+ * `envMap: null`, still governed by `scene.environmentIntensity`) since it
+ * is the reference, not a prop to fix.
+ */
+const ARCHAEOLOGY_ENV_MAP_INTENSITY = {
+  "ptolemy-root": 0.3,
+  "ishtar-gate-root": 0.16,
+  "lucy-root": 0.3
+};
+
+/**
  * `?work` or `?work=1` → 60% object raster. `?quality=0.6` sets the scale.
  * `?work=0` forces full. Screen canvases are not read from this.
  */
@@ -894,6 +917,46 @@ export class StageExperience {
   }
 
   /**
+   * Perceptual-luminance min/mean of a color texture, downsampled the same
+   * way `_meanTextureChannel` is — for the washed-out-blacks audit (item 2):
+   * a lifted darkest-region read can be the source texture's own authored
+   * floor, not a lighting/material bug.
+   * @param {THREE.Texture | null | undefined} tex
+   */
+  _textureLuminanceStats(tex) {
+    if (!tex?.image) return null;
+    const cache = tex.userData.__lumStats;
+    if (cache) return cache;
+    const img = tex.image;
+    const w = img.width;
+    const h = img.height;
+    if (!w || !h) return null;
+    try {
+      const sampleW = Math.min(w, 128);
+      const sampleH = Math.min(h, 128);
+      const canvas = new OffscreenCanvas(sampleW, sampleH);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(img, 0, 0, sampleW, sampleH);
+      const data = ctx.getImageData(0, 0, sampleW, sampleH).data;
+      let min = 1;
+      let sum = 0;
+      let count = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const lum = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 255;
+        if (lum < min) min = lum;
+        sum += lum;
+        count += 1;
+      }
+      const stats = { min: +min.toFixed(3), mean: count ? +(sum / count).toFixed(3) : null };
+      tex.userData.__lumStats = stats;
+      return stats;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * One row per material across every vignette (+ wet floor). DEV —
    * `window.__stageDebug("debugMaterialAudit")`. r172: `scene.environmentIntensity`
    * only drives IBL for materials with no own `envMap`; a set `envMap` uses
@@ -945,7 +1008,11 @@ export class StageExperience {
             roughnessMapColorSpace: mat.roughnessMap?.colorSpace ?? null,
             emissive: mat.emissive ? [+mat.emissive.r.toFixed(3), +mat.emissive.g.toFixed(3), +mat.emissive.b.toFixed(3)] : null,
             emissiveIntensity: typeof mat.emissiveIntensity === "number" ? +mat.emissiveIntensity.toFixed(3) : null,
-            hasEmissiveMap: Boolean(mat.emissiveMap)
+            hasEmissiveMap: Boolean(mat.emissiveMap),
+            hasAoMap: Boolean(mat.aoMap),
+            aoMapIntensity: typeof mat.aoMapIntensity === "number" ? +mat.aoMapIntensity.toFixed(3) : null,
+            hasUv2: Boolean(obj.geometry?.attributes?.uv2 ?? obj.geometry?.attributes?.uv1),
+            baseColorLum: this._textureLuminanceStats(mat.map)
           });
         }
       });
@@ -999,7 +1066,12 @@ export class StageExperience {
           envMapIntensity: typeof mat?.envMapIntensity === "number" ? +mat.envMapIntensity.toFixed(3) : null,
           mapImageW: mat?.map?.image?.width ?? null,
           mapImageH: mat?.map?.image?.height ?? null,
-          toneMapped: mat?.toneMapped ?? null
+          toneMapped: mat?.toneMapped ?? null,
+          hasOwnEnvMap: Boolean(mat?.envMap),
+          hasAoMap: Boolean(mat?.aoMap),
+          aoMapIntensity: typeof mat?.aoMapIntensity === "number" ? +mat.aoMapIntensity.toFixed(3) : null,
+          hasUv2: Boolean(obj.geometry?.attributes?.uv2 ?? obj.geometry?.attributes?.uv1),
+          baseColorLum: this._textureLuminanceStats(mat?.map)
         });
       }
     });
@@ -1425,6 +1497,58 @@ export class StageExperience {
     gl.bindFramebuffer(gl.FRAMEBUFFER, prevFb);
     gl.deleteFramebuffer(fb);
     return result;
+  }
+
+  /**
+   * Reads the drawing buffer (post composite) right after the beauty render
+   * that just happened, for a CSS-pixel rect in top-left-origin screen
+   * space. WebGL's buffer is bottom-left-origin and DPR-scaled, so the rect
+   * is flipped and scaled before `readPixels`. Returns perceptual-luminance
+   * min/mean/p5 (5th percentile, i.e. "darkest 5%") over the sampled rect.
+   */
+  _readFrameLuminance(x, y, w, h) {
+    const renderer = this.renderer;
+    const gl = renderer?.getContext?.();
+    if (!gl) return null;
+    const canvas = renderer.domElement;
+    const dpr = renderer.getPixelRatio?.() ?? 1;
+    const bufW = canvas.width;
+    const bufH = canvas.height;
+    const rx = Math.max(0, Math.round(x * dpr));
+    const rw = Math.max(1, Math.min(bufW - rx, Math.round(w * dpr)));
+    const ryTop = Math.max(0, Math.round(y * dpr));
+    const rh = Math.max(1, Math.min(bufH - ryTop, Math.round(h * dpr)));
+    const ry = Math.max(0, bufH - ryTop - rh);
+    const px = new Uint8Array(rw * rh * 4);
+    gl.readPixels(rx, ry, rw, rh, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const lums = new Array(rw * rh);
+    let sum = 0;
+    for (let i = 0; i < lums.length; i += 1) {
+      const o = i * 4;
+      const lum = (0.299 * px[o] + 0.587 * px[o + 1] + 0.114 * px[o + 2]) / 255;
+      lums[i] = lum;
+      sum += lum;
+    }
+    lums.sort((a, b) => a - b);
+    const p5Index = Math.max(0, Math.floor(lums.length * 0.05) - 1);
+    return {
+      min: +lums[0].toFixed(3),
+      p5: +lums[p5Index].toFixed(3),
+      mean: +(sum / lums.length).toFixed(3),
+      sampleCount: lums.length
+    };
+  }
+
+  /**
+   * DEV — one-shot GPU readback of a screen-space CSS-pixel rect, resolved
+   * right after the next beauty render. Used to compare darkest-5%
+   * luminance across Archaeology props under the same neon lighting.
+   * `window.__stageDebug("debugReadFrameLuminance", x, y, w, h)`.
+   */
+  debugReadFrameLuminance(x, y, w, h) {
+    return new Promise((resolve) => {
+      this._pendingFrameReadback = { x, y, w, h, resolve };
+    });
   }
 
   /** DEV — `window.__stageDebug("debugWarmState")`. Where stepVignette0Warm is. */
@@ -4020,6 +4144,33 @@ export class StageExperience {
   }
 
   /**
+   * Give the washed-out Archaeology props (see `ARCHAEOLOGY_ENV_MAP_INTENSITY`)
+   * their own `envMap` so `envMapIntensity` stops being a dead per-material
+   * setting (r172: ignored while `envMap` is null). Must run before the
+   * root's first `compileHeldRoot` pass (called right after, by the
+   * `onPropMounted` callback that invokes this) — flipping `envMap` on a
+   * material that has already compiled its shader program would toggle
+   * `USE_ENVMAP` and mint a second program post-Enter instead of reusing
+   * the one compiled during the hold.
+   */
+  _applyArchaeologyEnvMap(root) {
+    const intensity = ARCHAEOLOGY_ENV_MAP_INTENSITY[root?.name];
+    if (intensity === undefined) return;
+    const envMap = this.liveEnv?.getStudioEnvironment?.();
+    if (!envMap) return;
+    root.traverse((obj) => {
+      if (!obj.isMesh || !obj.material) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const mat of mats) {
+        if (!mat || !("envMap" in mat)) continue;
+        mat.envMap = envMap;
+        mat.envMapIntensity = intensity;
+        mat.needsUpdate = true;
+      }
+    });
+  }
+
+  /**
    * Upload maps, compile once while the root is on GPU_HOLD_LAYER, then show.
    * Not one compile per mesh inside the live fog-depth + beauty frame.
    */
@@ -4579,6 +4730,7 @@ export class StageExperience {
           deferModelLoad: true,
           onAligned: () => this._snapAllVignettesToFloor(),
           onPropMounted: (root) => {
+            this._applyArchaeologyEnvMap(root);
             void this._compileThenShow(root);
           }
         });
@@ -6347,6 +6499,15 @@ export class StageExperience {
       this.post.render(this.scene, this.camera, t, {
         grainStrength: this._postGrainStrength
       });
+    }
+    if (this._pendingFrameReadback && !this._skipBeauty) {
+      const { x, y, w, h, resolve } = this._pendingFrameReadback;
+      this._pendingFrameReadback = null;
+      try {
+        resolve(this._readFrameLuminance(x, y, w, h));
+      } catch (error) {
+        resolve(null);
+      }
     }
     this._lastBeautyMs = performance.now() - beautyT0;
     if (revealNow) {
