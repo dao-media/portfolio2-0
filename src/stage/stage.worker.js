@@ -68,13 +68,10 @@ self.onmessage = (event) => {
   else if (msg.type === "pixelBudget") stage.setPixelBudget(msg.megapixels);
   else if (msg.type === "floorReset") stage.resetFloorStats();
   else if (msg.type === "debugCall") {
-    let result;
-    try {
-      result = stage[msg.method]?.(...(msg.args || []));
-    } catch (error) {
-      result = { error: error?.message || String(error) };
-    }
-    post({ type: "debugResult", id: msg.id, result });
+    Promise.resolve()
+      .then(() => stage[msg.method]?.(...(msg.args || [])))
+      .catch((error) => ({ error: error?.message || String(error) }))
+      .then((result) => post({ type: "debugResult", id: msg.id, result }));
   }
   const ms = performance.now() - t0;
   if (ms >= 20) stage._noteGap?.(`message:${msg.type}`, ms);
