@@ -352,6 +352,30 @@ function polishMesh(obj, { receiveShadow = true, forceLit = false, antikythera =
 }
 
 /**
+ * Cuneiform tablet hardening — see call site. Scoped to the one material
+ * name ("Scene_-_Root") this GLB's own geode-like geometry actually uses;
+ * never touches other props even if a future asset swap reuses the name
+ * (`mat.userData._cuneiformHardened` guards against re-running on shared
+ * instances, and the name check keeps it from ever matching a GLB-sourced
+ * material from a different prop by accident since each prop's "generic"
+ * fallback material is its own distinct instance, not interned by name).
+ * @param {THREE.Object3D} root
+ */
+function hardenCuneiformSurface(root) {
+  root.traverse((obj) => {
+    if (!obj.isMesh || !obj.material) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const mat of mats) {
+      if (!mat || mat.name !== "Scene_-_Root" || mat.userData._cuneiformHardened) continue;
+      mat.userData._cuneiformHardened = true;
+      if (typeof mat.roughness === "number") mat.roughness = 0.95;
+      if (typeof mat.metalness === "number") mat.metalness = 0;
+      mat.needsUpdate = true;
+    }
+  });
+}
+
+/**
  * Venus GLB ships `KHR_materials_unlit` → MeshBasic (full albedo, no lights).
  * Reuse one MeshStandard swap per source material (4 meshes share Willendorf).
  * @param {THREE.Material} mat
@@ -980,6 +1004,18 @@ export class ArchaeologyVignette {
       this._mountRoot(this.cuneiformRoot, "cuneiform");
       holdRootOffCamera(this.cuneiformRoot);
       this.cuneiformRoot.traverse((obj) => polishMesh(obj, { forceLit: true }));
+      // Sketchfab source: the tablet's visible surface (node "Geode", 108
+      // submeshes) shares one generic, untextured "Scene_-_Root" material —
+      // no base-color/inscription map at all, just raw faceted geometry.
+      // polishMesh's forceLit roughness floor (0.82) still leaves enough
+      // specular response that each small, independently-angled facet mints
+      // its own glint under the neon key light — reads as a scattered
+      // "sparkle" across the tablet rather than a flat clay surface. No
+      // single commit changed this (the GLB's own geometry has looked this
+      // way since it was added); hardened directly, same spirit as pc_1
+      // (§20.18): push roughness to the diffuse ceiling so facet-to-facet
+      // specular variance can't show.
+      hardenCuneiformSurface(this.cuneiformRoot);
 
       const easelH = CUNEIFORM_EASEL_HEIGHT_M * propScale;
       const tabletH = CUNEIFORM_REAL_HEIGHT_M * propScale * CUNEIFORM_EXTRA_SCALE;
