@@ -270,8 +270,18 @@ export class EdgeGlitchSystem {
       return;
     }
 
-    const draw = new THREE.Vector2();
-    this.renderer.getDrawingBufferSize(draw);
+    // Pass E+ item 2: this pass runs inside the shared composer chain (see
+    // PostPass.js — EdgeGlitchPass is one of its addPass() stages), so it
+    // reads/writes at the composer's working resolution, not the canvas's
+    // native drawing-buffer size. Re-deriving size from
+    // `renderer.getDrawingBufferSize()` here (every frame, while any glitch
+    // stop is active) re-stamped the Bust depth target to native size right
+    // after `setSize()` had just sized it to the composer's budget-scaled
+    // resolution — the actual mechanism behind the reported ragged
+    // silhouette at any budget below native. `this.resolution` is exactly
+    // the value `setSize(w,h)` was last called with; reuse it instead of
+    // re-querying the renderer.
+    const draw = this.resolution;
     this.sdf.setDepthSize(draw.x, draw.y);
     const passUSize = this.glitchPass?.uniforms?.uBustDepthTexel;
     if (passUSize) passUSize.value.set(1 / Math.max(1, draw.x), 1 / Math.max(1, draw.y));

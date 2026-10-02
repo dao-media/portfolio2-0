@@ -6346,9 +6346,15 @@ export class StageExperience {
     this._applyRenderScale();
     this.neon?.setSize?.(this.renderer);
     this.videoFog?.setSizeFromRenderer?.(this.renderer);
-    const draw = new THREE.Vector2();
-    this.renderer.getDrawingBufferSize(draw);
-    this.edgeGlitch?.setSize?.(draw.x, draw.y);
+    // Pass E+ item 2 follow-up: `_applyRenderScale()` above already sizes
+    // `edgeGlitch` to the budget-scaled composer target (dw,dh), not the
+    // native drawing buffer. This call used to run unconditionally after it
+    // and re-stamp the native size on every literal resize, undoing that fix
+    // whenever a resize and a budget change land together (exactly what a
+    // `resize_window` + `setPixelBudget` combo, or a real monitor/DPR change,
+    // produces) — leaving the Bust depth target desynced from the composer
+    // again. `_applyRenderScale()` is the single source of truth for this
+    // target's size now.
     this.duoFab?.setSize?.(w, h);
     this.hud.updateMySpacePanelForVignette(this.current);
     this.waterCursor?.resize(w, h);
