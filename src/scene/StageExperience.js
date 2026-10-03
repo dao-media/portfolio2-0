@@ -1229,6 +1229,120 @@ export class StageExperience {
   }
 
   /**
+   * Pass I item 1 — A/B cost toggle. `gpuMs` is confirmed unreliable on
+   * ANGLE/Metal, so cost is measured by toggling one thing off, watching
+   * settled fps over a few seconds, then toggling it back — not by reading
+   * a per-pass GPU timer. `window.__stageDebug("debugAbToggle", "grass", false)`
+   * then `window.__stageDebug("debugAbToggle", "grass", true)` to restore.
+   * Returns `{ name, on, applied }` — `applied: false` means that name
+   * doesn't resolve to anything right now (e.g. a stop-specific light that
+   * isn't mounted yet).
+   * @param {string} name
+   * @param {boolean} on
+   */
+  debugAbToggle(name, on) {
+    const grass = this.vignettes?.[0]?.instance;
+    const lanternLight = this.neon?.stopLights?.[0]?.light;
+    let applied = false;
+    switch (name) {
+      case "grass":
+        if (grass?.grassRoot) {
+          grass.grassRoot.visible = on;
+          applied = true;
+        }
+        break;
+      case "grass-shadow":
+        if (grass?.grassEngine?.mesh) {
+          grass.grassEngine.mesh.castShadow = on;
+          if (grass.grassEngine.depthMesh) grass.grassEngine.depthMesh.castShadow = on;
+          applied = true;
+        }
+        break;
+      case "pov-spot-shadow":
+        if (this.spotLight) {
+          this.spotLight.castShadow = on;
+          applied = true;
+        }
+        break;
+      case "lantern-shadow":
+        if (lanternLight) {
+          lanternLight.castShadow = on;
+          applied = true;
+        }
+        break;
+      case "edge-glitch":
+        if (this.edgeGlitch) {
+          this.edgeGlitch.enabled = on;
+          applied = true;
+        }
+        break;
+      case "wet-floor":
+        if (this.wetFloor?.floorMesh) {
+          this.wetFloor.floorMesh.visible = on;
+          applied = true;
+        }
+        break;
+      case "bloom":
+        if (this.post?.setBloomIntensity) {
+          this._abBloomSaved = this._abBloomSaved ?? this.post.getBloomIntensity?.() ?? 1;
+          this.post.setBloomIntensity(on ? this._abBloomSaved : 0);
+          applied = true;
+        }
+        break;
+      case "smaa":
+        if (this.post?.smaaPass) {
+          this.post.smaaPass.enabled = on;
+          applied = true;
+        }
+        break;
+      case "duo":
+        if (this.duoFab?.root) {
+          this.duoFab.root.visible = on;
+          applied = true;
+        }
+        break;
+      case "water-cursor":
+        this._abWaterCursorOff = !on;
+        applied = true;
+        break;
+      case "star-field":
+        if (this.starField) {
+          this.starField.visible = on;
+          applied = true;
+        }
+        break;
+      case "cursor-trail":
+        if (this.cursorStarTrail) {
+          this.cursorStarTrail.visible = on;
+          applied = true;
+        }
+        break;
+      case "black-hole-disk":
+        if (this.blackHole?.group) {
+          this.blackHole.group.visible = on;
+          applied = true;
+        }
+        break;
+      case "warm-work":
+        this._abWarmPaused = !on;
+        applied = true;
+        break;
+      case "msaa": {
+        // on here means a sample count, passed via the second arg as a number.
+        const samples = typeof on === "number" ? on : on ? 4 : 0;
+        if (this.post?.setMultisampling) {
+          this.post.setMultisampling(samples);
+          applied = true;
+        }
+        break;
+      }
+      default:
+        break;
+    }
+    return { name, on, applied };
+  }
+
+  /**
    * DEV — isolate a named root under the real stage lighting (hide every
    * other mesh, reframe the camera tight on it, paint one frame, freeze the
    * tick) so it can be screenshotted without the camera rig fighting direct
@@ -2541,6 +2655,42 @@ export class StageExperience {
    */
   flightDump() {
     return this._flight?.dump() ?? { enabled: false };
+  }
+
+  /**
+   * Pass I item 1 — the A/B table's actual measurement: samples real
+   * frame-to-frame intervals (via rAF, not the flight recorder) for
+   * `seconds`, independent of whether `?flight=1` is even on, and returns
+   * fps + p95 interval. Pairs with `debugAbToggle`.
+   * `window.__stageDebug("debugMeasureFps", 5)`.
+   * @param {number} seconds
+   */
+  debugMeasureFps(seconds = 5) {
+    return new Promise((resolve) => {
+      const intervals = [];
+      let last = performance.now();
+      const deadline = last + seconds * 1000;
+      const tick = () => {
+        const now = performance.now();
+        intervals.push(now - last);
+        last = now;
+        if (now < deadline) {
+          requestAnimationFrame(tick);
+          return;
+        }
+        intervals.sort((a, b) => a - b);
+        const mean = intervals.reduce((s, v) => s + v, 0) / intervals.length;
+        const p95 = intervals[Math.min(intervals.length - 1, Math.floor(intervals.length * 0.95))];
+        resolve({
+          frames: intervals.length,
+          fps: +(1000 / mean).toFixed(1),
+          meanIntervalMs: +mean.toFixed(2),
+          p95IntervalMs: +p95.toFixed(2),
+          maxIntervalMs: +intervals[intervals.length - 1].toFixed(2)
+        });
+      };
+      requestAnimationFrame(tick);
+    });
   }
 
   debugWorkQuality() {
@@ -4345,6 +4495,8 @@ export class StageExperience {
       this._maybeShowEnter();
       return this._vignette0Warm;
     }
+    // Pass I A/B toggle — debugAbToggle("warm-work", false).
+    if (this._abWarmPaused) return this._vignette0Warm;
     const state = stepVignette0Warm(this, this._vignette0Warm);
     if (state?.done) {
       this._primeRestDpr();
@@ -4832,6 +4984,12 @@ export class StageExperience {
       this._prePartMs = ms;
       this._prePart = name;
     }
+    // Pass I item 3 — _prePart/_prePartMs only ever kept the single worst
+    // section per frame, discarding the rest; the periodic-hitch
+    // investigation needs every section, every frame, to actually name
+    // which one spikes rather than guessing from the frame total alone.
+    if (!this._preSections) this._preSections = [];
+    this._preSections.push([name, Math.round(ms * 10) / 10]);
     return performance.now();
   }
 
@@ -6639,6 +6797,7 @@ export class StageExperience {
     const workT0 = performance.now();
     this._prePartMs = 0;
     this._prePart = "";
+    this._preSections = [];
     let preT = workT0;
     this._holdStableLightVariant();
     if (this._resizeSkipScene) {
@@ -6846,6 +7005,7 @@ export class StageExperience {
     }
     preT = this._markPre("edge", preT);
     this._tickWaterCursorRim();
+    preT = this._markPre("water-cursor-rim", preT);
 
     this._tickCursorDof(dt);
     if (this._descentPendingWarm && this.chunkedTextures?.pending) {
@@ -7029,10 +7189,18 @@ export class StageExperience {
     this.duoFab?.render?.(this.renderer);
     this._lastDuoMs = performance.now() - duoT0;
     const waterT0 = performance.now();
-    this.waterCursor?.render();
+    if (!this._abWaterCursorOff) this.waterCursor?.render();
     this._lastWaterMs = performance.now() - waterT0;
     this._lastWorkMs = performance.now() - workT0;
     this._lastCause = this._frameCause;
+    // Pass I item 3 — these three were already measured (just never
+    // reported per-frame): fold them into the same per-section list as
+    // _markPre's named spans, so one table covers the whole tick.
+    this._preSections.push(
+      ["beauty-render", Math.round(this._lastBeautyMs * 10) / 10],
+      ["duo-render", Math.round(this._lastDuoMs * 10) / 10],
+      ["water-cursor-render", Math.round(this._lastWaterMs * 10) / 10]
+    );
     if (this._flight) {
       const draw = new THREE.Vector2();
       this.renderer.getDrawingBufferSize(draw);
@@ -7050,7 +7218,14 @@ export class StageExperience {
         warmLiveAt: this._vignette0Warm?._liveAt ?? null,
         warmLiveKind: this._vignette0Warm?._liveSteps?.[this._vignette0Warm?._liveAt]?.kind ?? null,
         phase: this._flightPhase(),
-        sceneTriangles: this.post?.renderPass?.lastSceneTriangles ?? null
+        sceneTriangles: this.post?.renderPass?.lastSceneTriangles ?? null,
+        // Pass I correction: `frameMs` is the inter-frame interval
+        // (dt * 1000 — sums to 1.0s/s by construction), not work time; a
+        // frame can read a tiny frameMs while cpuWorkMs is huge if the
+        // previous frame's queued GPU work was still draining. cpuWorkMs is
+        // the real wall-clock spent inside this tick, workT0 to here.
+        cpuWorkMs: this._lastWorkMs,
+        cpuSections: this._preSections.slice()
       });
     }
     this._frameCause = "render";

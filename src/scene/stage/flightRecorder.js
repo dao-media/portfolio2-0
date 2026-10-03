@@ -19,6 +19,16 @@
  * Cross-check a BLACK snapshot's `skipBeauty`/`worldVisible`/`visCensus`
  * fields before treating it as a real repro; BLINK and POP-IN are the
  * load-bearing triggers.
+ *
+ * Pass I: `gpuMs` is confirmed unreliable on ANGLE/Metal — EXT_disjoint_
+ * timer_query_webgl2 results there don't track real cost (measured: median
+ * 58ms while the actual settled rate was ~46fps, i.e. ≤~22ms/frame). Do not
+ * use `gpuMs` for cost decisions; it's left in the record for whatever
+ * signal it's still worth, but `cpuWorkMs` (real wall-clock inside
+ * `_animate`, not the inter-frame interval `frameMs` is) and `cpuSections`
+ * (that same tick broken down by named span) are the trustworthy numbers.
+ * For actual GPU cost, A/B: toggle the thing off, measure settled fps over
+ * a few seconds, compare.
  */
 
 const RING_SIZE = 240;
@@ -334,6 +344,13 @@ export class FlightRecorder {
       warmLiveAt: ctx.warmLiveAt ?? null,
       warmLiveKind: ctx.warmLiveKind ?? null,
       phase: ctx.phase ?? null,
+      // Pass I: gpuMs (below) is confirmed unreliable on ANGLE/Metal —
+      // don't make cost decisions from it. cpuWorkMs is the trustworthy
+      // number (real wall-clock time inside _animate); cpuSections is the
+      // same tick broken down by named span (_markPre + the three
+      // already-measured render calls), for naming which section spikes.
+      cpuWorkMs: ctx.cpuWorkMs != null ? +ctx.cpuWorkMs.toFixed(2) : null,
+      cpuSections: ctx.cpuSections ?? null,
       // Pass G: `renderer.info.render` resets on every individual
       // renderer.render() call — reading it here (after every post-process
       // pass, duoFab, water cursor) always saw whatever tiny fullscreen
