@@ -82,6 +82,57 @@ export class FlightRecorder {
     this._prevHarvestedBlack = null;
     this._meshCache = new Map();
     this._initBlackReadback();
+    this._initGpuTimer();
+  }
+
+  /**
+   * Pass H item 1 — GPU ms for the beauty pass, via
+   * EXT_disjoint_timer_query_webgl2. A TIME_ELAPSED query can only have one
+   * instance active at a time per target, and its result isn't available
+   * until a later frame (often the next one) — queue of in-flight queries,
+   * polled every endFrame, each one resolved into the record for the frame
+   * it was taken on (not the frame it happens to resolve on).
+   */
+  _initGpuTimer() {
+    const gl = this.renderer?.getContext?.();
+    this._gpuTimerExt =
+      gl?.getExtension?.("EXT_disjoint_timer_query_webgl2") ?? null;
+    this._gpuQueryPending = [];
+  }
+
+  /** Call right before the beauty render. No-op if the extension is unavailable. */
+  beginGpuTimer() {
+    const gl = this._gl ?? this.renderer?.getContext?.();
+    const ext = this._gpuTimerExt;
+    if (!gl || !ext || this._gpuQueryActive) return;
+    const query = gl.createQuery();
+    gl.beginQuery(ext.TIME_ELAPSED_EXT, query);
+    this._gpuQueryActive = query;
+  }
+
+  /** Call right after the beauty render. Tags the pending result with the current frame index. */
+  endGpuTimer() {
+    const gl = this._gl ?? this.renderer?.getContext?.();
+    const ext = this._gpuTimerExt;
+    if (!gl || !ext || !this._gpuQueryActive) return;
+    gl.endQuery(ext.TIME_ELAPSED_EXT);
+    this._gpuQueryPending.push({ query: this._gpuQueryActive, frame: this.frameIndex });
+    this._gpuQueryActive = null;
+  }
+
+  /** Non-blocking: harvests any queries whose result is ready, returns {frame, ms}[]. */
+  _pollGpuTimers() {
+    const gl = this._gl ?? this.renderer?.getContext?.();
+    if (!gl || !this._gpuQueryPending.length) return [];
+    const resolved = [];
+    this._gpuQueryPending = this._gpuQueryPending.filter(({ query, frame }) => {
+      if (!gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) return true;
+      const ns = gl.getQueryParameter(query, gl.QUERY_RESULT);
+      resolved.push({ frame, ms: +(ns / 1e6).toFixed(3) });
+      gl.deleteQuery(query);
+      return false;
+    });
+    return resolved;
   }
 
   /**
@@ -305,6 +356,14 @@ export class FlightRecorder {
 
     this.ring.push(record);
     if (this.ring.length > RING_SIZE) this.ring.shift();
+
+    // GPU timer results land on a *later* frame than the one they measured
+    // — patch the already-pushed record for that frame (and any already-
+    // captured snapshot windows holding a reference to the same object).
+    for (const { frame, ms } of this._pollGpuTimers()) {
+      const target = this.ring.find((r) => r.frame === frame);
+      if (target) target.gpuMs = ms;
+    }
 
     this._appendPost(record);
     this._detectTriggers(record);

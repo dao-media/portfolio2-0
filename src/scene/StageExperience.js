@@ -1164,6 +1164,71 @@ export class StageExperience {
   }
 
   /**
+   * Pass H item 1 — per-object triangle/draw-call table for the whole scene,
+   * not just one root: `window.__stageDebug("debugTriangleBreakdown")`.
+   * For every mesh under every vignette group plus grass/lantern/floor,
+   * reports its own triangle count (instance-aware — an InstancedMesh
+   * reports geometryTriangles * count), draw calls (1 per material slot),
+   * castShadow/receiveShadow, material type, and whether it's actually
+   * reachable right now (`.visible` false anywhere up its own ancestor
+   * chain, the same walk the flight recorder's `hiddenAtPresent` does) —
+   * so "is some other stop's geometry still being drawn at Bust" is a
+   * direct read of this table, not an inference.
+   */
+  debugTriangleBreakdown() {
+    const rows = [];
+    const totalsByStop = {};
+    const triCount = (geom) => {
+      if (!geom) return 0;
+      if (geom.index) return geom.index.count / 3;
+      const pos = geom.attributes?.position;
+      return pos ? pos.count / 3 : 0;
+    };
+    const hiddenAtPresent = (obj) => {
+      let p = obj;
+      while (p) {
+        if (p.visible === false) return true;
+        p = p.parent;
+      }
+      return false;
+    };
+    const visit = (root, stopLabel) => {
+      if (!root) return;
+      root.traverse((obj) => {
+        if (!obj.isMesh) return;
+        const instances = obj.isInstancedMesh ? obj.count : 1;
+        const tris = triCount(obj.geometry) * instances;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        totalsByStop[stopLabel] = (totalsByStop[stopLabel] ?? 0) + tris;
+        rows.push({
+          stop: stopLabel,
+          mesh: obj.name || "(unnamed)",
+          triangles: Math.round(tris),
+          instances: obj.isInstancedMesh ? instances : null,
+          drawCalls: mats.length,
+          materialType: mats[0]?.type ?? null,
+          castShadow: Boolean(obj.castShadow),
+          receiveShadow: Boolean(obj.receiveShadow),
+          visible: obj.visible,
+          hiddenAtPresent: hiddenAtPresent(obj)
+        });
+      });
+    };
+    const names = ["bust", "desktop", "sidekick", "archaeology"];
+    this.vignettes.forEach((vig, i) => visit(vig?.group, names[i] ?? `vignette-${i}`));
+    if (this.wetFloor?.floorMesh) visit(this.wetFloor.floorMesh, "wet-floor");
+    if (this.stageFloor) visit(this.stageFloor, "stage-floor");
+    rows.sort((a, b) => b.triangles - a.triangles);
+    return {
+      totalsByStop: Object.fromEntries(
+        Object.entries(totalsByStop).map(([k, v]) => [k, Math.round(v)])
+      ),
+      grandTotalTriangles: Math.round(rows.reduce((sum, r) => sum + r.triangles, 0)),
+      rows
+    };
+  }
+
+  /**
    * DEV — isolate a named root under the real stage lighting (hide every
    * other mesh, reframe the camera tight on it, paint one frame, freeze the
    * tick) so it can be screenshotted without the camera rig fighting direct
@@ -6919,9 +6984,11 @@ export class StageExperience {
     const revealNow = Boolean(this._revealPending);
     const skippedBeautyThisFrame = this._skipBeauty;
     if (!this._skipBeauty) {
+      this._flight?.beginGpuTimer();
       this.post.render(this.scene, this.camera, t, {
         grainStrength: this._postGrainStrength
       });
+      this._flight?.endGpuTimer();
       // Pass F — latches once, on the first real beauty frame this session
       // ever presents (effectively frame 1), and never goes false again. See
       // warmVignette0.js's "live" phase for why this replaced `world.visible`
