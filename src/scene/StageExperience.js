@@ -2391,6 +2391,20 @@ export class StageExperience {
   }
 
   /**
+   * Pass G — coarse phase label for the flight recorder's per-frame record,
+   * so a dump can be sliced into hold/spiral/drop/settled/hop without
+   * re-deriving it from raw state after the fact.
+   */
+  _flightPhase() {
+    const seq = this.blackHoleSeq;
+    if (this._blackHoleActive) {
+      return seq?.phase === BLACK_HOLE_PHASE.SPIRAL ? "spiral" : "hold";
+    }
+    if (!this.introComplete) return "drop";
+    return this.cameraRig?.state?.isSettled ? "settled" : "hop";
+  }
+
+  /**
    * Pass F — Shift+D toggles the flight-recorder pill. The pill itself is a
    * page-side DOM element (`stageHost.js` owns it, since the worker has no
    * DOM); clicking it calls `flightDump()` over the existing debug-call
@@ -3106,7 +3120,10 @@ export class StageExperience {
    * fader/hold budgets below but much larger.
    */
   _chunkUploadBudgetMs() {
-    if (this._descentPendingWarm) return 40;
+    // Pass G item 3: Bust's own chunk-drain wait (warmVignette0.js) is
+    // exactly as hidden/free as `_descentPendingWarm`'s black-screen window
+    // — borrow its budget regardless of which path set it.
+    if (this._descentPendingWarm || this._bustTexWaitActive) return 40;
     if (this._chunkUploadsAllowed()) return 6; // hold
     return 4; // fader / XP gate / approach dolly, when visible and moving
   }
@@ -4305,6 +4322,18 @@ export class StageExperience {
       if (!this._bustWarmReady()) return;
       this._descentPendingWarm = false;
       this.world.visible = true;
+      // Pass G item 3: `prelightStop` existed ("Bust lantern is already at
+      // full intensity before the world is shown") but was never actually
+      // called anywhere. Without it, NeonSystem's `_syncContentLit` wraps
+      // bust/tree/grass in a "neon-lit-content" group gated on its own
+      // camera-distance `arriveLevel` smoothstep — independent of
+      // `world.visible` — while the lantern tube is explicitly excluded
+      // from that wrapper and has no such gate. Lantern was popping in up
+      // to ~3.7s before bust/tree/grass (confirmed via the flight recorder)
+      // purely because of this split, not a load-order issue. Latching
+      // arrive to 1 for stop 0 the instant the world itself goes visible
+      // makes both paths resolve on the same frame.
+      this.neon?.prelightStop(0);
       this._introSpringArmed = true;
       this.cameraRig.armIntroDescent();
     }
@@ -6278,6 +6307,11 @@ export class StageExperience {
     }
     const bustReady = this._bustWarmReady();
     this.world.visible = bustReady;
+    // Pass G item 3 — see the `_descentPendingWarm` branch of
+    // `_tickIntroFromCameraRig` for why this is here: this is the OTHER
+    // place `world.visible` can go true (the fast path, when Bust's own
+    // warm already finished by spiral-complete) — needs the same prelight.
+    if (bustReady) this.neon?.prelightStop(0);
     document.body.classList.remove("is-black-hole");
     document.getElementById("bh-enter")?.setAttribute("hidden", "");
     this._hostPost?.({ type: "dom", blackHole: false, enterVisible: false });
@@ -6597,15 +6631,13 @@ export class StageExperience {
     this._tickCursorStarTrail(dt, t);
     this.cameraRig?.update(dt);
     if (this.starField) {
-      // Defensive, matching the old milky-way-dome/starfield pattern this
-      // replaced: warmVignette0's per-stop compile passes (hideSceneExcept)
-      // hide every scene child outside the held root for one frame, then
-      // restore it — but a hide that lands exactly when the black-hole hold
-      // settles (this pass's "live" warm phase runs across that whole
-      // window) can leave this particular child's restore out of sync.
-      // Unconditionally re-asserting visible here costs nothing and is the
-      // reason the stars used to never vanish at that moment.
-      this.starField.visible = true;
+      // Pass G: the per-frame `visible = true` re-assert that used to live
+      // here is gone — it was defending against `compileHeldRoot`'s old
+      // `hideSceneExcept` call toggling StarField's visibility off for the
+      // duration of a compile. `compileHeldRoot` now renders through a
+      // dedicated, layer-masked camera instead (see stageModelReveal.js) and
+      // never touches `.visible` on anything, so there's nothing left to
+      // defend against here.
       const pixelRatio = this.renderer?.getPixelRatio?.() ?? this.pixelRatio ?? 1;
       updateStarField(this.starField, this.camera, t, dt, {
         horizonFadeOn: !this._blackHoleActive,
@@ -6810,13 +6842,19 @@ export class StageExperience {
       const isHop = this._programState().motion === "hop";
       const notRevealing = this._modelRevealOpacity == null || this._modelRevealOpacity >= 1;
       if (prevFrameMs <= FLOOR_RECOVER_MS && !isHop && notRevealing) {
+        // Pass G item B: this branch only ever runs on an already-settled,
+        // non-hop, non-reveal frame (its own gating above) — i.e. always on
+        // a presented frame, never a hidden one. Skipping beauty here was
+        // the same confirmed-bad pattern as the bake flushes (Pass F): 17
+        // skipBeauty frames measured here alone in one settled Bust session.
+        // It stays within `lateBudgetMs` either way, so there's no budget
+        // reason to skip; just let beauty render normally every time.
         const lateBudgetMs = 4;
         const uploadT0 = performance.now();
         let lastResult = null;
         while (performance.now() - uploadT0 < lateBudgetMs && this.chunkedTextures.pending) {
           lastResult = this.chunkedTextures.step(this.renderer);
           if (!lastResult) break;
-          if (lastResult === "alloc") this._skipBeauty = true;
         }
         const uploadMs = performance.now() - uploadT0;
         if (uploadMs > (this._uploadPeakMs || 0)) this._uploadPeakMs = uploadMs;
@@ -6890,6 +6928,9 @@ export class StageExperience {
       // as the "is it safe to skip" check.
       this._hasPresentedFrame = true;
     }
+    // Pass G — sampled right here, not at the end of the tick: catches
+    // anything hidden during the render that only gets restored afterward.
+    this._flight?.sampleVisibilityAtPresent(skippedBeautyThisFrame);
     if (this._pendingFrameReadback && !this._skipBeauty) {
       const { x, y, w, h, resolve } = this._pendingFrameReadback;
       this._pendingFrameReadback = null;
@@ -6940,7 +6981,9 @@ export class StageExperience {
         worldVisible: Boolean(this.world?.visible),
         warmPhase: this._vignette0Warm?.phase ?? null,
         warmLiveAt: this._vignette0Warm?._liveAt ?? null,
-        warmLiveKind: this._vignette0Warm?._liveSteps?.[this._vignette0Warm?._liveAt]?.kind ?? null
+        warmLiveKind: this._vignette0Warm?._liveSteps?.[this._vignette0Warm?._liveAt]?.kind ?? null,
+        phase: this._flightPhase(),
+        sceneTriangles: this.post?.renderPass?.lastSceneTriangles ?? null
       });
     }
     this._frameCause = "render";

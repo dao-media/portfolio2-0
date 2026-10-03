@@ -126,51 +126,38 @@ export function releaseRootToCamera(root) {
 const _compileTarget = new THREE.WebGLRenderTarget(16, 16);
 
 /**
- * Hide siblings of the held root's ancestor chain so a compile render does not
- * redraw the already-shown stage. Never hide the root, its parents, cameras,
- * or lights (the POV spot lives on the camera).
- * @param {THREE.Scene} scene
- * @param {THREE.Object3D} root
- * @returns {() => void}
+ * Pass G — dedicated compile camera, masked to ONLY {@link GPU_HOLD_LAYER}.
+ * Replaces `hideSceneExcept` (below, kept only for anything else still
+ * calling it) as `compileHeldRoot`'s way of rendering just the held root:
+ * since this camera's layer mask never includes layer 0, three's own
+ * layer-test during scene traversal already skips every live object for
+ * free — no `.visible` toggle on anything, ever, so a live frame that
+ * happens to render while this is mid-flight sees exactly what it would
+ * have seen anyway. Transform is copied from the real camera on each call
+ * so the held root (wherever it actually sits) stays in frustum.
  */
-export function hideSceneExcept(scene, root) {
-  const keep = new Set();
-  let node = root;
-  while (node) {
-    keep.add(node);
-    node = node.parent;
-  }
-  const hidden = [];
-  const underRoot = (obj) => {
-    let node = obj;
-    while (node) {
-      if (node === root) return true;
-      node = node.parent;
-    }
-    return false;
-  };
-  scene.traverse((obj) => {
-    if (obj === scene || keep.has(obj) || underRoot(obj)) return;
-    if (obj.isLight || obj.isCamera) return;
-    if (!obj.parent || !keep.has(obj.parent) || !obj.visible) return;
-    obj.visible = false;
-    hidden.push(obj);
-  });
-  noteFlight("hideSceneExcept", {
-    root: root?.name || "(unnamed)",
-    hiddenCount: hidden.length,
-    hiddenNames: hidden.slice(0, 8).map((obj) => obj.name || "(unnamed)")
-  });
-  return () => {
-    for (const obj of hidden) obj.visible = true;
-    noteFlight("hideSceneExcept-restore", { root: root?.name || "(unnamed)", restoredCount: hidden.length });
-  };
-}
+const _compileCamera = new THREE.PerspectiveCamera();
+_compileCamera.layers.set(GPU_HOLD_LAYER);
 
 /**
  * `renderer.compile` skips shadow-depth variants. Draw only the held root
  * into an offscreen target (not the canvas) so the first beauty frame does
  * not compile them — and do not re-render the rest of the stage to do it.
+ *
+ * Pass G: this used to borrow the real, shared live camera (temporarily
+ * widening its layer mask to GPU_HOLD_LAYER + layer 0, then calling
+ * `hideSceneExcept` to blind it to everything on layer 0 it could now see)
+ * — real visibility toggles on live scene objects, for the duration of an
+ * `await` (`compileAsync`). The flight recorder's HOLD-phase BLINK trigger
+ * (hole + disk vanishing for single frames while stars survive, since
+ * StarField alone re-asserts `visible` every frame) is this exact
+ * mechanism: any real frame that renders between the hide and its restore
+ * — including one from a concurrent `compileHeldRoot` call for a different
+ * root, since `onPropMounted` fires these without awaiting each other —
+ * presents with those objects missing. The dedicated `_compileCamera` above
+ * needs none of that: its mask never includes layer 0, so it already can't
+ * see live scene content, with zero mutation of anything the live camera's
+ * own frame depends on.
  * @param {THREE.WebGLRenderer} renderer
  * @param {THREE.Scene} scene
  * @param {THREE.Camera} camera
@@ -179,46 +166,48 @@ export function hideSceneExcept(scene, root) {
 export async function compileHeldRoot(renderer, scene, camera, root) {
   if (!renderer || !scene || !camera) return;
   noteFlight("compileHeldRoot-start", { root: root?.name || "(unnamed)" });
-  const mask = camera.layers.mask;
   const prevTarget = renderer.getRenderTarget();
   const prevAutoClear = renderer.autoClear;
   const lights = [];
 
-  camera.layers.enable(GPU_HOLD_LAYER);
+  _compileCamera.position.copy(camera.position);
+  _compileCamera.quaternion.copy(camera.quaternion);
+  if (camera.isPerspectiveCamera) {
+    _compileCamera.fov = camera.fov;
+    _compileCamera.aspect = camera.aspect;
+    _compileCamera.near = camera.near;
+    _compileCamera.far = camera.far;
+    _compileCamera.updateProjectionMatrix();
+  }
+  _compileCamera.updateMatrixWorld(true);
+
   scene.traverse((obj) => {
     if (!obj.isLight || obj.layers.isEnabled(GPU_HOLD_LAYER)) return;
     lights.push(obj);
     obj.layers.enable(GPU_HOLD_LAYER);
   });
 
-  const restore = root ? hideSceneExcept(scene, root) : null;
   renderer.shadowMap.needsUpdate = true;
   // Bind a target before compile. A null target compiles the ACES tone-mapped
   // variant; the composer beauty pass compiles NoToneMapping. Those are
   // different program keys, and the ACES ones showed up as hop 0→3 leaks.
   renderer.setRenderTarget(_compileTarget);
   renderer.autoClear = true;
-  const linked = renderer.compileAsync(scene, camera);
-  if (restore) restore();
+  const linked = renderer.compileAsync(scene, _compileCamera);
   renderer.setRenderTarget(prevTarget);
   renderer.autoClear = prevAutoClear;
-  camera.layers.mask = mask;
   for (const light of lights) light.layers.disable(GPU_HOLD_LAYER);
   noteFlight("compileHeldRoot-await", { root: root?.name || "(unnamed)" });
   await linked;
   noteFlight("compileHeldRoot-resumed", { root: root?.name || "(unnamed)" });
-  camera.layers.enable(GPU_HOLD_LAYER);
   for (const light of lights) light.layers.enable(GPU_HOLD_LAYER);
-  const restoreDraw = root ? hideSceneExcept(scene, root) : null;
   renderer.shadowMap.needsUpdate = true;
   renderer.setRenderTarget(_compileTarget);
   renderer.autoClear = true;
-  renderer.render(scene, camera);
-  if (restoreDraw) restoreDraw();
+  renderer.render(scene, _compileCamera);
 
   renderer.setRenderTarget(prevTarget);
   renderer.autoClear = prevAutoClear;
-  camera.layers.mask = mask;
   for (const light of lights) light.layers.disable(GPU_HOLD_LAYER);
   noteFlight("compileHeldRoot-done", { root: root?.name || "(unnamed)" });
 }

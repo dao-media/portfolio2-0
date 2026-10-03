@@ -32,6 +32,13 @@ export class PortalAwareRenderPass extends RenderPass {
    */
   render(renderer, inputBuffer, outputBuffer, deltaTime, stencilTest) {
     super.render(renderer, inputBuffer, outputBuffer, deltaTime, stencilTest);
+    // Pass G — `renderer.info.render` resets on every individual
+    // renderer.render() call; by the time a frame finishes (every later
+    // postprocessing pass is its own such call, usually a 1-quad/2-triangle
+    // fullscreen draw), whatever ran last is all `info.render.triangles`
+    // still holds. This is the actual beauty draw of the real scene, so
+    // capture the real count here, right after it, for the flight recorder.
+    this.lastSceneTriangles = renderer.info.render.triangles;
     const target = this.renderToScreen ? null : inputBuffer;
     this.portal?.renderPortalSubpass?.(renderer, this.camera, target);
   }

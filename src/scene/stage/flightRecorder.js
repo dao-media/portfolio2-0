@@ -7,8 +7,8 @@
  * the exact cause of a presented black frame or an un-ramped pop-in can be
  * read back after the fact, instead of guessed from a screen recording.
  *
- * `hideSceneExcept` / `compileHeldRoot` (stageModelReveal.js) and the
- * StageExperience resize/bake paths report into this via the module-level
+ * `compileHeldRoot` (stageModelReveal.js) and the StageExperience
+ * resize/bake paths report into this via the module-level
  * `noteFlight()` — a `setActiveFrameBudget`-style singleton, so call sites
  * don't need a recorder reference threaded through them.
  *
@@ -66,6 +66,13 @@ export class FlightRecorder {
     this._armedPost = [];
     this._pendingNotes = [];
     this._lastFired = {};
+    // Pass G — true totals, independent of the refire-throttled snapshot
+    // pool: "report ALL trigger counts, not only the causes you fixed."
+    this._totalCounts = {};
+    this._totalCountsByPhase = {};
+    this._reasonCounts = {};
+    /** @type {object[]} up to 10, sorted desc by frameMs, independent of SLOW's refire throttle. */
+    this._topSlow = [];
     this._prevProgramCount = renderer?.info?.programs?.length ?? 0;
     this._frameUploads = 0;
     this._frameResizes = [];
@@ -93,9 +100,15 @@ export class FlightRecorder {
     );
     if (!this._blackReadbackSupported) return;
     this._gl = gl;
+    // Pass G: 4 points at 25%/75% of width/height instead of dead-center —
+    // the hold's black hole has a genuinely black core sitting exactly at
+    // canvas center, which made every BLACK reading during the hold a false
+    // positive on real (intended) content, not a skip/visibility bug. One
+    // PBO, 4 separate 2x2 reads at distinct byte offsets, one fence after
+    // the last — by the time that fence signals, all 4 copies are done.
     this._blackPbo = gl.createBuffer();
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this._blackPbo);
-    gl.bufferData(gl.PIXEL_PACK_BUFFER, 16, gl.STREAM_READ);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, 64, gl.STREAM_READ);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
     this._blackPending = null;
   }
@@ -104,10 +117,18 @@ export class FlightRecorder {
     if (!this._blackReadbackSupported || this._blackPending) return;
     const gl = this._gl;
     const canvas = this.renderer.domElement;
-    const cx = Math.max(0, Math.floor(canvas.width / 2) - 1);
-    const cy = Math.max(0, Math.floor(canvas.height / 2) - 1);
+    const points = [
+      [0.25, 0.25],
+      [0.75, 0.25],
+      [0.25, 0.75],
+      [0.75, 0.75]
+    ];
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this._blackPbo);
-    gl.readPixels(cx, cy, 2, 2, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+    points.forEach(([fx, fy], i) => {
+      const cx = Math.max(0, Math.floor(canvas.width * fx) - 1);
+      const cy = Math.max(0, Math.floor(canvas.height * fy) - 1);
+      gl.readPixels(cx, cy, 2, 2, gl.RGBA, gl.UNSIGNED_BYTE, i * 16);
+    });
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
     const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
     gl.flush();
@@ -123,15 +144,15 @@ export class FlightRecorder {
     gl.deleteSync(this._blackPending.sync);
     this._blackPending = null;
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this._blackPbo);
-    const px = new Uint8Array(16);
+    const px = new Uint8Array(64);
     gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, px);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
     let sum = 0;
-    for (let i = 0; i < 4; i += 1) {
+    for (let i = 0; i < 16; i += 1) {
       const o = i * 4;
       sum += (0.299 * px[o] + 0.587 * px[o + 1] + 0.114 * px[o + 2]) / 255;
     }
-    return +(sum / 4).toFixed(3);
+    return +(sum / 16).toFixed(3);
   }
 
   /** Any module can report an event into the frame currently being built. */
@@ -150,13 +171,23 @@ export class FlightRecorder {
   }
 
   /**
-   * @param {{
-   *   frameMs: number, governorLevel: number | null, pixelRatio: number,
-   *   drawingBuffer: { w: number, h: number }, frameCause: string | null,
-   *   skipBeauty: boolean, chunkPending: number, chunkMipmapPending: number
-   * }} ctx
+   * Pass G: call this immediately after the real `post.render()` call — NOT
+   * at the end of the frame, after duoFab/waterCursor/HUD work has also run.
+   * A hide-then-restore that happens entirely between this point and the
+   * previous call (e.g. still inside `_tickModelReveal`, before `render()`)
+   * is correctly invisible to this census, because it genuinely never
+   * reached the screen; the bug this exists to catch is the opposite case
+   * — something hidden *during* the real render and only restored
+   * afterward, which this now samples while it's still actually hidden.
+   * When beauty was skipped this frame (nothing new presented), carries the
+   * last real sample forward instead of re-deriving a fresh (meaningless —
+   * nothing changed on screen) one.
    */
-  endFrame(ctx) {
+  sampleVisibilityAtPresent(skippedBeauty) {
+    if (skippedBeauty) {
+      this._pendingVisCensus = this._lastVisCensus ?? {};
+      return;
+    }
     const visCensus = {};
     for (const { label, get } of this.roots) {
       let root = null;
@@ -184,9 +215,35 @@ export class FlightRecorder {
       }
       const mat = mesh ? (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) : null;
       const opacity = mat && typeof mat.opacity === "number" ? mat.opacity : 1;
-      visCensus[label] = { visible: Boolean(root.visible), opacity: +opacity.toFixed(3) };
+      // "hidden at present": this root, or any ancestor up to the scene,
+      // was non-visible at the exact moment it should have been drawn —
+      // catches a hidden *parent* (e.g. the old hideSceneExcept pattern)
+      // even though the root object's own `.visible` never changed.
+      let hiddenAtPresent = !root.visible;
+      let p = root.parent;
+      while (p && !hiddenAtPresent) {
+        if (p.visible === false) hiddenAtPresent = true;
+        p = p.parent;
+      }
+      visCensus[label] = {
+        visible: Boolean(root.visible),
+        opacity: +opacity.toFixed(3),
+        hiddenAtPresent
+      };
     }
+    this._pendingVisCensus = visCensus;
+    this._lastVisCensus = visCensus;
+  }
 
+  /**
+   * @param {{
+   *   frameMs: number, governorLevel: number | null, pixelRatio: number,
+   *   drawingBuffer: { w: number, h: number }, frameCause: string | null,
+   *   skipBeauty: boolean, chunkPending: number, chunkMipmapPending: number
+   * }} ctx
+   */
+  endFrame(ctx) {
+    const visCensus = this._pendingVisCensus ?? {};
     const programs = this.renderer?.info?.programs?.length ?? 0;
     const programsCreated = Math.max(0, programs - this._prevProgramCount);
     this._prevProgramCount = programs;
@@ -225,7 +282,14 @@ export class FlightRecorder {
       warmPhase: ctx.warmPhase ?? null,
       warmLiveAt: ctx.warmLiveAt ?? null,
       warmLiveKind: ctx.warmLiveKind ?? null,
-      triangles: this.renderer?.info?.render?.triangles ?? null,
+      phase: ctx.phase ?? null,
+      // Pass G: `renderer.info.render` resets on every individual
+      // renderer.render() call — reading it here (after every post-process
+      // pass, duoFab, water cursor) always saw whatever tiny fullscreen
+      // quad ran last. `sceneTriangles` is captured by the beauty RenderPass
+      // itself (PortalAwareRenderPass.lastSceneTriangles) right after the
+      // real scene draw, immune to that.
+      triangles: ctx.sceneTriangles ?? null,
       programs,
       programsCreated,
       texturesUploaded: this._frameUploads,
@@ -280,11 +344,21 @@ export class FlightRecorder {
       const a = prev.visCensus[label];
       const b = record.visCensus[label];
       if (!a || !b) continue;
-      if (a.visible && !b.visible) {
+      // The black hole's own hide is a deliberate, scripted one-shot at the
+      // spiral->drop handoff (`_onBlackHoleSpiralComplete` calls
+      // `blackHole.hide()`) — not a bug. Only flag it outside that moment.
+      const isExpectedBlackHoleHide = label === "black-hole" && record.phase === "drop";
+      if (a.visible && !b.visible && !isExpectedBlackHoleHide) {
         this._fire("BLINK", record, `${label} went visible -> hidden`);
       }
-      const wasGone = !a.visible || a.opacity < 0.05;
-      const nowShown = b.visible && b.opacity > 0.5;
+      // `hiddenAtPresent` catches a hidden ancestor even when the root's own
+      // `.visible` never flipped — the exact shape of the old
+      // hideSceneExcept bug (it hid siblings, not the held root itself).
+      if (!a.hiddenAtPresent && b.hiddenAtPresent && !isExpectedBlackHoleHide) {
+        this._fire("BLINK", record, `${label} hidden at present (an ancestor was non-visible during render)`);
+      }
+      const wasGone = !a.visible || a.opacity < 0.05 || a.hiddenAtPresent;
+      const nowShown = b.visible && b.opacity > 0.5 && !b.hiddenAtPresent;
       if (wasGone && nowShown) {
         this._fire("POP-IN", record, `${label} ${a.visible ? "opacity " + a.opacity : "hidden"} -> visible opacity ${b.opacity} with no ramp between`);
       }
@@ -301,6 +375,25 @@ export class FlightRecorder {
   }
 
   _fire(kind, record, summary) {
+    // Totals count every qualifying frame, unthrottled — the refire gap
+    // below only governs how many *snapshots* (expensive, 150-frame windows)
+    // get kept, not what's reported as having happened.
+    this._totalCounts[kind] = (this._totalCounts[kind] ?? 0) + 1;
+    const phaseKey = `${kind}:${record.phase ?? "unknown"}`;
+    this._totalCountsByPhase[phaseKey] = (this._totalCountsByPhase[phaseKey] ?? 0) + 1;
+    // Cheap (just a string counter) per-cause tally so "what caused the 10
+    // BLINKs" survives even once the snapshot pool has evicted most of them.
+    // Strips the leading "beauty render skipped (X) — ..." down to "X", and
+    // a visibility-flip summary down to "<label> visible<->hidden", so the
+    // same underlying cause collapses to one key instead of one per frame.
+    const reasonKey = /^beauty render skipped \(([^)]*)\)/.exec(summary)?.[1] ?? summary.replace(/\d+(\.\d+)?/g, "#");
+    const key = `${kind}:${reasonKey}`;
+    this._reasonCounts[key] = (this._reasonCounts[key] ?? 0) + 1;
+    if (kind === "SLOW") {
+      this._topSlow.push({ frame: record.frame, t: record.t, frameMs: record.frameMs, cause: record.frameCause, phase: record.phase });
+      this._topSlow.sort((a, b) => b.frameMs - a.frameMs);
+      if (this._topSlow.length > 10) this._topSlow.length = 10;
+    }
     const last = this._lastFired[kind];
     if (last != null && record.t - last < TRIGGER_REFIRE_GAP_MS) return;
     this._lastFired[kind] = record.t;
@@ -328,7 +421,13 @@ export class FlightRecorder {
     return {
       enabled: true,
       frameCount: this.frameIndex,
-      triggerCounts: this.snapshots.reduce((acc, s) => {
+      // True totals — every qualifying frame, not just the ones that got a
+      // (throttled, capped) snapshot. This is the number to report.
+      totalCounts: { ...this._totalCounts },
+      totalCountsByPhase: { ...this._totalCountsByPhase },
+      reasonCounts: { ...this._reasonCounts },
+      topSlow: this._topSlow.slice(),
+      snapshotCounts: this.snapshots.reduce((acc, s) => {
         acc[s.kind] = (acc[s.kind] ?? 0) + 1;
         return acc;
       }, {}),
@@ -337,10 +436,6 @@ export class FlightRecorder {
   }
 
   pillSummary() {
-    const counts = this.snapshots.reduce((acc, s) => {
-      acc[s.kind] = (acc[s.kind] ?? 0) + 1;
-      return acc;
-    }, {});
-    return { frameCount: this.frameIndex, counts };
+    return { frameCount: this.frameIndex, counts: { ...this._totalCounts } };
   }
 }

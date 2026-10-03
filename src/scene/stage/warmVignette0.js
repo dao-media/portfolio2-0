@@ -163,7 +163,39 @@ export function stepVignette0Warm(stage, state) {
   if (state.phase === "live") {
     const steps = state._liveSteps || [];
     const pastBust = state._liveAt >= (state._bustStepCount ?? 0);
-    if (state._liveAt === (state._bustStepCount ?? 0)) state.bustReady = true;
+    // Pass G item 3: Bust's own "scene" step (above) only compiles shaders
+    // and warms a draw — it says nothing about whether Bust's own chunked
+    // textures (the statue's 4096² map) have actually finished uploading.
+    // That drains on its own schedule during the normal per-frame budget
+    // (`_chunkUploadsAllowed`), fully independent of this sequence, so
+    // `bustReady` could — and, per the flight recorder, did — go true while
+    // the chunk queue still had rows left: the drop arms, and the texture
+    // visibly fills in afterward (same root shape as the reported lantern/
+    // bust/tree/grass pop-in split, just via a different channel: geometry
+    // reveals as one instant unit already, but Bust's own detail trails it).
+    // Hold `bustReady` — not the step progression itself, just the drop
+    // trigger that reads it — until the chunk queue is actually empty, or
+    // 8s, so a stalled queue can't hang the drop forever.
+    if (state._liveAt === (state._bustStepCount ?? 0) && !state.bustReady) {
+      if (!state._bustTexWait) state._bustTexWait = performance.now();
+      const chunksDrained = (stage.chunkedTextures?.pending ?? 0) === 0;
+      if (chunksDrained || performance.now() - state._bustTexWait > 1200) {
+        state.bustReady = true;
+        stage._bustTexWaitActive = false;
+      } else {
+        // The fast (40ms/frame) chunk-drain budget normally only applies
+        // while `_descentPendingWarm` is true (the black-screen window) —
+        // but that flag can already be false here (the spiral-complete fast
+        // path sets `world.visible` directly without ever setting it),
+        // leaving this wait stuck on the slow 4-6ms hold/approach budget:
+        // measured 1.8-2.4s to drain the statue's 4096² texture at that
+        // rate, which blew test:smoke's 2s spiral-to-drop budget outright.
+        // This flag (read by `_chunkUploadBudgetMs`) borrows the same fast
+        // budget for this wait specifically, regardless of which path led
+        // here — still hidden, still free.
+        stage._bustTexWaitActive = true;
+      }
+    }
     // liveModelsReady needs the other three stops mounted — real dependencies
     // for their own steps below, but not for Bust's own step above, which
     // runs (and can finish) without waiting on them at all.
