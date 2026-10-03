@@ -513,6 +513,7 @@ export class FlightRecorder {
       frame: record.frame,
       t: record.t,
       summary,
+      frameMs: record.frameMs ?? null,
       pre: this.ring.slice(-PRE_FRAMES),
       post: []
     };
@@ -521,8 +522,17 @@ export class FlightRecorder {
     // the rarer BLINK/POP-IN snapshots that are the actual point of this.
     const sameKind = this.snapshots.filter((s) => s.kind === kind);
     if (sameKind.length > MAX_SNAPSHOTS_PER_KIND) {
-      const oldest = sameKind[0];
-      this.snapshots.splice(this.snapshots.indexOf(oldest), 1);
+      // SLOW fires often enough that a plain FIFO cap just keeps whichever 6
+      // happened to be most recent — a run full of mild hitches then evicts
+      // the one 600ms stall that's actually worth a cpuSections/gapTasks
+      // snapshot. Evict the smallest frameMs instead, so this kind always
+      // holds the worst offenders seen so far. Other kinds (BLINK/POP-IN/
+      // BLACK) are rare enough that recency is fine, so keep FIFO for them.
+      const toEvict =
+        kind === "SLOW"
+          ? sameKind.reduce((min, s) => ((s.frameMs ?? 0) < (min.frameMs ?? 0) ? s : min))
+          : sameKind[0];
+      this.snapshots.splice(this.snapshots.indexOf(toEvict), 1);
     }
     this._armedPost.push(snap);
   }
