@@ -1149,7 +1149,9 @@ export class StageExperience {
           vertexColors: Boolean(mat?.vertexColors),
           hasGeometryColorAttr: Boolean(obj.geometry?.attributes?.color),
           mapColorSpace: mat?.map?.colorSpace ?? null,
-          mapGlInternalFormat: this._textureGlInternalFormat(mat?.map)
+          mapGlInternalFormat: this._textureGlInternalFormat(mat?.map),
+          mapChunkClaimed: Boolean(mat?.map?.userData?.__chunkClaimed),
+          mapChunkDone: Boolean(mat?.map?.userData?.__chunkDone)
         });
       }
     });
@@ -6804,6 +6806,23 @@ export class StageExperience {
       this._resizeSkipScene = false;
       this._applyRenderScale();
     }
+    // Pass I item 5 — the Bust reveal could land on the same tick as a
+    // draw-size change (governor/budget reacting to the sudden post-reveal
+    // workload spike), reading as a resize visibly overlapping the first
+    // frame of real content. Track how many consecutive ticks the
+    // composer's actual draw size has held steady; `_bustStepCount`'s gate
+    // below requires at least 2 before arming the reveal.
+    {
+      const dw = this.post?.drawWidth ?? 0;
+      const dh = this.post?.drawHeight ?? 0;
+      if (dw === this._lastDrawW && dh === this._lastDrawH) {
+        this._stableDrawFrames = (this._stableDrawFrames ?? 0) + 1;
+      } else {
+        this._stableDrawFrames = 0;
+        this._lastDrawW = dw;
+        this._lastDrawH = dh;
+      }
+    }
 
     const desktop = this.vignettes[1]?.instance;
     if (desktop?.pcRoot && desktop._pcSceneReady) {
@@ -7225,7 +7244,12 @@ export class StageExperience {
         // previous frame's queued GPU work was still draining. cpuWorkMs is
         // the real wall-clock spent inside this tick, workT0 to here.
         cpuWorkMs: this._lastWorkMs,
-        cpuSections: this._preSections.slice()
+        cpuSections: this._preSections.slice(),
+        // Pass I item 3/4 — whatever _noteGap captured since the last frame
+        // (message handlers ≥20ms, setTimeout callbacks ≥20ms), regardless
+        // of whether it won the `_lastCause` "gap:unaccounted" label race.
+        gapTasks: tasks && tasks.length ? tasks.slice() : null,
+        gapSinceMs: since != null ? Math.round(since) : null
       });
     }
     this._frameCause = "render";

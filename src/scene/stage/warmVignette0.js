@@ -179,7 +179,11 @@ export function stepVignette0Warm(stage, state) {
     if (state._liveAt === (state._bustStepCount ?? 0) && !state.bustReady) {
       if (!state._bustTexWait) state._bustTexWait = performance.now();
       const chunksDrained = (stage.chunkedTextures?.pending ?? 0) === 0;
-      if (chunksDrained || performance.now() - state._bustTexWait > 1200) {
+      // Pass I item 5 — also wait for 2 consecutive ticks of a stable draw
+      // size (see the tracking in _animate) so the reveal never lands on
+      // the same frame as a governor/budget resize.
+      const sizeStable = (stage._stableDrawFrames ?? 0) >= 2;
+      if ((chunksDrained && sizeStable) || performance.now() - state._bustTexWait > 1200) {
         state.bustReady = true;
         stage._bustTexWaitActive = false;
       } else {

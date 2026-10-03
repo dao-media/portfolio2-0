@@ -286,10 +286,39 @@ export class FlightRecorder {
         if (p.visible === false) hiddenAtPresent = true;
         p = p.parent;
       }
+      // Pass I item 5 — a mesh sampling the chunk queue's 1x1 placeholder
+      // texture instead of the real one at the moment it's revealed.
+      // Correction: `texture.image` staying 1x1 is this app's *normal,
+      // correct, final* state for a fully chunk-uploaded texture — the real
+      // content lives directly in GPU memory via in-place sub-uploads and
+      // `.image` is never swapped (confirmed live: bust's statue texture
+      // reads `.image` 1x1 with `__chunkClaimed && __chunkDone` both true,
+      // fully uploaded, rendering correctly — not a bug). Only flag a slot
+      // that's 1x1 and was *never claimed* by the chunk system at all —
+      // that's the actual "still showing nothing real" case; a claimed-but-
+      // not-yet-done texture is the one still legitimately loading.
+      let isPlaceholder = false;
+      if (mat) {
+        for (const key of ["map", "roughnessMap", "normalMap", "metalnessMap"]) {
+          const tex = mat[key];
+          if (!tex) continue;
+          const img = tex.image;
+          const tiny = !img || (img.width <= 1 && img.height <= 1);
+          if (!tiny) continue;
+          const claimed = Boolean(tex.userData?.__chunkClaimed);
+          if (!claimed) {
+            // Never entered the chunk system at all and still 1x1 — the
+            // real "nothing real sampled yet" case.
+            isPlaceholder = true;
+            break;
+          }
+        }
+      }
       visCensus[label] = {
         visible: Boolean(root.visible),
         opacity: +opacity.toFixed(3),
-        hiddenAtPresent
+        hiddenAtPresent,
+        isPlaceholder
       };
     }
     this._pendingVisCensus = visCensus;
@@ -351,6 +380,8 @@ export class FlightRecorder {
       // already-measured render calls), for naming which section spikes.
       cpuWorkMs: ctx.cpuWorkMs != null ? +ctx.cpuWorkMs.toFixed(2) : null,
       cpuSections: ctx.cpuSections ?? null,
+      gapTasks: ctx.gapTasks ?? null,
+      gapSinceMs: ctx.gapSinceMs ?? null,
       // Pass G: `renderer.info.render` resets on every individual
       // renderer.render() call — reading it here (after every post-process
       // pass, duoFab, water cursor) always saw whatever tiny fullscreen
@@ -436,7 +467,11 @@ export class FlightRecorder {
       const wasGone = !a.visible || a.opacity < 0.05 || a.hiddenAtPresent;
       const nowShown = b.visible && b.opacity > 0.5 && !b.hiddenAtPresent;
       if (wasGone && nowShown) {
-        this._fire("POP-IN", record, `${label} ${a.visible ? "opacity " + a.opacity : "hidden"} -> visible opacity ${b.opacity} with no ramp between`);
+        if (b.isPlaceholder) {
+          this._fire("POP-IN", record, `placeholder sampled: ${label} revealed while still showing the 1x1 chunk-queue placeholder texture`);
+        } else {
+          this._fire("POP-IN", record, `${label} ${a.visible ? "opacity " + a.opacity : "hidden"} -> visible opacity ${b.opacity} with no ramp between`);
+        }
       }
     }
 
