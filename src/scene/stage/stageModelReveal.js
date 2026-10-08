@@ -244,21 +244,26 @@ export async function compileHeldRootVariants(renderer, scene, camera, root, opt
   const wraps = opts.wraps ?? [(fn) => fn()];
   const yieldFrame = opts.yieldFrame ?? (async () => {});
   const name = root?.name || "(unnamed)";
-  syncCompileCamera(camera);
-  const lights = enableLightsOnHoldLayer(scene);
-  const prevTarget = renderer.getRenderTarget();
-  const prevAutoClear = renderer.autoClear;
-  renderer.setRenderTarget(_compileTarget);
-  renderer.autoClear = true;
-  const pending = [];
-  try {
-    for (const wrap of wraps) pending.push(wrap(() => renderer.compileAsync(scene, _compileCamera)));
-  } finally {
-    renderer.setRenderTarget(prevTarget);
-    renderer.autoClear = prevAutoClear;
-    for (const light of lights) light.layers.disable(GPU_HOLD_LAYER);
+  // Pass K item 4 — one variant's compile batch per frame slot, awaited
+  // (KHR_parallel_shader_compile links off the main thread; three polls).
+  for (const wrap of wraps) {
+    await yieldFrame();
+    syncCompileCamera(camera);
+    const lights = enableLightsOnHoldLayer(scene);
+    const prevTarget = renderer.getRenderTarget();
+    const prevAutoClear = renderer.autoClear;
+    renderer.setRenderTarget(_compileTarget);
+    renderer.autoClear = true;
+    let pending = null;
+    try {
+      pending = wrap(() => renderer.compileAsync(scene, _compileCamera));
+    } finally {
+      renderer.setRenderTarget(prevTarget);
+      renderer.autoClear = prevAutoClear;
+      for (const light of lights) light.layers.disable(GPU_HOLD_LAYER);
+    }
+    await pending;
   }
-  await Promise.all(pending);
   noteFlight("compileHeldRoot-done", { root: name, variants: wraps.length });
   for (const wrap of wraps) {
     await yieldFrame();

@@ -391,6 +391,11 @@ function diffProgramKeys(warmKey, liveKey) {
 const _STAR_CSS = new THREE.Vector2();
 const INACTIVE_MASK = 1 << INACTIVE_VIGNETTE_LAYER;
 
+/** Pass K item 4 — background work waits this long after the last input. */
+const BG_INPUT_QUIET_MS = 300;
+/** Pass K item 4 — mid-hop chunk uploads are off (no background work on camera motion). */
+const PASS_K_HOP_UPLOADS = false;
+
 export class StageExperience {
   /**
    * @param {HTMLCanvasElement} canvas
@@ -5323,6 +5328,12 @@ export class StageExperience {
       this._introIntegrateScheduled = true;
       void this._releaseIntroDeferredWork({ early: true });
     }
+    // Pass K item 4 — past Bust's own step nothing here gates the drop, so
+    // the rest of the sequence pauses through the spiral/drop and on any
+    // non-idle frame after land.
+    if (this._vignette0Warm?.bustReady && !this._vignette0Warm.done && !this._bgIdle()) {
+      return this._vignette0Warm;
+    }
     if (!this._vignette0Warm || this._vignette0Warm.done) {
       this._maybeShowEnter();
       return this._vignette0Warm;
@@ -5359,7 +5370,7 @@ export class StageExperience {
       // never run and _vignette0Warm.done would never become true. Keep
       // draining it in the background, same per-step skipBeauty/frameCause
       // care as before, until it actually finishes.
-      if (this._vignette0Warm && !this._vignette0Warm.done && !this._blackHoleActive) {
+      if (this._vignette0Warm && !this._vignette0Warm.done && !this._blackHoleActive && this._takeBgToken("warm")) {
         this.warmVignette0();
       }
       return;
@@ -5504,15 +5515,54 @@ export class StageExperience {
    * One frame slot for background GPU work (held textures, compiles, draws).
    * Item 4 tightens this to idle-only post-land slicing.
    */
-  async _bgSlot() {
-    await this._yieldFrame();
-    while (this._bgPaused()) await this._yieldFrame();
+  async _bgSlot(kind = "held") {
+    for (;;) {
+      await this._yieldFrame();
+      if (this._takeBgToken(kind)) return;
+    }
   }
 
-  /** Pass K item 2 — background integration never runs during the spiral or the drop. */
-  _bgPaused() {
-    if (this._blackHoleActive) return this.blackHoleSeq?.phase !== BLACK_HOLE_PHASE.APPROACH;
-    return !this._introMotionComplete;
+  /**
+   * Pass K item 4 — may background work run on this frame? In the hold
+   * (black-hole approach) yes; never during the spiral or the drop; after
+   * land only while the camera is settled, no stop fade is ramping, and
+   * there has been no input for BG_INPUT_QUIET_MS.
+   */
+  _bgIdle(now = performance.now()) {
+    if (this._blackHoleActive) return this.blackHoleSeq?.phase === BLACK_HOLE_PHASE.APPROACH;
+    if (!this._introMotionComplete) return false;
+    if (!this.cameraRig?.state?.isSettled) return false;
+    if (this._stopFadeRamping?.()) return false;
+    if (now - (this._lastInputAt ?? -Infinity) < BG_INPUT_QUIET_MS) return false;
+    return true;
+  }
+
+  /**
+   * Pass K item 4 — one background unit per rendered frame (a held texture
+   * upload, one compile batch, one held/tiny draw, one chunk strip, one
+   * mip generation or one warm step), only on idle frames. Returns false
+   * if this frame's unit is already spent or the frame is not idle.
+   * @param {string} kind
+   */
+  _takeBgToken(kind) {
+    if (!this._bgIdle()) {
+      if (this._bgStats) this._bgStats.pausedChecks += 1;
+      return false;
+    }
+    if (this._bgTokenFrame === this._frameNo) return false;
+    this._bgTokenFrame = this._frameNo;
+    this._bgTokenKind = kind;
+    this._bgTokenAt = performance.now();
+    if (!this._bgStats) this._bgStats = { pausedChecks: 0, byKind: {} };
+    const row = this._bgStats.byKind[kind] || (this._bgStats.byKind[kind] = { units: 0, postLand: 0 });
+    row.units += 1;
+    if (this.introComplete) row.postLand += 1;
+    return true;
+  }
+
+  /** DEV/Pass K item 4 — background units by kind (and post-land count). */
+  debugBgStats() {
+    return { frameNo: this._frameNo ?? 0, ...(this._bgStats || {}) };
   }
 
   /**
@@ -7753,6 +7803,7 @@ export class StageExperience {
       }
       this._lastPacedAt = now;
     }
+    this._frameNo = (this._frameNo ?? 0) + 1;
     this.frameBudget?.begin();
     this._flight?.beginFrame();
     const wall = performance.now();
@@ -8073,7 +8124,10 @@ export class StageExperience {
       const prevFrameMs = this._lastFrameMs || 0;
       const isHop = this._programState().motion === "hop";
       const notRevealing = this._modelRevealOpacity == null || this._modelRevealOpacity >= 1;
-      if (prevFrameMs <= FLOOR_RECOVER_MS && !isHop && notRevealing) {
+      // Pass K item 4 — one strip per idle frame (settled, no input, no
+      // fade); never mid-hop (the destination's jobs are still moved to the
+      // front of the queue on advance, so they go first once it settles).
+      if (prevFrameMs <= FLOOR_RECOVER_MS && !isHop && notRevealing && this._takeBgToken("chunk")) {
         // Pass G item B: this branch only ever runs on an already-settled,
         // non-hop, non-reveal frame (its own gating above) — i.e. always on
         // a presented frame, never a hidden one. Skipping beauty here was
@@ -8081,17 +8135,12 @@ export class StageExperience {
         // skipBeauty frames measured here alone in one settled Bust session.
         // It stays within `lateBudgetMs` either way, so there's no budget
         // reason to skip; just let beauty render normally every time.
-        const lateBudgetMs = 4;
         const uploadT0 = performance.now();
-        let lastResult = null;
-        while (performance.now() - uploadT0 < lateBudgetMs && this.chunkedTextures.pending) {
-          lastResult = this.chunkedTextures.step(this.renderer);
-          if (!lastResult) break;
-        }
+        const lastResult = this.chunkedTextures.step(this.renderer);
         const uploadMs = performance.now() - uploadT0;
         if (uploadMs > (this._uploadPeakMs || 0)) this._uploadPeakMs = uploadMs;
         if (lastResult) this._frameCause = `texture-late-${lastResult}`;
-      } else if (isHop) {
+      } else if (isHop && PASS_K_HOP_UPLOADS) {
         // A hop can land on a vignette whose own large textures were only
         // just claimed (post-intro PC/Sidekick/Archaeology integration) and
         // are still mid-drain — measured up to ~8s to finish unattended, long
@@ -8122,7 +8171,7 @@ export class StageExperience {
       const prevFrameMs = this._lastFrameMs || 0;
       const notHop = this._programState().motion !== "hop";
       const notRevealing = this._modelRevealOpacity == null || this._modelRevealOpacity >= 1;
-      if (prevFrameMs <= FLOOR_RECOVER_MS && notHop && notRevealing) {
+      if (prevFrameMs <= FLOOR_RECOVER_MS && notHop && notRevealing && this._takeBgToken("mipmap")) {
         this.chunkedTextures.stepMipmap(this.renderer);
       }
     }
