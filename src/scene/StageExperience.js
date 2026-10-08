@@ -4049,6 +4049,162 @@ export class StageExperience {
     return { heavyMs: this._debugHeavyMs, governor: this.perfGovernor?.dump?.() ?? null, floorMp: this._floorMp ?? null };
   }
 
+  /**
+   * DEV/Pass K K2 — shadow-side fill study. Nothing here ships; default is
+   * "current". Variants (switchable live, restored exactly):
+   *  - "A": per-stop dark environment — a PMREM captured from the stop's own
+   *    position with everything hidden except that stop's emitters (its neon
+   *    tube + floor glow; lantern at Bust; CRT screen at Desktop; LCD at
+   *    Sidekick) over black, assigned as each of the stop's materials' own
+   *    envMap at the SAME intensity value it already uses (own envMapIntensity,
+   *    else scene.environmentIntensity).
+   *  - "B": RoomEnvironment at 0.25 (scene.environmentIntensity 0.6 → 0.25;
+   *    props carrying the studio env as their own envMap scaled by 0.25/0.6).
+   *    Touches a constrained value: comparison only.
+   *  - "C": N8AO on at rest (needs ?ao=1; off while the camera moves).
+   * @param {"current"|"A"|"B"|"C"} name
+   */
+  debugK2Variant(name = "current") {
+    this._k2Restore();
+    this._k2Variant = name;
+    if (name === "A") this._k2ApplyA();
+    else if (name === "B") this._k2ApplyB();
+    else if (name === "C") {
+      if (!this.post?.aoPass) return { variant: name, error: "N8AO needs ?ao=1" };
+      this._k2AoAtRest = true;
+    }
+    return { variant: name, envIntensity: this.scene.environmentIntensity, ao: Boolean(this.post?.aoPass?.enabled) };
+  }
+
+  _k2Restore() {
+    for (const [mat, saved] of this._k2Saved ?? []) {
+      mat.envMap = saved.envMap;
+      mat.envMapIntensity = saved.envMapIntensity;
+      mat.needsUpdate = true;
+    }
+    this._k2Saved = new Map();
+    if (this._k2EnvIntensity != null) this.scene.environmentIntensity = this._k2EnvIntensity;
+    this._k2EnvIntensity = null;
+    this._k2AoAtRest = false;
+    if (this.post?.aoPass) this.post.aoPass.enabled = false;
+  }
+
+  _k2Save(mat) {
+    if (!this._k2Saved.has(mat)) this._k2Saved.set(mat, { envMap: mat.envMap ?? null, envMapIntensity: mat.envMapIntensity });
+  }
+
+  /** Each stop's own emitters (meshes) for variant A. */
+  _k2Emitters(i) {
+    const out = [];
+    const e = this.neon?.entries?.[i];
+    if (e?.tube) out.push(e.tube);
+    if (e?.floorGlow) out.push(e.floorGlow);
+    const inst = this.vignettes?.[i]?.instance;
+    if (i === 1) {
+      if (inst?.phosphorMesh) out.push(inst.phosphorMesh);
+      if (inst?.screenMesh) out.push(inst.screenMesh);
+    }
+    if (i === 2 && inst?.screenMesh) out.push(inst.screenMesh);
+    return out;
+  }
+
+  _k2ApplyA() {
+    if (!this._k2EnvA) this._k2EnvA = [];
+    const pmrem = this._k2Pmrem || (this._k2Pmrem = new THREE.PMREMGenerator(this.renderer));
+    for (let i = 0; i < (this.vignettes?.length ?? 0); i += 1) {
+      if (!this._k2EnvA[i]) {
+        const keep = new Set();
+        for (const root of this._k2Emitters(i)) root.traverse((o) => keep.add(o));
+        const hidden = [];
+        this.scene.traverse((o) => {
+          if (!(o.isMesh || o.isPoints || o.isLine || o.isSprite) || keep.has(o) || !o.visible) return;
+          o.visible = false;
+          hidden.push(o);
+        });
+        // Stops may be culled by layer; enable everything on a temp mask.
+        const layerSaved = [];
+        for (const o of keep) {
+          layerSaved.push([o, o.layers.mask]);
+          o.layers.enableAll();
+        }
+        const bg = this.scene.background;
+        const env = this.scene.environment;
+        this.scene.background = new THREE.Color(0x000000);
+        this.scene.environment = null;
+        const center = new THREE.Vector3();
+        this.vignettes[i].group.getWorldPosition(center);
+        center.y += 1.0;
+        try {
+          this._k2EnvA[i] = pmrem.fromScene(this.scene, 0.04, 0.05, 60, { position: center }).texture;
+        } finally {
+          this.scene.background = bg;
+          this.scene.environment = env;
+          for (const o of hidden) o.visible = true;
+          for (const [o, m] of layerSaved) o.layers.mask = m;
+        }
+      }
+      const envTex = this._k2EnvA[i];
+      this.vignettes[i].group.traverse((obj) => {
+        if (!obj.isMesh || !obj.material) return;
+        for (const mat of Array.isArray(obj.material) ? obj.material : [obj.material]) {
+          if (!mat || !("envMap" in mat) || !mat.isMeshStandardMaterial) continue;
+          // Leave dedicated reflection captures (CRT glass cube, etc.) alone.
+          if (mat.envMap && mat.envMap !== this.liveEnv?.getStudioEnvironment?.()) continue;
+          this._k2Save(mat);
+          const intensity = mat.envMap ? mat.envMapIntensity : this.scene.environmentIntensity;
+          mat.envMap = envTex;
+          mat.envMapIntensity = intensity;
+          mat.needsUpdate = true;
+        }
+      });
+    }
+  }
+
+  _k2ApplyB() {
+    const from = this.scene.environmentIntensity;
+    this._k2EnvIntensity = from;
+    const to = 0.25;
+    this.scene.environmentIntensity = to;
+    const studio = this.liveEnv?.getStudioEnvironment?.();
+    for (const v of this.vignettes ?? []) {
+      v.group.traverse((obj) => {
+        if (!obj.isMesh || !obj.material) return;
+        for (const mat of Array.isArray(obj.material) ? obj.material : [obj.material]) {
+          if (!mat?.envMap || mat.envMap !== studio) continue;
+          this._k2Save(mat);
+          mat.envMapIntensity = mat.envMapIntensity * (to / Math.max(1e-6, from));
+        }
+      });
+    }
+  }
+
+  /**
+   * DEV/Pass K K2 — props carrying their own envMap (scene.environmentIntensity
+   * does not reach them in r172), with envMapIntensity and env source.
+   */
+  debugEnvMapCensus() {
+    const studio = this.liveEnv?.getStudioEnvironment?.();
+    const rows = [];
+    const seen = new Set();
+    (this.vignettes ?? []).forEach((v, i) => {
+      v.group.traverse((obj) => {
+        if (!obj.isMesh || !obj.material) return;
+        for (const mat of Array.isArray(obj.material) ? obj.material : [obj.material]) {
+          if (!mat?.envMap || seen.has(mat)) continue;
+          seen.add(mat);
+          rows.push({
+            stop: i,
+            mesh: obj.name || "(unnamed)",
+            material: mat.name || "(unnamed)",
+            envMapIntensity: +(+mat.envMapIntensity).toFixed(3),
+            source: mat.envMap === studio ? "studio RoomEnvironment" : mat.envMap?.isCubeTexture || mat.envMap?.mapping === THREE.CubeReflectionMapping ? "cube capture" : "other PMREM/texture"
+          });
+        }
+      });
+    });
+    return { sceneEnvironmentIntensity: this.scene.environmentIntensity, rows };
+  }
+
   /** DEV/Pass K — what the hold is waiting on (Enter gate inputs). */
   debugHoldGate() {
     const desktop = this.vignettes?.[1]?.instance;
@@ -8209,6 +8365,7 @@ export class StageExperience {
     preT = this._markPre("water-cursor-rim", preT);
 
     this._tickCursorDof(dt);
+    if (this._k2AoAtRest && this.post?.aoPass) this.post.aoPass.enabled = Boolean(this.cameraRig?.state?.isSettled);
     if (this._descentPendingWarm && this.chunkedTextures?.pending) {
       // Black screen between the spiral ending and the drop arming: the
       // world is hidden (nothing presented), and the drop is waiting on
