@@ -1329,6 +1329,10 @@ export class StageExperience {
           applied = true;
         }
         break;
+      case "dof":
+        this._abDofOff = !on;
+        applied = Boolean(this.post?.dofPass);
+        break;
       case "smaa":
         if (this.post?.smaaPass) {
           this.post.smaaPass.enabled = on;
@@ -4011,6 +4015,12 @@ export class StageExperience {
     return this.waterCursor?.debugRimFreezeDelta?.() ?? null;
   }
 
+  /** DEV/Pass K item 9 — force N ms of unexplained work per frame (0 = off). */
+  debugForceHeavy(ms = 0) {
+    this._debugHeavyMs = Math.max(0, Number(ms) || 0);
+    noteFlight("mark", { label: `force-heavy:${this._debugHeavyMs}` });
+    return { heavyMs: this._debugHeavyMs, governor: this.perfGovernor?.dump?.() ?? null, floorMp: this._floorMp ?? null };
+  }
 
   /** DEV/Pass K — what the hold is waiting on (Enter gate inputs). */
   debugHoldGate() {
@@ -7858,6 +7868,11 @@ export class StageExperience {
       pass.enabled = false;
       return;
     }
+    if (this._abDofOff) {
+      effect.bokehScale = 0;
+      pass.enabled = false;
+      return;
+    }
     const goal = CURSOR_DOF.bokehScale;
     const k = 1 - Math.exp(-6 * Math.max(0, dt));
     this._dofBokeh += (goal - this._dofBokeh) * k;
@@ -8381,6 +8396,13 @@ export class StageExperience {
     const waterT0 = performance.now();
     if (!this._abWaterCursorOff) this.waterCursor?.render();
     this._lastWaterMs = performance.now() - waterT0;
+    if (this._debugHeavyMs > 0) {
+      // DEV/Pass K item 9 — a genuinely heavy steady scene, on purpose: busy
+      // work inside the frame that no background cause explains. The governor
+      // must still downshift under it (proves explained-frames do not blind it).
+      const spinT0 = performance.now();
+      while (performance.now() - spinT0 < this._debugHeavyMs) { /* spin */ }
+    }
     this._lastWorkMs = performance.now() - workT0;
     this._lastCause = this._frameCause;
     // Pass I item 3 — these three were already measured (just never
