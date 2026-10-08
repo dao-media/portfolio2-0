@@ -31,6 +31,9 @@ const MAX_WAVE_AMP = 0.08;
  * Physics: position follower → velocity → stretch spring → harmonic polar SDF.
  * Heading uses angular momentum (coast); radial deformations use springs.
  */
+/** Pass K item 7 — rim sim pauses after the blob has been this still (ms). */
+const RIM_IDLE_MS = 1200;
+
 export class WaterCursor {
   /**
    * @param {{ renderer: THREE.WebGLRenderer, ticker: { add: Function, remove: Function }, config?: Partial<typeof DEFAULT_WATER_CURSOR_CONFIG> }} options
@@ -282,6 +285,7 @@ export class WaterCursor {
   /** @param {boolean} on */
   setPressed(on) {
     if (!this._initialized || this._disposed) return;
+    this._markMotion();
     this._pressTween?.kill();
     this._pressTween = gsap.to(this.uniforms.uPressScale, {
       value: on ? this.cfg.pressScale : 1,
@@ -308,6 +312,8 @@ export class WaterCursor {
     if (!this._initialized || this._disposed) return;
     this._syncRimKnobs();
     const gate = Boolean(src.gate) && this.deformEnabled;
+    const tex = src.texture ?? this._sdfDummy;
+    if ((gate ? 1 : 0) !== this.uniforms.uRimGate.value || tex !== this.uniforms.uEdgeSdf.value) this._markMotion();
     this.uniforms.uRimGate.value = gate ? 1 : 0;
     this.uniforms.uCursorUv.value.set(
       Number.isFinite(src.u) ? src.u : 0,
@@ -388,6 +394,71 @@ export class WaterCursor {
     if (this.uniforms?.uQuadPx) this.uniforms.uQuadPx.value = this._quadPx;
   }
 
+  /**
+   * Pass K item 7 — run the rim sim (2×1 state target) *before* the composer
+   * draws the frame, and not at all once the blob has been still for
+   * RIM_IDLE_MS: the field damps at rimFieldSmooth (16/s → 3e-4 left after
+   * 0.5 s), so a still cursor's state is already converged and the shader
+   * keeps sampling it unchanged — the quad itself (and its uTime idle
+   * wobble) still draws every frame, so nothing snaps. Resolving after the
+   * frame was drawn switched the canvas out for a 2×1 target and back each
+   * frame (a full framebuffer store/reload on tiled GPUs).
+   */
+  prepare() {
+    if (!this._initialized || this._disposed) return;
+    this._preparedThisFrame = true;
+    if (this._rimIdle()) {
+      this._rimSkips = (this._rimSkips ?? 0) + 1;
+      return;
+    }
+    this._rimRuns = (this._rimRuns ?? 0) + 1;
+    try {
+      this._resolveRimState();
+    } catch (error) {
+      if (!this._renderWarned) {
+        this._renderWarned = true;
+        console.warn("[WaterCursor] Rim resolve failed:", error);
+      }
+    }
+  }
+
+  /** Pass K item 7 — still long enough that the rim field has converged. */
+  _rimIdle() {
+    return performance.now() - (this._lastMotionAt ?? 0) > RIM_IDLE_MS;
+  }
+
+  _markMotion() {
+    this._lastMotionAt = performance.now();
+  }
+
+  /**
+   * DEV/Pass K item 7 — proof the idle freeze cannot snap: read the frozen
+   * 2×1 rim state, run one live resolve from it, read again; max |Δ| per
+   * channel. ~0 means the frozen state is what the live sim would hold.
+   */
+  debugRimFreezeDelta() {
+    const read = (target) => {
+      const buf = new Float32Array(2 * 4);
+      try {
+        this.renderer.readRenderTargetPixels(target, 0, 0, 2, 1, buf);
+      } catch (error) {
+        return null;
+      }
+      return Array.from(buf);
+    };
+    const before = read(this._rimRead);
+    this._resolveRimState();
+    const after = read(this._rimRead);
+    if (!before || !after) return null;
+    const maxDelta = Math.max(...before.map((v, i) => Math.abs(v - after[i])));
+    return { idle: this._rimIdle(), before: before.map((v) => +v.toFixed(5)), after: after.map((v) => +v.toFixed(5)), maxDelta: +maxDelta.toExponential(2) };
+  }
+
+  /** DEV — rim sim runs vs idle skips. */
+  debugRim() {
+    return { runs: this._rimRuns ?? 0, skips: this._rimSkips ?? 0, idle: this._rimIdle(), stillMs: Math.round(performance.now() - (this._lastMotionAt ?? 0)) };
+  }
+
   render() {
     if (!this._initialized || this._disposed) return;
 
@@ -395,7 +466,8 @@ export class WaterCursor {
       const gl = this.renderer.getContext?.();
       if (gl && gl.isContextLost?.()) return;
 
-      this._resolveRimState();
+      if (!this._preparedThisFrame && !this._rimIdle()) this._resolveRimState();
+      this._preparedThisFrame = false;
       if (this.uniforms.uPresence.value < 0.001) return;
 
       const prevAutoClear = this.renderer.autoClear;
@@ -572,6 +644,7 @@ export class WaterCursor {
       this.appearAt(x, y);
       return;
     }
+    if (x !== this._pointer.x || y !== this._pointer.y) this._markMotion();
     this._pointer.x = x;
     this._pointer.y = y;
     this._syncViewportPresence(this._isPointerInViewport(x, y));
@@ -798,6 +871,17 @@ export class WaterCursor {
     }
     this.uniforms.uRimPress.value = 1;
     this.mesh.position.set(this._pos.x, this._pos.y, 0);
+    const moving =
+      Math.abs(this._pos.x - targetX) > 0.05 ||
+      Math.abs(this._pos.y - targetY) > 0.05 ||
+      this._velocity.length() > 1 ||
+      Math.abs(this._stretch) > 1e-3 ||
+      this.uniforms.uWaveAmp.value > 1e-3 ||
+      Math.abs(this._omega) > 1e-3 ||
+      this._presenceUseSpring ||
+      (this._diskShear?.strength ?? 0) > 0 ||
+      this._diskYank > 0;
+    if (moving) this._markMotion();
   }
 
   /**

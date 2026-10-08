@@ -4002,6 +4002,16 @@ export class StageExperience {
     return this._uploadTimingFinish;
   }
 
+  /** DEV/Pass K item 7 — water-cursor rim sim runs vs idle skips. */
+  debugWaterCursorRim() {
+    return this.waterCursor?.debugRim?.() ?? null;
+  }
+
+  debugWaterCursorFreezeDelta() {
+    return this.waterCursor?.debugRimFreezeDelta?.() ?? null;
+  }
+
+
   /** DEV/Pass K — what the hold is waiting on (Enter gate inputs). */
   debugHoldGate() {
     const desktop = this.vignettes?.[1]?.instance;
@@ -8153,6 +8163,7 @@ export class StageExperience {
     }
     preT = this._markPre("edge", preT);
     this._tickWaterCursorRim();
+    if (!this._abWaterCursorOff) this.waterCursor?.prepare?.();
     preT = this._markPre("water-cursor-rim", preT);
 
     this._tickCursorDof(dt);
