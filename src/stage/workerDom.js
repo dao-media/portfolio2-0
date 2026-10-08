@@ -3,6 +3,8 @@
  * run on a worker. Installed only when those globals are missing. The page HUD
  * stays on the main thread.
  */
+const IMAGE_FETCH_TIMEOUT_MS = 15000;
+
 if (typeof document === "undefined") {
   globalThis.__STAGE_WORKER = true;
 
@@ -32,11 +34,7 @@ if (typeof document === "undefined") {
     }
 
     set src(url) {
-      fetch(url)
-        .then((response) => {
-          if (!response.ok) throw new Error(`Image failed: ${url}`);
-          return response.blob();
-        })
+      fetchImageBlob(url)
         .then((blob) => createImageBitmap(blob))
         .then((bitmap) => {
           this.bitmap = bitmap;
@@ -50,6 +48,35 @@ if (typeof document === "undefined") {
           if (typeof this.onerror === "function") this.onerror.call(this, error);
         });
     }
+  }
+
+  /**
+   * Pass K — a stalled request must not hang its loader forever. Pass K's
+   * harness caught one image fetch that never settled (no load, no error):
+   * TextureLoader's promise, preloadPcTextures and the whole PC/Sidekick/
+   * Archaeology integration waited on it, and those stops stayed empty for
+   * the rest of the session. Abort after IMAGE_FETCH_TIMEOUT_MS, retry once,
+   * then fail (callers already treat a failed texture as missing).
+   * @param {string} url
+   * @param {number} [attempt]
+   * @returns {Promise<Blob>}
+   */
+  function fetchImageBlob(url, attempt = 0) {
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = setTimeout(() => controller?.abort(), IMAGE_FETCH_TIMEOUT_MS);
+    return fetch(url, controller ? { signal: controller.signal } : undefined)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Image failed: ${url}`);
+        return response.blob();
+      })
+      .finally(() => clearTimeout(timer))
+      .catch((error) => {
+        if (error?.name === "AbortError" && attempt === 0) {
+          console.warn(`[workerDom] image fetch stalled ${IMAGE_FETCH_TIMEOUT_MS} ms, retrying: ${url}`);
+          return fetchImageBlob(url, 1);
+        }
+        throw error;
+      });
   }
 
   function createCanvas() {

@@ -5770,6 +5770,8 @@ export class StageExperience {
       if (!opts.early) await this._waitForIntegrateWindow();
       await yieldFrame(INTRO_MATERIAL_YIELD_FRAMES);
 
+      const phase = (name) => noteFlight("mark", { label: `integrate:${name}` });
+      phase("desktop");
       await spanFrame("desktop-integrate", () =>
         desktop?.integrateAfterIntro?.({
           yieldFrame,
@@ -5801,8 +5803,10 @@ export class StageExperience {
           }
         });
       }
+      phase("pc-held");
       await this._compileThenShow(desktop?.pcRoot);
 
+      phase("sidekick");
       await spanFrame("sidekick-integrate", () =>
         sidekick?.integrateAfterIntro?.({
           yieldFrame,
@@ -5810,8 +5814,10 @@ export class StageExperience {
           deferScreenTextureMs: INTRO_SIDEKICK_BAKE_DELAY_MS
         })
       );
+      phase("sidekick-held");
       await this._compileThenShow(sidekick?.sidekickRoot);
 
+      phase("archaeology");
       await spanFrame("archaeology-integrate", () =>
         archaeology?.integrateAfterIntro?.({
           yieldFrame,
@@ -5819,6 +5825,7 @@ export class StageExperience {
         })
       );
       const archaeologyRoots = archaeology?.getMountedRoots?.({ compile: true }) ?? [];
+      phase(`archaeology-held:${archaeologyRoots.length}`);
       for (const root of archaeologyRoots) {
         await this._compileThenShow(root);
       }
