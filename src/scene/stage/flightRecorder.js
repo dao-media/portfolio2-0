@@ -12,10 +12,11 @@
  * `noteFlight()` — a `setActiveFrameBudget`-style singleton, so call sites
  * don't need a recorder reference threaded through them.
  *
- * Known limitation: BLACK samples a literal 2x2 pixel block at canvas
- * center, not a real "is the frame black" judgement — it will fire (and is
- * meant only as a secondary signal) if the camera genuinely has dark scene
- * content sitting at dead-center, independent of any skip/visibility bug.
+ * BLACK (Pass L): the brightest of a 5×5 grid of 2×2 blocks (10–90 % of the
+ * canvas) dropping from > 0.05 to < 0.01, sampled every 10th frame. Mid-hop
+ * frames with every stop faded out are black by design and are tagged
+ * (`explainedDrops["black:all-stops-faded"]`), not counted. Still a
+ * secondary signal — the grid can miss a small lit object.
  * Cross-check a BLACK snapshot's `skipBeauty`/`worldVisible`/`visCensus`
  * fields before treating it as a real repro; BLINK and POP-IN are the
  * load-bearing triggers.
@@ -33,13 +34,16 @@
 
 const RING_SIZE = 240;
 /** Notes kept for the whole session (not just inside snapshot windows). */
-const MILESTONES = new Set(["fader-dismiss", "fade-variants", "shadow-bake", "bake", "stop-cull", "cull-reapplied", "land", "mark", "chunk-step", "governor", "floor-notch", "pace", "programs", "warm-step", "pace-stats", "compileHeldRoot-done", "enter-shown", "bust-ready", "bust-load", "warm-phase"]);
+const MILESTONES = new Set(["fader-dismiss", "fade-variants", "shadow-bake", "bake", "stop-cull", "cull-reapplied", "land", "mark", "chunk-step", "governor", "floor-notch", "pace", "programs", "warm-step", "pace-stats", "compileHeldRoot-done", "enter-shown", "bust-ready", "bust-load", "warm-phase", "slow-frame", "bg-unit"]);
 const MAX_SNAPSHOTS_PER_KIND = 6;
 const PRE_FRAMES = 120;
 const POST_FRAMES = 30;
 const SLOW_MS = 1000 / 24; // 41.7ms — the stated 24fps floor
 const TRIGGER_REFIRE_GAP_MS = 500;
 const BLACK_CHECK_EVERY_N = 10;
+/** Pass L — 5×5 grid of 2×2 sample blocks, 10 %…90 % of the canvas. */
+const BLACK_POINTS = [];
+for (let y = 0; y < 5; y += 1) for (let x = 0; x < 5; x += 1) BLACK_POINTS.push([0.1 + x * 0.2, 0.1 + y * 0.2]);
 
 /** @type {FlightRecorder | null} */
 let active = null;
@@ -184,7 +188,7 @@ export class FlightRecorder {
     // the last — by the time that fence signals, all 4 copies are done.
     this._blackPbo = gl.createBuffer();
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this._blackPbo);
-    gl.bufferData(gl.PIXEL_PACK_BUFFER, 64, gl.STREAM_READ);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, BLACK_POINTS.length * 16, gl.STREAM_READ);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
     this._blackPending = null;
   }
@@ -193,14 +197,8 @@ export class FlightRecorder {
     if (!this._blackReadbackSupported || this._blackPending) return;
     const gl = this._gl;
     const canvas = this.renderer.domElement;
-    const points = [
-      [0.25, 0.25],
-      [0.75, 0.25],
-      [0.25, 0.75],
-      [0.75, 0.75]
-    ];
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this._blackPbo);
-    points.forEach(([fx, fy], i) => {
+    BLACK_POINTS.forEach(([fx, fy], i) => {
       const cx = Math.max(0, Math.floor(canvas.width * fx) - 1);
       const cy = Math.max(0, Math.floor(canvas.height * fy) - 1);
       gl.readPixels(cx, cy, 2, 2, gl.RGBA, gl.UNSIGNED_BYTE, i * 16);
@@ -220,15 +218,19 @@ export class FlightRecorder {
     gl.deleteSync(this._blackPending.sync);
     this._blackPending = null;
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this._blackPbo);
-    const px = new Uint8Array(64);
+    const px = new Uint8Array(BLACK_POINTS.length * 16);
     gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, px);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-    let sum = 0;
-    for (let i = 0; i < 16; i += 1) {
+    // Pass L — the brightest of the 25 sample blocks: a real black frame has
+    // nothing lit anywhere; 4 points at 25/75 % read 0 whenever the camera
+    // simply framed empty sky there (drop, Archaeology arrival).
+    let max = 0;
+    for (let i = 0; i < BLACK_POINTS.length * 4; i += 1) {
       const o = i * 4;
-      sum += (0.299 * px[o] + 0.587 * px[o + 1] + 0.114 * px[o + 2]) / 255;
+      const l = (0.299 * px[o] + 0.587 * px[o + 1] + 0.114 * px[o + 2]) / 255;
+      if (l > max) max = l;
     }
-    return +(sum / 16).toFixed(3);
+    return +max.toFixed(3);
   }
 
   /** Any module can report an event into the frame currently being built. */
@@ -459,6 +461,28 @@ export class FlightRecorder {
     }
     this.ring.push(record);
     if (this.ring.length > RING_SIZE) this.ring.shift();
+    // Pass L — every frame > 50 ms keeps its details even when the SLOW
+    // snapshot cap has evicted its snapshot.
+    if (record.frameMs > 50 && (this._slowFrameNotes = (this._slowFrameNotes ?? 0) + 1) <= 300) {
+      this._milestones.push({
+        kind: "slow-frame",
+        frame: record.frame,
+        t: record.t,
+        data: {
+          ms: Math.round(record.frameMs),
+          cpu: record.cpuWorkMs,
+          cause: record.frameCause,
+          phase: record.phase,
+          gap: record.gapSinceMs ?? null,
+          gapTasks: record.gapTasks ?? null,
+          progs: record.programsCreated,
+          tex: record.texturesUploaded,
+          chunk: record.chunkPending,
+          top: (record.cpuSections || []).slice().sort((a, b) => b[1] - a[1]).slice(0, 3),
+          events: (record.events || []).map((e) => e.kind).slice(0, 6)
+        }
+      });
+    }
     if (this._frameLog.length < 40000) {
       this._frameLog.push([
         record.frame,
@@ -584,7 +608,15 @@ export class FlightRecorder {
       record.blackLuminancePrev > 0.05 &&
       record.blackLuminance < 0.01
     ) {
-      this._fire("BLACK", record, `center luminance ${record.blackLuminancePrev} -> ${record.blackLuminance}`);
+      // Mid-hop with every stop faded out is black by design (both stops
+      // faded, tubes included): tag it, don't count it.
+      const fades = record.stopFade;
+      const allFaded = Array.isArray(fades) && fades.length > 0 && fades.every((f) => f <= 0.02) && record.phase === "hop";
+      if (allFaded) {
+        this._explainedDrops["black:all-stops-faded"] = (this._explainedDrops["black:all-stops-faded"] ?? 0) + 1;
+      } else {
+        this._fire("BLACK", record, `max grid luminance ${record.blackLuminancePrev} -> ${record.blackLuminance}`);
+      }
     }
   }
 

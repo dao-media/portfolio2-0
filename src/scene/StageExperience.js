@@ -5880,11 +5880,25 @@ export class StageExperience {
     // Pass K item 9 — the unit's cost lands on this frame or the next ones:
     // explained (same 250 ms window as the other background causes).
     this._bgWorkAt = this._bgTokenAt;
+    if (this.introComplete) noteFlight("bg-unit", { kind });
     if (!this._bgStats) this._bgStats = { pausedChecks: 0, byKind: {} };
     const row = this._bgStats.byKind[kind] || (this._bgStats.byKind[kind] = { units: 0, postLand: 0 });
     row.units += 1;
     if (this.introComplete) row.postLand += 1;
     return true;
+  }
+
+  /** DEV/Pass L — GL capabilities that decide how compiles behave. */
+  debugGlCaps() {
+    const gl = this.renderer?.getContext?.();
+    const ext = (n) => Boolean(gl?.getExtension?.(n));
+    return {
+      webgl2: typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext,
+      parallelCompile: ext("KHR_parallel_shader_compile"),
+      threeHasParallel: Boolean(this.renderer?.extensions?.has?.("KHR_parallel_shader_compile")),
+      renderer: gl?.getParameter?.(gl.RENDERER) ?? null,
+      programs: this.renderer?.info?.programs?.length ?? null
+    };
   }
 
   /** DEV/Pass K item 4 — why background work is or is not running right now. */

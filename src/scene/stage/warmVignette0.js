@@ -323,6 +323,15 @@ export function stepVignette0Warm(stage, state) {
       state._liveAt += 1;
       return state;
     }
+    // Pass L — composer-level steps that only make sense before land: the
+    // hole frame (the hold is over), and the notch tiers + restore (each a
+    // composer resize plus a full-size draw: one post-land frame measured
+    // 48 ms CPU + a 281 ms gap). After land a notch change simply allocates
+    // its targets the first time it happens.
+    if (stage.introComplete && (step.kind === "hole" || step.kind === "tier" || step.kind === "restore")) {
+      state._liveAt += 1;
+      return state;
+    }
     if (step.kind === "hole") drawHoleFrame(stage);
     else if (step.kind === "edge") warmEdgePass(stage, step.stop ?? 0);
     else if (step.kind === "smaa") {
@@ -719,6 +728,17 @@ function warmEdgePass(stage, stop = 0) {
   const enabled = pass?.enabled;
   const pointerWas = glitch?._pointerLive;
   const root = stage._edgeGlitchRootForStop?.(stop);
+  // Pass L — during the warm the glitch is still disabled / below its work-
+  // quality gate, so update() returned before the silhouette SDF ever ran:
+  // its mask + depth override programs then linked live on the land frame
+  // (48 ms CPU, next frame 53 ms, a floor notch). Open both gates for this
+  // one offscreen call.
+  const enabledWas = glitch?.enabled;
+  const qualityWas = glitch?._workQuality;
+  if (glitch) {
+    glitch.enabled = true;
+    if (typeof glitch._workQuality === "number") glitch._workQuality = Math.max(glitch._workQuality, 1);
+  }
   if (edge?.uEnabled) edge.uEnabled.value = 1;
   if (pass) pass.enabled = true;
   if (glitch) {
@@ -741,7 +761,11 @@ function warmEdgePass(stage, stop = 0) {
   } catch (error) {
     console.warn("[warmVignette0] edge warm failed:", error);
   }
-  if (glitch) glitch._pointerLive = pointerWas;
+  if (glitch) {
+    glitch._pointerLive = pointerWas;
+    if (enabledWas != null) glitch.enabled = enabledWas;
+    if (qualityWas != null) glitch._workQuality = qualityWas;
+  }
   if (edge?.uEnabled && was != null) edge.uEnabled.value = was;
   if (pass) pass.enabled = enabled;
   stage.renderer?.getContext()?.finish?.();
