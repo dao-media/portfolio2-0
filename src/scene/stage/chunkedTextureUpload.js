@@ -132,6 +132,28 @@ export class ChunkedTextureQueue {
     const props = renderer.properties.get(texture);
     props.__webglTexture = glTex;
     props.__version = texture.version;
+    texture.userData.__chunkGlTex = glTex;
+    // Pass J item 3 — the renderer.initTexture override only guards the
+    // explicit initTexture() path. A plain `texture.needsUpdate = true` after
+    // this claim (pcProductionMaterials' configurePcTexture does exactly that
+    // when it runs after the claim — order is timing-dependent) bumps
+    // texture/source version, and the next draw's setTexture2D ->
+    // uploadTexture creates three's OWN new GL texture for the 1×1
+    // placeholder and overwrites __webglTexture: the finished 4096² upload
+    // is abandoned and the PC samples black (measured: pc_1/pc_2 map,
+    // normal, roughness, emissive all read back 0,0,0 while "done").
+    // Route needsUpdate to syncParams instead: sampler state is re-applied
+    // to OUR GL object and the version never moves.
+    Object.defineProperty(texture, "needsUpdate", {
+      configurable: true,
+      enumerable: false,
+      get() {
+        return false;
+      },
+      set: (value) => {
+        if (value === true) this.syncParams(texture, renderer);
+      }
+    });
     // Three only attaches its own 'dispose' listener (the one that frees the
     // GL object) inside its own initTexture/uploadTexture path — which this
     // texture never goes through. Without our own listener, texture.dispose()
@@ -139,6 +161,7 @@ export class ChunkedTextureQueue {
     // never called and the GL object leaks for the runtime's whole session.
     const onDispose = () => {
       texture.removeEventListener("dispose", onDispose);
+      delete texture.needsUpdate;
       const p = renderer.properties.get(texture);
       if (p?.__webglTexture) gl.deleteTexture(p.__webglTexture);
       renderer.properties.remove(texture);
@@ -274,6 +297,8 @@ export class ChunkedTextureQueue {
     const props = renderer.properties.get(texture);
     if (props?.__webglTexture) gl.deleteTexture(props.__webglTexture);
     renderer.properties.remove(texture);
+    // Back to the prototype setter; claim() re-installs the guard.
+    delete texture.needsUpdate;
     if (!job) {
       console.warn(
         "[chunkedTextureUpload] colorSpace changed on an already-finished chunked texture " +
