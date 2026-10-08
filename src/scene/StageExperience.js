@@ -391,6 +391,11 @@ function diffProgramKeys(warmKey, liveKey) {
 const _STAR_CSS = new THREE.Vector2();
 const INACTIVE_MASK = 1 << INACTIVE_VIGNETTE_LAYER;
 
+/**
+ * Pass K item 8 — an uncapped probe needs this long of stable, still, paced
+ * frames first (a failed probe costs one slow frame; back-off 20 → 160 s).
+ */
+const PACE_PROBE_STILL_MS = 20000;
 /** Pass K item 4 — background work waits this long after the last input. */
 const BG_INPUT_QUIET_MS = 300;
 /** Pass K item 4 — mid-hop chunk uploads are off (no background work on camera motion). */
@@ -3877,10 +3882,11 @@ export class StageExperience {
    *
    * Policy on a high-refresh display: start paced at 60 Hz from the first
    * rendered frame (a full frame here costs more GPU than 8.3 ms). Uncapped gets a
-   * probe only while settled with no input, after 6 s of paced frames that
-   * all landed on the even cadence; >= 3 unexplained rendered frames > 33 ms
-   * within 1.5 s re-pace it (cooldown before the next probe doubles each
-   * time a probe fails, 20 s → 160 s). Switching *to* paced is allowed
+   * probe only while settled with no input, after PACE_PROBE_STILL_MS of
+   * stable paced frames (rolling 6 s: <= 5% beyond one interval + 0.6 tick,
+   * none > 33 ms); a probe bails on its first unexplained stall, otherwise
+   * >= 3 unexplained rendered frames > 33 ms within 1.5 s re-pace (cooldown
+   * before the next probe doubles each time a probe fails, 20 s → 160 s). Switching *to* paced is allowed
    * mid-motion (it only removes bursts); switching to uncapped is not.
    * Every switch is a flight milestone ("pace") with its trigger.
    * @param {number} frameMs rendered-frame interval
@@ -3914,8 +3920,10 @@ export class StageExperience {
     if (frameMs > 33 && !this._lastFrameExplained) this._stalls.push(now);
     while (this._stalls.length && now - this._stalls[0] > 1500) this._stalls.shift();
     if (!this._paceMs) {
-      if (this._stalls.length >= 3) {
-        const probing = now - (this._probeAt ?? -Infinity) < 1600;
+      // A probe bails on its first unexplained stall (measured: Sidekick
+      // uncapped held 0.7 s, then 52/37/36 ms frames); otherwise 3 in 1.5 s.
+      const probing = now - (this._probeAt ?? -Infinity) < 1600;
+      if (this._stalls.length >= 3 || (probing && this._stalls.length >= 1)) {
         if (probing) {
           this._probeFails = (this._probeFails ?? 0) + 1;
           this._probeCooldownUntil = now + Math.min(160000, 20000 * 2 ** (this._probeFails - 1));
@@ -3929,15 +3937,34 @@ export class StageExperience {
       }
       return;
     }
-    if (frameMs > 19 || this._lastFrameExplained) this._evenSince = now;
+    // Stable = over the last 6 s of still, unexplained paced frames, <= 5%
+    // landed beyond one paced interval + 0.6 tick and none beyond 33 ms. A
+    // single-frame reset never passed here: the worker's ticks run ~9-10 ms
+    // under load, so a paced frame is 19-20 ms and ~12% reach 22-27 ms.
     const still = Boolean(this.cameraRig?.state?.isSettled) && now - (this._lastInputAt ?? -Infinity) > 1000;
-    if (!still) {
-      this._evenSince = Math.max(this._evenSince ?? now, now - 4000);
+    if (!this._evenWin) this._evenWin = [];
+    if (!still || this._lastFrameExplained) {
+      this._evenWin.length = 0;
+      this._evenSince = now;
       return;
     }
-    if (now - (this._evenSince ?? now) > 6000 && now > (this._probeCooldownUntil ?? 0)) {
-      this._probeAt = now;
-      this._setPace(0, "probe", { refresh, evenMs: Math.round(now - this._evenSince) });
+    this._evenWin.push([now, frameMs]);
+    while (this._evenWin.length && now - this._evenWin[0][0] > 6000) this._evenWin.shift();
+    const span = now - (this._evenSince ?? now);
+    if (span > PACE_PROBE_STILL_MS && now > (this._probeCooldownUntil ?? 0)) {
+      const limit = this._paceMs + refresh * 0.6;
+      let uneven = 0;
+      let worst = 0;
+      for (const [, ms] of this._evenWin) {
+        if (ms > limit) uneven += 1;
+        if (ms > worst) worst = ms;
+      }
+      const share = uneven / Math.max(1, this._evenWin.length);
+      if (share <= 0.05 && worst <= 33) {
+        this._probeAt = now;
+        this._setPace(0, "probe", { refresh, unevenShare: +share.toFixed(3), worstMs: Math.round(worst) });
+        this._evenWin.length = 0;
+      }
     }
   }
 
