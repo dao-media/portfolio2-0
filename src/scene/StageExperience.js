@@ -5313,6 +5313,16 @@ export class StageExperience {
 
   /** One idle frame of Bust prewarm. No-op once the pass has finished. */
   warmVignette0() {
+    if (
+      !this._holdIntegrationStarted &&
+      this._blackHoleActive &&
+      !this._introIntegrateScheduled &&
+      this._bustWarmReady()
+    ) {
+      this._holdIntegrationStarted = true;
+      this._introIntegrateScheduled = true;
+      void this._releaseIntroDeferredWork({ early: true });
+    }
     if (!this._vignette0Warm || this._vignette0Warm.done) {
       this._maybeShowEnter();
       return this._vignette0Warm;
@@ -5494,8 +5504,15 @@ export class StageExperience {
    * One frame slot for background GPU work (held textures, compiles, draws).
    * Item 4 tightens this to idle-only post-land slicing.
    */
-  _bgSlot() {
-    return this._yieldFrame();
+  async _bgSlot() {
+    await this._yieldFrame();
+    while (this._bgPaused()) await this._yieldFrame();
+  }
+
+  /** Pass K item 2 — background integration never runs during the spiral or the drop. */
+  _bgPaused() {
+    if (this._blackHoleActive) return this.blackHoleSeq?.phase !== BLACK_HOLE_PHASE.APPROACH;
+    return !this._introMotionComplete;
   }
 
   /**
@@ -5614,20 +5631,31 @@ export class StageExperience {
     });
   }
 
-  /** Heavy vignette integration — only after the resting POV is stable. */
-  async _releaseIntroDeferredWork() {
-    if (this._introDeferredRunning) return;
+  /**
+   * Heavy vignette integration (PC / Sidekick / Archaeology mount, CRT cube,
+   * held compiles). Pass K item 2: it starts in the black-hole hold as soon
+   * as Bust is ready (`early`) and runs opportunistically — one background
+   * step per frame slot (`_bgSlot`), paused through the spiral and the drop
+   * — so whatever finishes before Enter never touches a post-land frame.
+   * Anything left over resumes after land under the idle-slot rules.
+   * @param {{ early?: boolean }} [opts]
+   */
+  async _releaseIntroDeferredWork(opts = {}) {
+    if (this._introDeferredRunning || this._introIntegrationSettled) return;
     this._introDeferredRunning = true;
     this._introIntegrationActive = true;
+    noteFlight("mark", { label: opts.early ? "integrate-start-hold" : "integrate-start-land" });
 
     const desktop = this.vignettes[1]?.instance;
     const sidekick = this.vignettes[2]?.instance;
     const archaeology = this.vignettes[3]?.instance;
-    const yieldFrame = (frames) => this._yieldFrame(frames);
+    const yieldFrame = async (frames = 1) => {
+      for (let i = 0; i < Math.max(1, frames | 0); i += 1) await this._bgSlot();
+    };
     let stillHolding = false;
 
     try {
-      await this._waitForIntegrateWindow();
+      if (!opts.early) await this._waitForIntegrateWindow();
       await yieldFrame(INTRO_MATERIAL_YIELD_FRAMES);
 
       await spanFrame("desktop-integrate", () =>
@@ -5641,7 +5669,9 @@ export class StageExperience {
       // CubeUV + PMREM once while the PC is still on GPU_HOLD_LAYER.
       // The heavy-effects flush used to recapture this and hitch the first
       // live frame (~600ms). Do not force a second capture later.
-      if (desktop?.glassMesh) {
+      // Skip if the warm sequence's "env" step already captured and locked it.
+      if (desktop?.glassMesh && !this.liveEnv?._livePmremLocked) {
+        await yieldFrame();
         await spanFrame("crt-cube", async () => {
           try {
             desktop.updateCrtGlassReflection?.(
@@ -5702,10 +5732,11 @@ export class StageExperience {
     if (stillHolding) {
       // Models hadn't finished loading — try again shortly. Reveal stays
       // gated (_introIntegrationSettled stays false) across this retry gap.
-      window.setTimeout(() => this._scheduleIntroDeferredWork(), 400);
+      window.setTimeout(() => void this._releaseIntroDeferredWork(opts), 400);
       return;
     }
 
+    noteFlight("mark", { label: this.introComplete ? "integrate-done-post-land" : "integrate-done-hold" });
     this._introIntegrationSettled = true;
     window.setTimeout(() => {
       this._flushIntroDeferredWork();
@@ -6660,6 +6691,7 @@ export class StageExperience {
       this._sidekickMap.generateMipmaps = false;
       this._sidekickMap.minFilter = THREE.LinearFilter;
       this._sidekickMap.magFilter = THREE.LinearFilter;
+      this._sidekickMap.userData.noChunk = true;
     }
     const prev = this._sidekickMap.image;
     this._sidekickMap.image = bitmap;
@@ -7649,7 +7681,10 @@ export class StageExperience {
       this.introComplete &&
       !this._introIntegrationActive &&
       this._introHeavyEffectsAfter > 0 &&
-      performance.now() >= this._introHeavyEffectsAfter
+      performance.now() >= this._introHeavyEffectsAfter &&
+      // Pass K item 2 — integration can now finish in the hold; the heavy
+      // effects still wait their delay after land, as before.
+      performance.now() >= (this._introLandAt ?? Infinity) + INTRO_HEAVY_EFFECTS_DELAY_MS
     );
   }
 

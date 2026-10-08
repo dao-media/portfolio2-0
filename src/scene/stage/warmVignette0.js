@@ -438,6 +438,11 @@ function bakeCrtEnvironment(stage) {
   const desktop = stage.vignettes?.[1]?.instance;
   const liveEnv = stage.liveEnv;
   if (!desktop?.updateCrtGlassReflection || !liveEnv || liveEnv._livePmremLocked) return;
+  // Pass K item 2 — integration already captured it in the hold: just lock.
+  if (desktop._lastEnvRotY != null) {
+    liveEnv.lockLivePmrem?.();
+    return;
+  }
   try {
     desktop.updateCrtGlassReflection(liveEnv, stage.scene, stage.spotLight, stage.spotTarget, {
       force: true,
@@ -541,7 +546,11 @@ function liveModelsReady(stage) {
   const archOk = Boolean(arch?._modelLoadSettled);
   const spill = Boolean(desktop?.screenLightRig?.spill && desktop?.screenLightRig?.glow);
   const led = Boolean(sidekick?.scrollballLed?.light);
-  return deskOk && sideOk && archOk && spill && led && warmMaterialsReady(stage);
+  // Pass K item 2 — integration (mount + held compile + release) now runs in
+  // the hold; wait for it so each stop's static shadow bake includes its
+  // own props (25 s fallback as before if it never settles).
+  const integrated = Boolean(stage._introIntegrationSettled);
+  return deskOk && sideOk && archOk && spill && led && integrated && warmMaterialsReady(stage);
 }
 
 function bakeWarmMaterials(stage) {

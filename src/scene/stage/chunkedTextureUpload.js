@@ -92,6 +92,9 @@ export function chunkLabel(texture) {
 export function isChunkCandidate(texture) {
   if (!texture?.isTexture || texture.isDataTexture || texture.isRenderTargetTexture) return false;
   if (texture.userData.__chunkClaimed || texture.userData.__chunkDone) return false;
+  // Pass K — live, repainting textures (Sidekick LCD) upload whole on every
+  // change; a claim would route their needsUpdate to syncParams and freeze them.
+  if (texture.userData.noChunk) return false;
   const { w, h } = imageSize(texture.image);
   return w >= CHUNK_TEXTURE_EDGE || h >= CHUNK_TEXTURE_EDGE;
 }
@@ -391,6 +394,13 @@ export class ChunkedTextureQueue {
   _step(renderer) {
     const job = this.jobs[0];
     if (!job || !renderer) return false;
+    // Pass K — a source ImageBitmap closed by its owner (width 0) can never
+    // upload; drop the job instead of blocking the queue (and Enter) forever.
+    if (typeof ImageBitmap !== "undefined" && job.source instanceof ImageBitmap && job.source.width === 0) {
+      this.jobs.shift();
+      noteFlight("chunk-step", { kind: "drop-closed", w: job.w, h: job.h, ms: 0, name: chunkLabel(job.texture) });
+      return "drop";
+    }
     const gl = renderer.getContext();
     const props = renderer.properties.get(job.texture);
     const glTex = props?.__webglTexture;

@@ -21,7 +21,10 @@ for (let i = 0; i < 90; i += 1) {
 await hopTo(stop);
 await page.mouse.move(W * 0.12, H * 0.15);
 await sleep(4000);
-const toggles = ["ground-fog", "wet-floor", "edge-glitch", "neon", "contact-pads", "bloom", "smaa", "sidekick-phone", "duo", "star-field", "water-cursor"];
+const only = args.includes("--toggles") ? args[args.indexOf("--toggles") + 1].split(",") : null;
+const toggles = only ?? ["ground-fog", "wet-floor", "edge-glitch", "neon", "contact-pads", "bloom", "smaa", "sidekick-phone", "duo", "star-field", "water-cursor"];
+// Pass K item 8 — pacing would cap both sides at 60 Hz; measure uncapped.
+await dbg("setFramePacing", 0);
 const rows = [];
 const base = await dbg("debugMeasureFps", 5);
 for (const name of toggles) {
