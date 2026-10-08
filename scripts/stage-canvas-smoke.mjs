@@ -459,6 +459,8 @@ try {
   const chunkState = await dbg(page, "debugChunkReadbackSample");
   if ((chunkState?.pending ?? 0) > 0) {
     fail(`chunk-texture queue still has ${chunkState.pending} job(s) pending 10s+ after land`);
+    const why = await dbg(page, "debugBgWhy");
+    console.log("  background state:", JSON.stringify(why));
   } else {
     console.log("✓ chunk-texture queue fully drained");
   }

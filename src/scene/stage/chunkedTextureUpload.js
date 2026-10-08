@@ -76,8 +76,8 @@ function isMipmapFilter(mode) {
 }
 
 /** Pass K — a readable name for a chunked texture (flight log). */
-/** Pass K item 5 — target CPU cost of one strip step, and the first strip's height. */
-const STRIP_TARGET_MS = 1.5;
+/** Pass K item 5 — target CPU cost of one strip step (rule 4: one step, <= 4 ms per idle frame), and the first strip's height. */
+const STRIP_TARGET_MS = 3.5;
 const STRIP_FIRST_ROWS = 32;
 
 export function chunkLabel(texture) {

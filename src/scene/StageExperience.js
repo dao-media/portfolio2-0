@@ -396,6 +396,8 @@ const INACTIVE_MASK = 1 << INACTIVE_VIGNETTE_LAYER;
  * frames first (a failed probe costs one slow frame; back-off 20 → 160 s).
  */
 const PACE_PROBE_STILL_MS = 20000;
+/** Pass K item 4 — CPU budget of one frame's chunk-upload slot (post-land). */
+const CHUNK_SLOT_MS = 3.5;
 /** Pass K item 4 — background work waits this long after the last input. */
 const BG_INPUT_QUIET_MS = 300;
 /** Pass K item 4 — mid-hop chunk uploads are off (no background work on camera motion). */
@@ -5835,12 +5837,12 @@ export class StageExperience {
    * land only while the camera is settled, no stop fade is ramping, and
    * there has been no input for BG_INPUT_QUIET_MS.
    */
-  _bgIdle(now = performance.now()) {
+  _bgIdle(now = performance.now(), { ignoreInput = false } = {}) {
     if (this._blackHoleActive) return this.blackHoleSeq?.phase === BLACK_HOLE_PHASE.APPROACH;
     if (!this._introMotionComplete) return false;
     if (!this.cameraRig?.state?.isSettled) return false;
     if (this._stopFadeRamping?.()) return false;
-    if (now - (this._lastInputAt ?? -Infinity) < BG_INPUT_QUIET_MS) return false;
+    if (!ignoreInput && now - (this._lastInputAt ?? -Infinity) < BG_INPUT_QUIET_MS) return false;
     return true;
   }
 
@@ -5852,12 +5854,20 @@ export class StageExperience {
    * @param {string} kind
    */
   _takeBgToken(kind) {
-    if (!this._bgIdle()) {
+    // Chunk strips are pure uploads (no link, <= STRIP_TARGET_MS): they run
+    // on any settled frame, input or not — under the full input-quiet rule a
+    // user who keeps moving the cursor kept 8-9 textures as grey
+    // placeholders for 10 s+ (test:smoke). Links and held draws keep it.
+    if (!this._bgIdle(performance.now(), { ignoreInput: kind === "chunk" })) {
       if (this._bgStats) this._bgStats.pausedChecks += 1;
       return false;
     }
-    if (this._bgTokenFrame === this._frameNo) return false;
-    this._bgTokenFrame = this._frameNo;
+    // Rule 4: one chunk step AND one other unit (link / held draw / warm
+    // step / mip) per frame — separate allowances, so a long held-compile
+    // queue can never starve the texture queue (smoke caught 8 jobs stuck).
+    const slot = kind === "chunk" ? "_bgChunkFrame" : "_bgTokenFrame";
+    if (this[slot] === this._frameNo) return false;
+    this[slot] = this._frameNo;
     this._bgTokenKind = kind;
     this._bgTokenAt = performance.now();
     // Pass K item 9 — the unit's cost lands on this frame or the next ones:
@@ -5868,6 +5878,25 @@ export class StageExperience {
     row.units += 1;
     if (this.introComplete) row.postLand += 1;
     return true;
+  }
+
+  /** DEV/Pass K item 4 — why background work is or is not running right now. */
+  debugBgWhy() {
+    const now = performance.now();
+    return {
+      idle: this._bgIdle(now),
+      blackHole: Boolean(this._blackHoleActive),
+      introMotionComplete: Boolean(this._introMotionComplete),
+      settled: Boolean(this.cameraRig?.state?.isSettled),
+      fadeRamping: Boolean(this._stopFadeRamping?.()),
+      sinceInputMs: Math.round(now - (this._lastInputAt ?? -Infinity)),
+      lastFrameMs: +(this._lastFrameMs || 0).toFixed(1),
+      frameCause: this._frameCause ?? null,
+      chunkUploadsAllowed: this._chunkUploadsAllowed(),
+      revealOpacity: this._modelRevealOpacity ?? null,
+      chunkPending: this.chunkedTextures?.pending ?? 0,
+      stats: this._bgStats ?? null
+    };
   }
 
   /** DEV/Pass K item 4 — background units by kind (and post-land count). */
@@ -8474,8 +8503,13 @@ export class StageExperience {
         // skipBeauty frames measured here alone in one settled Bust session.
         // It stays within `lateBudgetMs` either way, so there's no budget
         // reason to skip; just let beauty render normally every time.
+        // One chunk slot per frame: strips until CHUNK_SLOT_MS is spent
+        // (rule 4: <= 4 ms CPU); each strip is itself sized to ~3.5 ms.
         const uploadT0 = performance.now();
-        const lastResult = this.chunkedTextures.step(this.renderer);
+        let lastResult = null;
+        do {
+          lastResult = this.chunkedTextures.step(this.renderer);
+        } while (lastResult && this.chunkedTextures.pending && performance.now() - uploadT0 < CHUNK_SLOT_MS);
         const uploadMs = performance.now() - uploadT0;
         if (uploadMs > (this._uploadPeakMs || 0)) this._uploadPeakMs = uploadMs;
         if (lastResult) this._frameCause = `texture-late-${lastResult}`;
