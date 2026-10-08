@@ -16,8 +16,19 @@ export const SIDEKICK_SPLASH_URL = "/assets/models/sidekick/branding-splash.svg"
 /** Authored SVG viewBox — do not rely on `<img>` naturalWidth/Height for SVG. */
 export const SIDEKICK_SPLASH_SIZE = { w: 1080, h: 360 };
 
-/** Authored frame atlas size (px). */
+/** Authored frame atlas size (px). All LCD drawing coordinates live in this space. */
 export const SIDEKICK_FRAME_SIZE = 2360;
+
+/**
+ * Pass K item 6 — backing pixels of the live LCD atlas. Measured at Dane's
+ * window (1837×1222, DSF 2): the screen mesh needs ~378 texels per UV edge
+ * at rest and ~760 click-zoomed for 1:1, so 1024 keeps 1.35× headroom at
+ * zoom. 2360² (22 MB) re-uploaded whole on every SMS repaint, and was big
+ * enough to be chunk-claimed. Drawing still happens in 2360-space through a
+ * canvas scale transform.
+ */
+export const SIDEKICK_LCD_PX = 1024;
+export const SIDEKICK_LCD_SCALE = SIDEKICK_LCD_PX / SIDEKICK_FRAME_SIZE;
 
 /** Fit splash inside the hollow window without cropping past the frame cutout. */
 export const SIDEKICK_SPLASH_FIT = "letterbox";

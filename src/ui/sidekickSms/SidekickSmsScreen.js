@@ -7,6 +7,8 @@ import { releaseCaptureCanvas } from "../releaseCaptureCanvas.js";
 import { SidekickSmsForm } from "./SidekickSmsForm.js";
 import {
   SIDEKICK_FRAME_SIZE,
+  SIDEKICK_LCD_PX,
+  SIDEKICK_LCD_SCALE,
   SIDEKICK_FRAME_URL,
   SIDEKICK_SCREEN_WINDOW,
   SIDEKICK_SPLASH_BG,
@@ -55,9 +57,10 @@ export class SidekickSmsScreen {
     this.onSendSequence = options.onSendSequence ?? null;
 
     this.canvas = document.createElement("canvas");
-    this.canvas.width = SIDEKICK_FRAME_SIZE;
-    this.canvas.height = SIDEKICK_FRAME_SIZE;
+    this.canvas.width = SIDEKICK_LCD_PX;
+    this.canvas.height = SIDEKICK_LCD_PX;
     this.ctx = this.canvas.getContext("2d", { alpha: false });
+    this.ctx.imageSmoothingQuality = "high";
 
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
@@ -206,6 +209,8 @@ export class SidekickSmsScreen {
     const size = SIDEKICK_FRAME_SIZE;
     const windowRect = SIDEKICK_SCREEN_WINDOW;
 
+    // Draw in 2360-space onto the SIDEKICK_LCD_PX backing store.
+    ctx.setTransform(SIDEKICK_LCD_SCALE, 0, 0, SIDEKICK_LCD_SCALE, 0, 0);
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, size, size);
     ctx.fillStyle = SIDEKICK_SPLASH_BG;
@@ -221,14 +226,16 @@ export class SidekickSmsScreen {
   _bakeSplashAtlas() {
     if (!this._frameImage || !this._splashCanvas) return;
     const atlas = document.createElement("canvas");
-    atlas.width = SIDEKICK_FRAME_SIZE;
-    atlas.height = SIDEKICK_FRAME_SIZE;
+    atlas.width = SIDEKICK_LCD_PX;
+    atlas.height = SIDEKICK_LCD_PX;
     const ctx = atlas.getContext("2d", { alpha: false });
     if (!ctx) return;
+    ctx.imageSmoothingQuality = "high";
+    ctx.setTransform(SIDEKICK_LCD_SCALE, 0, 0, SIDEKICK_LCD_SCALE, 0, 0);
 
     const windowRect = SIDEKICK_SCREEN_WINDOW;
     ctx.fillStyle = "#000000";
-    ctx.fillRect(0, 0, atlas.width, atlas.height);
+    ctx.fillRect(0, 0, SIDEKICK_FRAME_SIZE, SIDEKICK_FRAME_SIZE);
     ctx.fillStyle = SIDEKICK_SPLASH_BG;
     ctx.fillRect(windowRect.x, windowRect.y, windowRect.w, windowRect.h);
     drawFace(
@@ -240,7 +247,7 @@ export class SidekickSmsScreen {
       SIDEKICK_SPLASH_ROTATION_DEG,
       1
     );
-    ctx.drawImage(this._frameImage, 0, 0, atlas.width, atlas.height);
+    ctx.drawImage(this._frameImage, 0, 0, SIDEKICK_FRAME_SIZE, SIDEKICK_FRAME_SIZE);
     this._splashAtlas = atlas;
   }
 
@@ -249,6 +256,7 @@ export class SidekickSmsScreen {
       this.paint();
       return;
     }
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.drawImage(this._splashAtlas, 0, 0);
     this.texture.needsUpdate = true;
     this._emitFrame();
@@ -299,7 +307,7 @@ export class SidekickSmsScreen {
         ease: "power2.inOut",
         onUpdate: () => {
           this.flipProgress = state.t;
-          // Cap atlas rebuilds ~30fps during the flip — 2360² compositing is heavy.
+          // Cap atlas rebuilds ~30fps during the flip.
           const now = performance.now();
           if (now - lastPaint < 32) return;
           lastPaint = now;

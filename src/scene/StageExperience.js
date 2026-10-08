@@ -3809,7 +3809,12 @@ export class StageExperience {
   }
 
   debugBitmapCounts() {
-    return { t: Math.round(performance.now()), counts: JSON.parse(JSON.stringify(this._bitmapCounts || {})) };
+    const up = this._sidekickUploadStats;
+    return {
+      t: Math.round(performance.now()),
+      counts: JSON.parse(JSON.stringify(this._bitmapCounts || {})),
+      sidekickUpload: up ? { n: up.n, w: up.w, avgMs: +(up.totalMs / Math.max(1, up.n)).toFixed(2), maxMs: +up.maxMs.toFixed(2) } : null
+    };
   }
 
   /**
@@ -3935,6 +3940,63 @@ export class StageExperience {
     if (!ticks || ticks.length < 60) return null;
     const sorted = ticks.slice().sort((a, b) => a - b);
     return sorted[Math.floor(sorted.length * 0.2)];
+  }
+
+  /**
+   * DEV/Pass K item 6 — how many atlas texels the Sidekick LCD actually needs:
+   * sqrt(screen-px area / UV area) over the screen mesh's front-facing
+   * triangles, in device pixels at the full DPR (CSS × DSF), from the
+   * current camera. 1:1 texel:pixel at that atlas edge.
+   */
+  debugSidekickScreenFootprint() {
+    const mesh = this.vignettes?.[2]?.instance?.screenMesh;
+    const geo = mesh?.geometry;
+    const pos = geo?.attributes?.position;
+    const uv = geo?.attributes?.uv;
+    if (!pos || !uv) return null;
+    const css = this._viewportCssSize();
+    const dpr = this._fullPixelRatio || 1;
+    const W = css.w * dpr;
+    const H = css.h * dpr;
+    mesh.updateMatrixWorld(true);
+    this.camera.updateMatrixWorld(true);
+    const idx = geo.index ? geo.index.array : null;
+    const n = idx ? idx.length : pos.count;
+    const v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+    const t = [new THREE.Vector2(), new THREE.Vector2(), new THREE.Vector2()];
+    let screenArea = 0;
+    let uvArea = 0;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let i = 0; i + 2 < n; i += 3) {
+      for (let k = 0; k < 3; k += 1) {
+        const j = idx ? idx[i + k] : i + k;
+        v[k].fromBufferAttribute(pos, j).applyMatrix4(mesh.matrixWorld).project(this.camera);
+        v[k].set((v[k].x * 0.5 + 0.5) * W, (1 - (v[k].y * 0.5 + 0.5)) * H, v[k].z);
+        t[k].fromBufferAttribute(uv, j);
+      }
+      const sa = ((v[1].x - v[0].x) * (v[2].y - v[0].y) - (v[2].x - v[0].x) * (v[1].y - v[0].y)) / 2;
+      const ua = Math.abs(((t[1].x - t[0].x) * (t[2].y - t[0].y) - (t[2].x - t[0].x) * (t[1].y - t[0].y)) / 2);
+      screenArea += Math.abs(sa);
+      uvArea += ua;
+      for (const p of v) {
+        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+      }
+    }
+    return {
+      deviceW: Math.round(W),
+      deviceH: Math.round(H),
+      screenBoxPx: [Math.round(minX), Math.round(minY), Math.round(maxX - minX), Math.round(maxY - minY)],
+      atlasEdgeFor1to1: Math.round(Math.sqrt(screenArea / Math.max(1e-9, uvArea))),
+      composerDrawW: this.post?.drawWidth ?? null
+    };
+  }
+
+  /** DEV/Pass K item 6 — time LCD uploads to GPU completion (gl.finish). */
+  setUploadTiming(on = true) {
+    this._uploadTimingFinish = Boolean(on);
+    this._sidekickUploadStats = null;
+    return this._uploadTimingFinish;
   }
 
   /** DEV/Pass K — what the hold is waiting on (Enter gate inputs). */
@@ -6751,6 +6813,21 @@ export class StageExperience {
     configureSidekickScreenMaterial(material);
     ensureSidekickScreenMapLocked(mesh);
     material.needsUpdate = true;
+    // Pass K item 6 — upload now, timed (per repaint), instead of inside the
+    // next beauty render.
+    if (this.renderer) {
+      const u0 = performance.now();
+      this.renderer.initTexture(this._sidekickMap);
+      // DEV — setUploadTiming(true) brackets with gl.finish so the number is
+      // GPU completion, not queue submission. Off by default (a real stall).
+      if (this._uploadTimingFinish) this.renderer.getContext()?.finish?.();
+      const ms = performance.now() - u0;
+      const st = this._sidekickUploadStats || (this._sidekickUploadStats = { n: 0, totalMs: 0, maxMs: 0, w: 0 });
+      st.n += 1;
+      st.totalMs += ms;
+      st.maxMs = Math.max(st.maxMs, ms);
+      st.w = bitmap.width;
+    }
     if (prev && prev !== bitmap && typeof ImageBitmap !== "undefined" && prev instanceof ImageBitmap) {
       prev.close();
     }

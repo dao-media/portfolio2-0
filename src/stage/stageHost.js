@@ -505,6 +505,13 @@ export function startStageHost(canvas, options = {}) {
         const b0 = performance.now();
         const bitmap = await createImageBitmap(sidekick.canvas);
         rememberPage("bitmap:sidekick", performance.now() - b0);
+        // Pass K item 6 — per-repaint page cost of the LCD readback (dev stat).
+        const st = window.__sidekickBitmapStats || (window.__sidekickBitmapStats = { n: 0, totalMs: 0, maxMs: 0, w: 0 });
+        const bms = performance.now() - b0;
+        st.n += 1;
+        st.totalMs += bms;
+        st.maxMs = Math.max(st.maxMs, bms);
+        st.w = sidekick.canvas.width;
         const p0 = performance.now();
         worker.postMessage({ type: "updateSidekickTexture", bitmap }, [bitmap]);
         rememberPage("post:sidekick", performance.now() - p0);
