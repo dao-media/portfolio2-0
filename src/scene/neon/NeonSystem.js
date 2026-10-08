@@ -22,6 +22,7 @@ import {
 import { restResource } from "../stage/restFidelity.js";
 import { noteFlight } from "../stage/flightRecorder.js";
 import { makeNeonTube } from "./makeNeonTube.js";
+import { makeNeonGlobe, GLOBE } from "./makeNeonGlobe.js";
 import { makeNeonLantern, LANTERN_WARM, LANTERN_LIGHT, BUST_LANTERN_HEIGHT_M } from "./makeNeonLantern.js";
 import { sampleNeonMapUv } from "./neonGradientTexture.js";
 import {
@@ -248,6 +249,7 @@ export class NeonSystem {
    */
   attach(vignette) {
     const isLantern = vignette.def?.neonProp === "lantern";
+    const isGlobe = vignette.def?.neonProp === "globe";
     const hexColors = vignette.def.neonColors?.length
       ? vignette.def.neonColors
       : isLantern
@@ -256,13 +258,17 @@ export class NeonSystem {
     const colors = hexColors.map((h) => new THREE.Color(h));
     const dominant = isLantern
       ? new THREE.Color(LANTERN_WARM.light)
-      : colors[0].clone();
+      : isGlobe
+        ? new THREE.Color(GLOBE.light)
+        : colors[0].clone();
     const tube = isLantern
       ? makeNeonLantern({
           ...vignette.def,
           loadingManager: this.loadingManager
         })
-      : makeNeonTube(vignette.def);
+      : isGlobe
+        ? makeNeonGlobe({ ...vignette.def, loadingManager: this.loadingManager })
+        : makeNeonTube(vignette.def);
     vignette.group.add(tube);
     this._seatTubeOnFloor(tube, vignette.group);
 
@@ -296,7 +302,9 @@ export class NeonSystem {
     light.layers.enable(WET_FLOOR_LAYER);
     const lightY = isLantern
       ? _TUBE_WORLD.y + (tube.userData.flameLocalY ?? LANTERN_LIGHT.flameFrac * BUST_LANTERN_HEIGHT_M)
-      : this._lightHeight;
+      : isGlobe
+        ? _TUBE_WORLD.y + tube.userData.flameLocalY
+        : this._lightHeight;
     light.position.set(_TUBE_WORLD.x, lightY, _TUBE_WORLD.z);
     if (isLantern && restResource(this.entries.length, "lantern-shadow-bake")) {
       light.userData.lanternWarm = true;
@@ -339,8 +347,9 @@ export class NeonSystem {
       tube.getWorldPosition(_TUBE_WORLD);
       const entry = this.stopLights[i];
       if (entry?.light) {
+        const prop = tube.userData?.neonProp;
         const ly =
-          tube.userData?.neonProp === "lantern"
+          prop === "lantern" || prop === "globe"
             ? _TUBE_WORLD.y + (tube.userData.flameLocalY ?? 0.85)
             : this._lightHeight;
         entry.light.position.set(_TUBE_WORLD.x, ly, _TUBE_WORLD.z);
@@ -509,7 +518,8 @@ export class NeonSystem {
         if (
           this._flickering &&
           i === this._flickerIndex &&
-          this.entries[i].tube?.userData?.neonProp !== "lantern"
+          this.entries[i].tube?.userData?.neonProp !== "lantern" &&
+          this.entries[i].tube?.userData?.neonProp !== "globe"
         ) {
           level *= neonFlickerMul(this._flickerT);
         }
@@ -655,8 +665,12 @@ export class NeonSystem {
         continue;
       }
 
+      // —— Globe (Archaeology): emissive night-side Earth, light at its centre ——
+      const isGlobe = tube?.userData?.neonProp === "globe";
+      if (isGlobe) tube.userData.tickGlobe?.(time, displayLevel, this.reducedMotion);
+
       // —— Standard neon tube ——
-      if (mat) {
+      if (mat && !isGlobe) {
         // Option 1: luminance-compensated core under bloom (no Additive shell).
         const map = mat.userData?.neonGradientMap ?? mat.map ?? mat.emissiveMap;
         if (map && displayLevel > 1e-3 && !this.reducedMotion) {
@@ -716,7 +730,9 @@ export class NeonSystem {
         : arriveLevel * this._maxLight;
       // Cast light MUST match the visible tube — same mid-UV sample as emissive
       // (map.offset.y = _gradientPhase). No slow phase / rate-cap lag.
-      if (displayLevel > 1e-3) {
+      if (isGlobe) {
+        light.color.copy(tube.userData.globeWarm ?? this.entries[i].dominant);
+      } else if (displayLevel > 1e-3) {
         const gradientMap =
           mat?.userData?.neonGradientMap ?? mat?.map ?? mat?.emissiveMap;
         if (gradientMap) {
@@ -730,7 +746,9 @@ export class NeonSystem {
       // Floor pool/cone = exact tube-foot texel (CylinderGeometry side UV v=0).
       const footMap =
         mat?.userData?.neonGradientMap ?? mat?.map ?? mat?.emissiveMap;
-      if (footMap) {
+      if (isGlobe) {
+        _FOOT_COLOR.copy(tube.userData.globeWarm ?? this.entries[i].dominant);
+      } else if (footMap) {
         sampleNeonMapUv(footMap, 0.5, 0, _FOOT_COLOR);
       } else {
         _FOOT_COLOR.copy(this.entries[i].dominant);

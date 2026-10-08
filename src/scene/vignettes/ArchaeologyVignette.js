@@ -246,6 +246,9 @@ export const archaeologyVignetteMeta = {
   name: "Archaeology",
   tint: 0xc4a574,
   neonColors: ["#ff3d1a", "#ffc14a"],
+  // The stop's light is a floating night-side Earth, not a neon tube
+  // (makeNeonGlobe.js); its PointLight sits at the globe's centre.
+  neonProp: "globe",
   desc: "Shelf finds under neon. Click to lean in."
 };
 
