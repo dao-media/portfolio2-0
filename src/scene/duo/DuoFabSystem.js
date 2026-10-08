@@ -56,6 +56,7 @@ import {
   DUO_HUD_BLOOM_STRENGTH,
   DUO_HUD_BLOOM_RADIUS,
   DUO_HUD_BLOOM_THRESHOLD,
+  DUO_MAIL_ASPECT,
   DUO_HUD_BLOOM_RES_SCALE,
   DUO_HUD_BLOOM_MAIL_SCALE,
   DUO_HOLO_SHEET_OFFSET,
@@ -213,6 +214,43 @@ function orderClientQuadInto(pts, out) {
  *   basis  — FIXED once: locks model up / right / front to HUD axes
  *   model  — GLB; scale = fit × seat × entrance; position keeps COM on spin origin
  */
+/**
+ * Pass J item 6 — faint LCD pixel grid on the insight screen's emissive, so
+ * the Mail mirror reads as a lit display rather than a flat glowing card.
+ * Grid pitch = one capture texel; it fades out as soon as a texel is under
+ * ~1.5 device px (fwidth), so a small on-screen phone never moirés.
+ * @param {THREE.Material} mat
+ */
+/** Mail capture size (stageHost / duoMailScreen) — one grid cell per texel. */
+const DUO_CAPTURE_GRID_H = 520;
+const DUO_CAPTURE_GRID_W = Math.round(DUO_CAPTURE_GRID_H * DUO_MAIL_ASPECT);
+
+function installDuoScreenGrid(mat) {
+  if (mat.userData.duoScreenGrid) return;
+  mat.userData.duoScreenGrid = true;
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, renderer) => {
+    prev?.call(mat, shader, renderer);
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <emissivemap_fragment>",
+      /* glsl */ `#include <emissivemap_fragment>
+#ifdef USE_EMISSIVEMAP
+  {
+    vec2 px = vEmissiveMapUv * vec2(${DUO_CAPTURE_GRID_W}.0, ${DUO_CAPTURE_GRID_H}.0);
+    vec2 cell = abs(fract(px) - 0.5);
+    float line = smoothstep(0.34, 0.5, max(cell.x, cell.y));
+    float fp = max(fwidth(px.x), fwidth(px.y));
+    float visible = 1.0 - smoothstep(0.35, 0.7, fp);
+    totalEmissiveRadiance *= 1.0 - 0.08 * line * visible;
+  }
+#endif`
+    );
+  };
+  const prevKey = mat.customProgramCacheKey?.bind(mat);
+  mat.customProgramCacheKey = () => `${prevKey ? prevKey() : ""}|duo-grid-v1`;
+  mat.needsUpdate = true;
+}
+
 export class DuoFabSystem {
   /**
    * @param {{
@@ -2140,7 +2178,12 @@ export class DuoFabSystem {
               m.emissiveMap = m.map;
             }
           }
-          m.toneMapped = false;
+          // Pass J item 6: the insight glass (the Mail mirror) is a lit
+          // display, not a light source — tone-mapped like the room, peak
+          // kept under the HUD bloom threshold (DUO_SCREEN_EMISSIVE_MAIL),
+          // with a faint pixel grid. Exterior lock screen is unchanged.
+          m.toneMapped = Boolean(isInsight);
+          if (isInsight) installDuoScreenGrid(m);
           m.depthWrite = true;
           m.polygonOffset = true;
           m.polygonOffsetFactor = -1;

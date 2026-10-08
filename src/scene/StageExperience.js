@@ -3562,6 +3562,154 @@ export class StageExperience {
     });
   }
 
+  /**
+   * DEV — re-bake stop `index`'s neon shadow on the next frame, or set its
+   * shadow strength (`intensity` 0..1, null = leave). Diagnostics only.
+   */
+  debugNeonShadow(index = 1, { rebake = false, intensity = null } = {}) {
+    const light = index < 0 ? this.spotLight : this.neon?.stopLights?.[index]?.light;
+    if (!light?.shadow) return null;
+    if (rebake) light.shadow.needsUpdate = true;
+    if (intensity != null) this._debugShadowOverride = { index, intensity };
+    else this._debugShadowOverride = null;
+    return {
+      pos: light.position.toArray().map((v) => +v.toFixed(3)),
+      bakedAt: light.userData.shadowBakedPos ?? null,
+      hasMap: Boolean(light.shadow.map),
+      autoUpdate: light.shadow.autoUpdate,
+      mapSize: light.shadow.mapSize.x
+    };
+  }
+
+  /** DEV — materials under stop `index` whose live opacity/blend differs from authored. */
+  debugStopMaterials(index = 1) {
+    const group = this.vignettes?.[index]?.group;
+    const rows = [];
+    let total = 0;
+    group?.traverse((obj) => {
+      if (!obj.isMesh || !obj.material) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const m of mats) {
+        total += 1;
+        const a = m.userData?.__revealAuthored;
+        const off = a ? Math.abs(m.opacity - a.opacity) > 1e-3 || m.transparent !== a.transparent : m.opacity < 0.999;
+        if (off && rows.length < 30) {
+          rows.push({
+            mesh: obj.name,
+            mat: m.name,
+            opacity: +m.opacity.toFixed(3),
+            transparent: m.transparent,
+            depthWrite: m.depthWrite,
+            auth: a ? { opacity: a.opacity, transparent: a.transparent } : null
+          });
+        }
+      }
+    });
+    return { fade: this.neon?.getStopFadeRaw?.(index), applied: this._appliedStopFade?.[index], reveal: this._modelRevealOpacity, total, off: rows };
+  }
+
+  /**
+   * Pass J item 3 — every textured slot on every mesh under the PC root:
+   * mesh, material, slot, texture size, uv channel, chunk-queue state, GL
+   * residency, and a GPU readback of mip 0 (a 3×3 grid of texels, read from
+   * the GL texture itself — what the shader actually samples).
+   * `window.__stageDebug("debugPcTextureReport")`.
+   */
+  debugPcTextureReport() {
+    const root = this.vignettes?.[1]?.instance?.pcRoot;
+    if (!root) return { error: "no pcRoot" };
+    const gl = this.renderer.getContext();
+    const q = this.chunkedTextures;
+    const queued = new Set((q?.jobs ?? []).map((j) => j.texture));
+    const readback = (tex) => {
+      const glTex = this.renderer.properties.get(tex)?.__webglTexture;
+      if (!glTex) return { error: "no GL texture" };
+      const w = tex.image?.width > 1 ? tex.image.width : tex.userData?.__chunkW ?? 0;
+      const h = tex.image?.height > 1 ? tex.image.height : tex.userData?.__chunkH ?? 0;
+      const fb = gl.createFramebuffer();
+      const prev = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, glTex, 0);
+      const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+      const samples = [];
+      if (ok && w > 0 && h > 0) {
+        const px = new Uint8Array(4);
+        for (const fy of [0.2, 0.5, 0.8]) {
+          for (const fx of [0.2, 0.5, 0.8]) {
+            gl.readPixels(Math.floor(fx * w), Math.floor(fy * h), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+            samples.push([px[0], px[1], px[2]]);
+          }
+        }
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, prev);
+      gl.deleteFramebuffer(fb);
+      const flat = samples.length > 1 && samples.every((s) => s.join() === samples[0].join());
+      return { fbComplete: ok, readW: w, readH: h, samples, uniform: flat };
+    };
+    const rows = [];
+    const seen = new Map();
+    root.traverse((obj) => {
+      if (!obj.isMesh || !obj.material) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const mat of mats) {
+        if (!mat) continue;
+        const slots = {};
+        for (const key of ["map", "normalMap", "roughnessMap", "metalnessMap", "emissiveMap", "aoMap", "alphaMap"]) {
+          const tex = mat[key];
+          if (!tex?.isTexture) continue;
+          if (!seen.has(tex)) {
+            seen.set(tex, {
+              uuid: tex.uuid.slice(0, 8),
+              name: tex.name || null,
+              image: `${tex.image?.width ?? "?"}x${tex.image?.height ?? "?"}`,
+              size: tex.userData?.__chunkW
+                ? `${tex.userData.__chunkW}x${tex.userData.__chunkH}`
+                : `${tex.image?.width ?? "?"}x${tex.image?.height ?? "?"}`,
+              chunkClaimed: Boolean(tex.userData?.__chunkClaimed),
+              chunkDone: Boolean(tex.userData?.__chunkDone),
+              inQueue: queued.has(tex),
+              channel: tex.channel,
+              glResident: Boolean(this.renderer.properties.get(tex)?.__webglTexture),
+              // false = three swapped in its own GL object over the uploader's
+              glIsChunkOwn: tex.userData?.__chunkGlTex
+                ? this.renderer.properties.get(tex)?.__webglTexture === tex.userData.__chunkGlTex
+                : null,
+              gpu: readback(tex)
+            });
+          }
+          slots[key] = seen.get(tex);
+        }
+        rows.push({
+          mesh: obj.name,
+          material: mat.name,
+          type: mat.type,
+          color: `#${mat.color?.getHexString?.() ?? "?"}`,
+          transparent: mat.transparent,
+          alphaTest: mat.alphaTest,
+          visible: obj.visible,
+          uvSets: Object.keys(obj.geometry?.attributes ?? {}).filter((k) => /^uv/.test(k)),
+          slots
+        });
+      }
+    });
+    return { queuePending: q?.pending ?? null, rows };
+  }
+
+  /** DEV — try a Mail mirror UV orientation: rotation (rad), mirror U / V. */
+  debugDuoMailUv(rotation = Math.PI, mirrorU = false, mirrorV = false) {
+    const tex = this.duoFab?._mailScreen?.texture;
+    if (!tex) return null;
+    tex.rotation = rotation;
+    tex.repeat.set(mirrorU ? -1 : 1, mirrorV ? -1 : 1);
+    tex.updateMatrix?.();
+    return { rotation: tex.rotation, repeat: tex.repeat.toArray(), flipY: tex.flipY, imageCtor: tex.image?.constructor?.name };
+  }
+
+  /** DEV — Pass J item 6: every Mail mirror bitmap applied, with latency. */
+  debugDuoSyncLog() {
+    return (this._duoSyncLog || []).slice();
+  }
+
   /** DEV — `window.__stageDebug("debugStopFade")`. */
   debugStopFade() {
     const n = this.vignettes?.length ?? 0;
@@ -5248,6 +5396,9 @@ export class StageExperience {
       allowNeon
     });
     const stops = this.neon.stopLights;
+    const ov = this._debugShadowOverride;
+    const ovLight = ov ? (ov.index < 0 ? this.spotLight : stops?.[ov.index]?.light) : null;
+    if (ovLight?.shadow) ovLight.shadow.intensity = ov.intensity;
     if (stops) {
       for (let i = 0; i < stops.length; i += 1) {
         if (stops[i]?.light?.userData.flushShadow) {
@@ -6175,7 +6326,14 @@ export class StageExperience {
     }
   }
 
-  applyDuoBitmap(bitmap) {
+  applyDuoBitmap(bitmap, meta = null) {
+    // Pass J item 6 — latency log: overlay change -> texture swapped here.
+    if (meta) {
+      if (!this._duoSyncLog) this._duoSyncLog = [];
+      const appliedAt = performance.timeOrigin + performance.now();
+      this._duoSyncLog.push({ ...meta, appliedAt, latencyMs: Math.round(appliedAt - meta.dirtyAt) });
+      if (this._duoSyncLog.length > 200) this._duoSyncLog.shift();
+    }
     const texture = this.duoFab?._mailScreen?.texture;
     if (!texture) {
       const prev = this._duoBitmapPending;
@@ -6188,6 +6346,11 @@ export class StageExperience {
     this._duoBitmapPending = null;
     this._duoGlassReady = true;
     const prev = texture.image;
+    // Pass J item 6: WebGL ignores flipY for ImageBitmap uploads, so the
+    // canvas-path rotation (π, see duoMailScreen.js) turns the bitmap
+    // upside down on the open-pose glass. Verified on screen: 0 reads
+    // upright with the same layout as the overlay (traffic lights top-left).
+    texture.rotation = 0;
     texture.image = bitmap;
     texture.needsUpdate = true;
     if (prev && prev !== bitmap && typeof ImageBitmap !== "undefined" && prev instanceof ImageBitmap) {

@@ -63,7 +63,7 @@ self.onmessage = (event) => {
   else if (msg.type === "crtHoverIndex") stage.setCrtHoverIndex?.(msg.index);
   else if (msg.type === "updateCrtTexture") stage.applyCrtBitmap(msg.bitmap, msg.state);
   else if (msg.type === "updateSidekickTexture") stage.applySidekickBitmap(msg.bitmap);
-  else if (msg.type === "updateDuoTexture") stage.applyDuoBitmap(msg.bitmap);
+  else if (msg.type === "updateDuoTexture") stage.applyDuoBitmap(msg.bitmap, msg.meta);
   else if (msg.type === "duo") stage.handleHostDuo(msg);
   else if (msg.type === "pixelBudget") stage.setPixelBudget(msg.megapixels);
   else if (msg.type === "floorReset") stage.resetFloorStats();

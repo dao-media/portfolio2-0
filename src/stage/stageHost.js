@@ -663,13 +663,66 @@ export function startStageHost(canvas, options = {}) {
     flightPillEl.textContent = `flight #${msg.frameCount ?? 0} — ${counts} (click to save)`;
   }
 
+  /**
+   * Pass J item 6 — everything the phone screen must mirror: visible text,
+   * open state, selection, both scroll offsets, and the hovered row. Any
+   * change here is a capture; nothing else is.
+   * @param {HTMLElement} shell
+   */
   function duoShellVersion(shell) {
     const text = (shell.textContent || "").replace(/\s+/g, " ").trim();
-    return `${text.length}:${text.slice(0, 120)}`;
+    const list = shell.querySelector(".duo-mail__list");
+    const preview = shell.querySelector(".duo-mail__preview");
+    return [
+      text.length,
+      text.slice(0, 120),
+      shell.classList.contains("is-visible") ? "open" : "closed",
+      duoMail.selectedSlug ?? "",
+      Math.round(list?.scrollTop ?? 0),
+      Math.round(preview?.scrollTop ?? 0),
+      duoHoverIndex
+    ].join("|");
+  }
+
+  /** Index of the list row under the pointer (-1 = none). */
+  let duoHoverIndex = -1;
+  document.addEventListener(
+    "pointerover",
+    (event) => {
+      const shell = duoMail.shell;
+      if (!shell) return;
+      const row = event.target?.closest?.(".duo-mail__row");
+      const rows = row && shell.contains(row) ? [...shell.querySelectorAll(".duo-mail__row")] : null;
+      const idx = rows ? rows.indexOf(row) : -1;
+      if (idx === duoHoverIndex) return;
+      duoHoverIndex = idx;
+      scheduleDuoRaster("hover");
+    },
+    { passive: true }
+  );
+
+  /** src -> downscaled JPEG data URL for the Mail capture (built once). */
+  const duoHeroCache = new Map();
+  /** @param {HTMLImageElement} img */
+  function duoSmallHero(img) {
+    const src = img.currentSrc || img.src;
+    if (!src || !img.complete || !img.naturalWidth) return null;
+    let url = duoHeroCache.get(src);
+    if (url) return url;
+    const w = Math.min(img.naturalWidth, Math.round(DUO_CAPTURE_W * 0.75));
+    const h = Math.round((img.naturalHeight / img.naturalWidth) * w);
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    c.getContext("2d").drawImage(img, 0, 0, w, h);
+    url = c.toDataURL("image/jpeg", 0.86);
+    duoHeroCache.set(src, url);
+    return url;
   }
 
   /**
    * Offscreen in-flow clone. The live shell is position:fixed and paints white.
+   * Clones lose scroll position and :hover, so both are re-applied here.
    * @param {HTMLElement} source
    */
   function buildDuoCaptureClone(source) {
@@ -708,41 +761,111 @@ export function startStageHost(canvas, options = {}) {
       "overflow:hidden",
       "pointer-events:none"
     ].join(";");
+    for (const sel of [".duo-mail__list", ".duo-mail__preview"]) {
+      const from = source.querySelector(sel);
+      const to = clone.querySelector(sel);
+      const y = Math.round(from?.scrollTop ?? 0);
+      if (!to || y <= 0) continue;
+      to.style.overflow = "hidden";
+      for (const child of to.children) child.style.transform = `translateY(${-y}px)`;
+    }
+    if (duoHoverIndex >= 0) {
+      clone.querySelectorAll(".duo-mail__row")[duoHoverIndex]?.classList.add("is-hover");
+    }
+    // The hero webp is embedded as base64 into the SVG on every capture and
+    // re-decoded each time; swap in a cached copy sized for the capture.
+    const liveHero = source.querySelector("img.duo-mail__hero");
+    const cloneHero = clone.querySelector("img.duo-mail__hero");
+    const small = liveHero && duoSmallHero(liveHero);
+    if (cloneHero && small) {
+      cloneHero.removeAttribute("loading");
+      cloneHero.src = small;
+    }
+    const style = document.createElement("style");
+    style.textContent =
+      "[data-duo-mail-capture-host] .duo-mail__row.is-hover:not(.is-active){background:rgba(0,160,220,0.08)}";
+    host.appendChild(style);
     host.appendChild(clone);
     document.body.appendChild(host);
     return host;
   }
 
+  /**
+   * Pass J item 6 — capture on every overlay change, at most every
+   * DUO_MIN_INTERVAL_MS (<= 10 fps), never per frame. Trailing edge: a change
+   * inside the window schedules one capture at the window's end, so the last
+   * state always lands. The old `duoInteractionLive` lock (set for good at
+   * Enter / black-hole exit) skipped every capture after the intro — the
+   * phone stayed frozen on the pre-flight warm frame.
+   */
+  const DUO_MIN_INTERVAL_MS = 100;
+  /**
+   * Only the properties the Mail layout actually uses. Chrome returns an
+   * empty computed `cssText`, so html-to-image otherwise copies all ~350
+   * computed properties onto every cloned node — the bulk of the 66–111 ms
+   * per capture measured before this list.
+   */
+  const DUO_CAPTURE_STYLE_PROPS = [
+    "display", "position", "top", "right", "bottom", "left", "z-index", "box-sizing",
+    "width", "height", "min-width", "min-height", "max-width", "max-height",
+    "margin-top", "margin-right", "margin-bottom", "margin-left",
+    "padding-top", "padding-right", "padding-bottom", "padding-left",
+    "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
+    "border-top-style", "border-right-style", "border-bottom-style", "border-left-style",
+    "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
+    "border-top-left-radius", "border-top-right-radius", "border-bottom-left-radius", "border-bottom-right-radius",
+    "flex-direction", "flex-wrap", "flex-grow", "flex-shrink", "flex-basis", "order",
+    "align-items", "align-self", "align-content", "justify-content", "justify-items", "gap", "row-gap", "column-gap",
+    "grid-template-columns", "grid-template-rows", "grid-column", "grid-row",
+    "overflow-x", "overflow-y", "visibility", "opacity", "transform", "transform-origin",
+    "color", "background-color", "background-image", "background-size", "background-position", "background-repeat",
+    "font-family", "font-size", "font-weight", "font-style", "line-height", "letter-spacing",
+    "text-align", "text-transform", "text-overflow", "text-decoration-line", "white-space",
+    "word-break", "overflow-wrap", "vertical-align", "object-fit", "object-position",
+    "-webkit-line-clamp", "-webkit-box-orient", "content", "list-style-type", "fill", "stroke"
+  ];
+  let duoLastCaptureAt = -Infinity;
+  let duoTrailingTimer = 0;
+  /** performance.timeOrigin-based ms of the first change not yet captured. */
+  let duoDirtySince = 0;
+
   function scheduleDuoRaster(reason) {
-    if (duoInteractionLive) {
-      window.__duoToCanvas.skipped += 1;
-      return;
-    }
     const shell = duoMail.shell;
     if (!shell) return;
     const version = duoShellVersion(shell);
-    if (reason !== "warm" && version === duoCachedVersion) return;
+    if (reason !== "warm" && version === duoCachedVersion && !duoCaptureBusy) {
+      duoDirtySince = 0;
+      return;
+    }
+    if (!duoDirtySince) duoDirtySince = performance.timeOrigin + performance.now();
+    if (duoCaptureBusy) {
+      duoCaptureAgain = true;
+      return;
+    }
+    const wait = DUO_MIN_INTERVAL_MS - (performance.now() - duoLastCaptureAt);
+    if (wait > 0) {
+      if (!duoTrailingTimer) {
+        duoTrailingTimer = setTimeout(() => {
+          duoTrailingTimer = 0;
+          scheduleDuoRaster("trailing");
+        }, wait);
+      }
+      return;
+    }
     void postDuoGlass(reason, version);
   }
 
   async function postDuoGlass(reason, version) {
     const shell = duoMail.shell;
-    if (!shell || duoInteractionLive) {
-      if (duoInteractionLive) window.__duoToCanvas.skipped += 1;
-      return;
-    }
-    if (duoCaptureBusy) {
-      duoCaptureAgain = true;
-      return;
-    }
+    if (!shell) return;
     duoCaptureBusy = true;
+    duoLastCaptureAt = performance.now();
+    const startAt = performance.timeOrigin + performance.now();
+    const dirtyAt = duoDirtySince || startAt;
+    duoDirtySince = 0;
     const host = buildDuoCaptureClone(shell);
     const t0 = performance.now();
     try {
-      if (duoInteractionLive) {
-        window.__duoToCanvas.skipped += 1;
-        return;
-      }
       pageTrigger = `duo:${reason || "raster"}`;
       const captured = await toCanvas(host, {
         pixelRatio: 1,
@@ -750,9 +873,17 @@ export function startStageHost(canvas, options = {}) {
         canvasHeight: DUO_CAPTURE_H,
         cacheBust: false,
         backgroundColor: "#eef5f8",
-        fontEmbedCSS: ""
+        fontEmbedCSS: "",
+        // The host sits at left:-12000px to stay off screen; html-to-image
+        // copies the root's computed style into the SVG, which put the whole
+        // capture 12000 px off its own canvas — every Mail mirror frame was
+        // the background fill alone. Re-anchor the root inside the capture.
+        style: { position: "relative", left: "0px", top: "0px", zIndex: "auto" },
+        ...(window.__duoFullStyle ? {} : { includeStyleProperties: DUO_CAPTURE_STYLE_PROPS })
       });
       const ms = performance.now() - t0;
+      // DEV/verification: keep the last capture when a probe asks for it.
+      if (window.__duoKeepCapture) window.__duoLastCapture = captured.toDataURL("image/png");
       if (duoInteractionLive) window.__duoToCanvas.live += 1;
       else window.__duoToCanvas.warm += 1;
       noteMainGap("toCanvas:duo", ms);
@@ -760,24 +891,34 @@ export function startStageHost(canvas, options = {}) {
       const b0 = performance.now();
       const bitmap = await createImageBitmap(captured);
       rememberPage("bitmap:duo", performance.now() - b0);
-      if (!duoInteractionLive) {
-        worker.postMessage({ type: "updateDuoTexture", bitmap }, [bitmap]);
-      } else if (typeof bitmap.close === "function") {
-        bitmap.close();
-      }
+      worker.postMessage(
+        {
+          type: "updateDuoTexture",
+          bitmap,
+          meta: {
+            version: duoCachedVersion,
+            dirtyAt,
+            startAt,
+            postAt: performance.timeOrigin + performance.now(),
+            captureMs: Math.round(ms)
+          }
+        },
+        [bitmap]
+      );
     } catch (error) {
       console.warn("[stageHost] duo glass bitmap", reason, error);
     } finally {
       host.remove();
       duoCaptureBusy = false;
-      if (duoCaptureAgain && !duoInteractionLive) {
+      if (duoCaptureAgain) {
         duoCaptureAgain = false;
-        requestAnimationFrame(() => scheduleDuoRaster("retry"));
-      } else {
-        duoCaptureAgain = false;
+        scheduleDuoRaster("retry");
       }
     }
   }
+
+  /** Pass J item 6 verification — the overlay's current mirror signature. */
+  window.__duoMirrorVersion = () => (duoMail.shell ? duoShellVersion(duoMail.shell) : null);
 
   requestAnimationFrame(() => scheduleDuoRaster("warm"));
 
