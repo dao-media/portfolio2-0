@@ -5647,9 +5647,16 @@ export class StageExperience {
       this._maybeShowEnter();
       return this._vignette0Warm;
     }
+    if (this._vignette0Warm.bustReady) this._maybeShowEnter();
     // Pass I A/B toggle — debugAbToggle("warm-work", false).
     if (this._abWarmPaused) return this._vignette0Warm;
+    const phaseWas = this._vignette0Warm.phase;
+    if (this._warmFirstTickAt == null) {
+      this._warmFirstTickAt = Math.round(performance.now());
+      noteFlight("warm-phase", { phase: `first-tick:${phaseWas}`, t: this._warmFirstTickAt });
+    }
     const state = stepVignette0Warm(this, this._vignette0Warm);
+    if (state && state.phase !== phaseWas) noteFlight("warm-phase", { phase: state.phase, t: Math.round(performance.now()) });
     if (state?.done) {
       this._primeRestDpr();
       this._maybeShowEnter();
@@ -7834,11 +7841,21 @@ export class StageExperience {
     }
   }
 
+  /**
+   * Enter is gated on Bust's own warm only (`bustReady`, which already waits
+   * for Bust's chunked textures). Pass L: it used to be re-checked only when
+   * interaction armed and when the *whole* warm sequence finished — if the
+   * load gate armed before Bust was ready (any machine where Bust is slower
+   * than the gate) Enter waited for every stop's warm, ~50 s; Dane's machine
+   * happened to finish Bust first and saw it at ~6 s. It is now re-checked
+   * every hold tick. Jobs claimed by the opportunistic hold integration
+   * (other stops' textures) never hold it back.
+   */
   _maybeShowEnter() {
     if (!this._enterArmed || this._enterShown || !this._blackHoleActive) return;
     if (!this._bustWarmReady()) return;
     const pending = this.chunkedTextures?.pending ?? 0;
-    if (pending > 0 && !this._uploadStop) return;
+    if (pending > 0 && !this._uploadStop && !this._holdIntegrationStarted) return;
     this._enterShown = true;
     this._programBaseline = this.renderer.info.programs?.length ?? 0;
     this._showBlackHoleEnter();
@@ -7847,6 +7864,12 @@ export class StageExperience {
   _showBlackHoleEnter() {
     if (!this._blackHoleActive) return;
     this._enterShownAtMs = Math.round(performance.now());
+    noteFlight("enter-shown", {
+      t: this._enterShownAtMs,
+      warmPhase: this._vignette0Warm?.phase ?? null,
+      warmDone: Boolean(this._vignette0Warm?.done),
+      chunkPending: this.chunkedTextures?.pending ?? 0
+    });
     document.getElementById("bh-enter")?.removeAttribute("hidden");
     this._hostPost?.({ type: "dom", enterVisible: true });
   }

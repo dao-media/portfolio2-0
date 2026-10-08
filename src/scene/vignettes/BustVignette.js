@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { noteFlight } from "../stage/flightRecorder.js";
 import { createGltfLoader } from "../loaders/createGltfLoader.js";
 import { NEON_FOG_LAYER } from "../stage/constants.js";
 import {
@@ -495,9 +496,16 @@ export class BustVignette {
 
   async _loadModels() {
     const loader = createGltfLoader(this.loadingManager ?? undefined);
+    // Pass L — Bust readiness gates Enter; show where its time goes.
+    noteFlight("bust-load", { phase: "start", t: Math.round(performance.now()) });
+    const timed = (url, name) =>
+      loader.loadAsync(url).then((r) => {
+        noteFlight("bust-load", { phase: `${name}-loaded`, t: Math.round(performance.now()) });
+        return r;
+      });
     const [bustResult, appleResult] = await Promise.allSettled([
-      loader.loadAsync(BUST_URL),
-      loader.loadAsync(APPLE_URL)
+      timed(BUST_URL, "bust"),
+      timed(APPLE_URL, "apple")
     ]);
 
     // Procedural meadow — sync, no GLB / LoadingManager item
@@ -516,6 +524,7 @@ export class BustVignette {
     }
 
     this._modelLoadSettled = true;
+    noteFlight("bust-load", { phase: "settled", t: Math.round(performance.now()) });
     if (this.bustRoot || this.appleRoot || this.grassRoot) {
       this.onAligned?.();
     }

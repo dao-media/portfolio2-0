@@ -188,6 +188,7 @@ export function stepVignette0Warm(stage, state) {
       if ((chunksDrained && sizeStable) || performance.now() - state._bustTexWait > 1200) {
         state.bustReady = true;
         stage._bustTexWaitActive = false;
+        noteFlight("bust-ready", { t: Math.round(performance.now()), chunkPending: stage.chunkedTextures?.pending ?? 0 });
       } else {
         // The fast (40ms/frame) chunk-drain budget normally only applies
         // while `_descentPendingWarm` is true (the black-screen window) —
