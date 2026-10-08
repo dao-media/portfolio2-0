@@ -1057,6 +1057,7 @@ function warmDuoHud(stage) {
   const entranceWas = duo._entrance;
   const holoWas = duo._holoOpen;
   const stateWas = duo.state;
+  const entranceOpacityWas = duo._entranceOpacity ?? 1;
   if (duo.root) duo.root.visible = true;
   if (duo.ready) duo._entrance = "live";
   duo._holoOpen = false;
@@ -1071,9 +1072,21 @@ function warmDuoHud(stage) {
     duo.setState?.("caseStudy");
     duo._applyScreenPower?.(1);
     duo.render(renderer);
+    // Pass K — the entrance fade (land frame). Mid-fade every Duo material is
+    // transparent, so three draws each DoubleSide mesh in two passes
+    // (BackSide → flipSided, then FrontSide) with `opaque` off: four `duo`
+    // programs + `screen` + a depth program that the opaque draws above
+    // never build — measured linking live on the land frame (91 ms of
+    // duo-render, a 129 ms frame after it).
+    duo._holoOpen = false;
+    duo.setState?.("idle");
+    duo._applyScreenPower?.(0);
+    duo._setEntranceOpacity?.(0.5);
+    duo.render(renderer);
   } catch (error) {
     console.warn("[warmVignette0] duo warm failed:", error);
   } finally {
+    duo._setEntranceOpacity?.(entranceOpacityWas);
     duo.setState?.(stateWas || "idle");
     duo._applyScreenPower?.(0);
     duo._holoOpen = holoWas;

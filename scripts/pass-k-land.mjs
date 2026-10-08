@@ -33,8 +33,10 @@ const t0 = Date.now();
 const { browser, page, dbg, sleep, hopTo, shot, enterMs } = await bootStage({ port, holdMs: 250, profileDir });
 console.log(`landed after ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 await page.mouse.move(W * 0.12, H * 0.15);
+const bitmapsLand0 = await dbg("debugBitmapCounts");
 await sleep(10_000);
 await dbg("flightMark", "land-idle-end");
+const bitmapsLand1 = await dbg("debugBitmapCounts");
 await shot(`${OUT}/bust-settled.png`);
 await hopTo(2);
 await page.mouse.move(W * 0.12, H * 0.15);
@@ -43,6 +45,8 @@ await dbg("flightMark", "sidekick-idle-start");
 await sleep(20_000);
 await dbg("flightMark", "sidekick-idle-end");
 await shot(`${OUT}/sidekick-settled.png`);
+const bitmapsSk1 = await dbg("debugBitmapCounts");
+const bgStats = await dbg("debugBgStats");
 const pacing = await dbg("debugPacingStats");
 const chunkCost = await dbg("debugChunkStepCost");
 const flight = await dbg("flightDump");
@@ -74,6 +78,8 @@ const skA = ms("sidekick-idle-start")?.frame ?? 0;
 const skB = ms("sidekick-idle-end")?.frame ?? 0;
 const result = {
   enterMs,
+  bitmaps: { landStart: bitmapsLand0, landEnd: bitmapsLand1, sidekickEnd: bitmapsSk1 },
+  bgStats,
   pacing,
   chunkCost,
   paceSwitches: flight.milestones.filter((m) => m.kind === "pace").map((m) => [m.frame, m.data.ms, m.data.reason, m.data.stop]),
