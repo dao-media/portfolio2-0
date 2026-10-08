@@ -863,9 +863,9 @@ These are why the repo has “weird” helpers. Full narrative history lived in 
 24. **First use of a blend state is a GPU pipeline compile on ANGLE/Metal.** `compile()` builds programs only; a stop's hop-fade (transparent) state must also be **drawn** once offscreen (`withFadeVariant` / `withAuthoredVariant` in warm and `_compileThenShow`), or the first fade costs 0.5–1.5 s.
 25. **html-to-image copies the root's computed style into the SVG.** An offscreen host at `left:-12000px` captured as a blank fill — pass `style: { position: "relative", left: "0px", top: "0px" }`. `ImageBitmap` uploads ignore `flipY` (Duo mirror is `rotation` **0**, not π).
 26. **`Box3.setFromObject(sidekickRoot)` is ~1.7 km** (hidden / far helper meshes). Bound props from visible, prop-sized meshes.
+27. **Once the fader is down, never skip the beauty pass** (warm steps, chunk allocs, shadow bakes are offscreen) and never resize inside a stop fade (`_stopFadeRamping`). The fader lifts only after **4** clean frames.
 28. **High-refresh displays turn GPU-bound frames into bursts.** At 120 Hz the worker submits every 8.3 ms; with ~15 ms of GPU per frame the swap queue fills and delivery alternates 7–11 ms frames with 30 + 60 ms stalls — a fine-looking 60 fps mean with an 80–130 ms p95, which also drives the governor down. Judge smoothness with `debugRenderedIntervals` (p95 / >33 / >50 counts), not mean fps, and let `_tickFramePacing` hold 60 Hz. A paced-skipped tick issues no GL calls (nothing presented).
 29. **Frames paying for background work must not steer the governor.** `_frameExplained` covers compile / texture / bake / reveal / resize causes, warm not done, integration active, and the 250 ms after background GPU work (its stall lands on later frames with cause `render`). Do not add `beauty-render` / `pick-render` — those are the scene's own cost.
-27. **Once the fader is down, never skip the beauty pass** (warm steps, chunk allocs, shadow bakes are offscreen) and never resize inside a stop fade (`_stopFadeRamping`). The fader lifts only after **4** clean frames.
 
 ---
 
