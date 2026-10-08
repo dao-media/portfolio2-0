@@ -33,7 +33,7 @@
 
 const RING_SIZE = 240;
 /** Notes kept for the whole session (not just inside snapshot windows). */
-const MILESTONES = new Set(["fader-dismiss", "fade-variants", "shadow-bake", "bake"]);
+const MILESTONES = new Set(["fader-dismiss", "fade-variants", "shadow-bake", "bake", "stop-cull", "cull-reapplied"]);
 const MAX_SNAPSHOTS_PER_KIND = 6;
 const PRE_FRAMES = 120;
 const POST_FRAMES = 30;
@@ -90,6 +90,8 @@ export class FlightRecorder {
     /** Pass J — triangle drops the BLINK rule attributed to an intended hop exit. */
     this._explainedDrops = {};
     this._milestones = [];
+    /** Pass J item 8 — top 3 frames per cpu / rig section, whole session. */
+    this._sectionPeaks = {};
     this._prevProgramCount = renderer?.info?.programs?.length ?? 0;
     this._frameUploads = 0;
     this._frameResizes = [];
@@ -418,6 +420,18 @@ export class FlightRecorder {
       events: this._pendingNotes.length ? this._pendingNotes.slice() : null
     };
 
+    for (const [list, prefix] of [[record.cpuSections, ""], [record.rigSections, "rig."]]) {
+      if (!Array.isArray(list)) continue;
+      for (const [name, ms] of list) {
+        if (!(ms >= 4)) continue;
+        const key = prefix + name;
+        const peaks = this._sectionPeaks[key] || (this._sectionPeaks[key] = []);
+        if (peaks.length >= 3 && ms <= peaks[peaks.length - 1].ms) continue;
+        peaks.push({ ms, frame: record.frame, t: record.t, phase: record.phase, rig: record.rigSections, sections: record.cpuSections });
+        peaks.sort((a, b) => b.ms - a.ms);
+        if (peaks.length > 3) peaks.pop();
+      }
+    }
     if (record.resizes && this._resizeLog.length < 300) {
       for (const rz of record.resizes) {
         this._resizeLog.push({ frame: record.frame, phase: record.phase, stopFade: record.stopFade, ...rz });
@@ -601,6 +615,7 @@ export class FlightRecorder {
       resizeLog: this._resizeLog.slice(),
       explainedDrops: { ...this._explainedDrops },
       milestones: this._milestones.slice(),
+      sectionPeaks: this._sectionPeaks,
       snapshotCounts: this.snapshots.reduce((acc, s) => {
         acc[s.kind] = (acc[s.kind] ?? 0) + 1;
         return acc;

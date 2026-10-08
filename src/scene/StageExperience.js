@@ -90,6 +90,7 @@ import {
   STAGE_FOG_MODE,
   STAGE_FOG_ENABLED,
   INACTIVE_VIGNETTE_LAYER,
+  STOP_FADE_IN_RAD,
   NEON_FOG_LAYER,
   NEON_SHADOW
 } from "./stage/constants.js";
@@ -388,6 +389,7 @@ function diffProgramKeys(warmKey, liveKey) {
 }
 
 const _STAR_CSS = new THREE.Vector2();
+const INACTIVE_MASK = 1 << INACTIVE_VIGNETTE_LAYER;
 
 export class StageExperience {
   /**
@@ -3411,6 +3413,9 @@ export class StageExperience {
         : !(i === to || (!settled && i === this._layerCullFromIndex));
       const was = group.userData._stopCulled === true;
       if (!culled && !was) continue;
+      if (culled !== was) {
+        noteFlight("stop-cull", { stop: i, culled, fade: this.neon?.getStopFadeRaw?.(i) ?? null });
+      }
       group.userData._stopCulled = culled;
       group.traverse((obj) => {
         if (obj.isLight || obj === group) return;
@@ -3418,6 +3423,15 @@ export class StageExperience {
         const saved = obj.userData._stopCullMask;
         if (culled) {
           if (saved == null) {
+            obj.userData._stopCullMask = obj.layers.mask;
+            obj.layers.set(INACTIVE_VIGNETTE_LAYER);
+          } else if (obj.layers.mask !== INACTIVE_MASK) {
+            // Something re-enabled camera layers on an already-culled object
+            // (measured: Archaeology meshes drawing at opacity 0 during a
+            // 1->2 hop). Adopt its new mask as the restore value and re-cull.
+            if ((this._cullReapplied = (this._cullReapplied ?? 0) + 1) <= 12) {
+              noteFlight("cull-reapplied", { stop: i, name: obj.name || obj.type, mask: obj.layers.mask });
+            }
             obj.userData._stopCullMask = obj.layers.mask;
             obj.layers.set(INACTIVE_VIGNETTE_LAYER);
           }
@@ -3513,7 +3527,21 @@ export class StageExperience {
       const ud = group.userData;
       const full = (this.neon?.getStopFadeRaw?.(i) ?? 0) >= 1;
       if (!ud._flightBox || (full && !ud._flightBoxFresh)) {
-        ud._flightBox = (ud._flightBox ?? new THREE.Box3()).setFromObject(group);
+        // Visible, prop-sized meshes only: setFromObject on the Sidekick
+        // root measured ~1.7 km (hidden / far helper meshes inside it).
+        const box = (ud._flightBox ?? new THREE.Box3()).makeEmpty();
+        const mesh = new THREE.Box3();
+        const size = new THREE.Vector3();
+        group.updateWorldMatrix(true, true);
+        group.traverse((obj) => {
+          if (!obj.isMesh || !obj.geometry) return;
+          for (let p = obj; p && p !== group.parent; p = p.parent) if (p.visible === false) return;
+          if (!obj.geometry.boundingBox) obj.geometry.computeBoundingBox();
+          mesh.copy(obj.geometry.boundingBox).applyMatrix4(obj.matrixWorld);
+          if (mesh.isEmpty() || mesh.getSize(size).length() > 12) return;
+          box.union(mesh);
+        });
+        ud._flightBox = box;
         ud._flightBoxFresh = full;
       }
       if (!full) ud._flightBoxFresh = false;
@@ -3624,25 +3652,6 @@ export class StageExperience {
       };
       requestAnimationFrame(tick);
     });
-  }
-
-  /**
-   * DEV — re-bake stop `index`'s neon shadow on the next frame, or set its
-   * shadow strength (`intensity` 0..1, null = leave). Diagnostics only.
-   */
-  debugNeonShadow(index = 1, { rebake = false, intensity = null } = {}) {
-    const light = index < 0 ? this.spotLight : this.neon?.stopLights?.[index]?.light;
-    if (!light?.shadow) return null;
-    if (rebake) light.shadow.needsUpdate = true;
-    if (intensity != null) this._debugShadowOverride = { index, intensity };
-    else this._debugShadowOverride = null;
-    return {
-      pos: light.position.toArray().map((v) => +v.toFixed(3)),
-      bakedAt: light.userData.shadowBakedPos ?? null,
-      hasMap: Boolean(light.shadow.map),
-      autoUpdate: light.shadow.autoUpdate,
-      mapSize: light.shadow.mapSize.x
-    };
   }
 
   /** DEV — materials under stop `index` whose live opacity/blend differs from authored. */
@@ -3757,16 +3766,6 @@ export class StageExperience {
       }
     });
     return { queuePending: q?.pending ?? null, rows };
-  }
-
-  /** DEV — try a Mail mirror UV orientation: rotation (rad), mirror U / V. */
-  debugDuoMailUv(rotation = Math.PI, mirrorU = false, mirrorV = false) {
-    const tex = this.duoFab?._mailScreen?.texture;
-    if (!tex) return null;
-    tex.rotation = rotation;
-    tex.repeat.set(mirrorU ? -1 : 1, mirrorV ? -1 : 1);
-    tex.updateMatrix?.();
-    return { rotation: tex.rotation, repeat: tex.repeat.toArray(), flipY: tex.flipY, imageCtor: tex.image?.constructor?.name };
   }
 
   /** DEV — Pass J item 6: every Mail mirror bitmap applied, with latency. */
@@ -4675,12 +4674,22 @@ export class StageExperience {
     }
   }
 
-  /** Pass J — true while any stop's fade is strictly between 0 and 1. */
+  /**
+   * Pass J — true while any stop's fade is strictly between 0 and 1, or the
+   * camera is inside an arriving stop's fade-in approach (a resize applied
+   * at the top of a frame would otherwise land on the ramp's first frame).
+   */
   _stopFadeRamping() {
     if (!this.introComplete || !this.neon) return false;
     for (let i = 0; i < (this.vignettes?.length ?? 0); i += 1) {
       const f = this.neon.getStopFadeRaw(i);
       if (f > 0 && f < 1) return true;
+    }
+    const s = this.cameraRig?.state;
+    const entry = this.neon.entries?.[s?.index ?? -1];
+    if (s && entry && this.neon.getStopFadeRaw(s.index) < 1) {
+      const d = Math.abs(Math.atan2(Math.sin(s.theta - entry.theta), Math.cos(s.theta - entry.theta)));
+      if (d <= STOP_FADE_IN_RAD + 0.12) return true;
     }
     return false;
   }
@@ -5460,9 +5469,6 @@ export class StageExperience {
       allowNeon
     });
     const stops = this.neon.stopLights;
-    const ov = this._debugShadowOverride;
-    const ovLight = ov ? (ov.index < 0 ? this.spotLight : stops?.[ov.index]?.light) : null;
-    if (ovLight?.shadow) ovLight.shadow.intensity = ov.intensity;
     if (stops) {
       for (let i = 0; i < stops.length; i += 1) {
         if (stops[i]?.light?.userData.flushShadow) {
@@ -7501,7 +7507,9 @@ export class StageExperience {
     this._tickBlackHole(dt);
     this._tickBlackHoleCursorShear(dt);
     this._tickCursorStarTrail(dt, t);
+    const camRigT0 = performance.now();
     this.cameraRig?.update(dt);
+    const camRigMs = performance.now() - camRigT0;
     if (this.starField) {
       // Pass G: the per-frame `visible = true` re-assert that used to live
       // here is gone — it was defending against `compileHeldRoot`'s old
@@ -7541,6 +7549,9 @@ export class StageExperience {
     }
     preT = this._markPre("sky", preT);
     this._beginRigProbe();
+    // Pass J item 8 — camera rig spring update is timed above (it must run
+    // before the star field); reported with the rest of the rig laps.
+    this._rigRecord("cameraRig", camRigMs);
     if (this.duoFab) this.duoFab._noteRig = (name, ms) => this._rigRecord(name, ms);
     this._rigLap("intro", () => this._tickIntroFromCameraRig());
     this._rigLap("index", () => this._syncCameraRigIndex());
@@ -7790,6 +7801,14 @@ export class StageExperience {
     this._snapshotGl();
     const beautyT0 = performance.now();
     const revealNow = Boolean(this._revealPending);
+    // Pass J: once the fader is down every frame is on screen. Warm compile
+    // steps, chunk allocs and shadow bakes all do their work offscreen and
+    // restore state before this point, so skipping the beauty pass only ever
+    // presented a stale (or, per Pass F, black) frame — 11 hold BLINKs per
+    // run. Behind the fader the skip is still free and still allowed.
+    if (this._skipBeauty && this._faderDismissed && this._hasPresentedFrame) {
+      this._skipBeauty = false;
+    }
     const skippedBeautyThisFrame = this._skipBeauty;
     if (!this._skipBeauty) {
       // Pass J item 5 — the composer renders at its own internal size
