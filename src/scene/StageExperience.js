@@ -5867,6 +5867,27 @@ export class StageExperience {
     return true;
   }
 
+  /** DEV — Archaeology layout: shelf/props world AABB, globe centre and size, camera. */
+  debugArchLayout() {
+    const arch = this.vignettes?.[3];
+    const box = new THREE.Box3();
+    for (const r of arch?.instance?.getMountedRoots?.() ?? []) box.expandByObject(r);
+    const tube = this.neon?.entries?.[3]?.tube;
+    const c = new THREE.Vector3();
+    tube?.getWorldPosition(c);
+    const light = this.neon?.stopLights?.[3]?.light;
+    const r3 = (v) => v.toArray().map((x) => +x.toFixed(2));
+    return {
+      group: r3(arch.group.getWorldPosition(new THREE.Vector3())),
+      groupScale: r3(arch.group.getWorldScale(new THREE.Vector3())),
+      propsMin: r3(box.min),
+      propsMax: r3(box.max),
+      globeFoot: r3(c),
+      light: light ? r3(light.position) : null,
+      camera: r3(this.camera.position)
+    };
+  }
+
   /** DEV/Pass L — GL capabilities that decide how compiles behave. */
   debugGlCaps() {
     const gl = this.renderer?.getContext?.();

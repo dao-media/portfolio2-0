@@ -274,6 +274,12 @@ export class NeonSystem {
 
     const floorGlow = makeNeonFloorGlow(dominant);
     vignette.group.add(floorGlow);
+    if (isGlobe) {
+      // A 3.2 m floating globe: wide pool under it, no tube-foot stump.
+      floorGlow.userData.poolScale = GLOBE.poolScale;
+      if (floorGlow.userData.cone) floorGlow.userData.cone.visible = false;
+      floorGlow.userData.noCone = true;
+    }
     // Desktop tube sits near the tower — shrink/bias pool + full footprint clip
     // so additive glow cannot soft-bleed onto the case (§12 / §20).
     if (/desktop/i.test(vignette.def?.name ?? "")) {
