@@ -4,6 +4,7 @@ import { DuoMailOverlay } from "../ui/DuoMailOverlay.js";
 import { DuoCaseStudyOverlay } from "../ui/DuoCaseStudyOverlay.js";
 import { SidekickSmsScreen } from "../ui/sidekickSms/SidekickSmsScreen.js";
 import { PixelBudgetTuner } from "../ui/PixelBudgetTuner.js";
+import { GroundFogTuner } from "../ui/GroundFogTuner.js";
 import { REST_PIXEL_BUDGET_MP } from "../scene/stage/constants.js";
 import { DUO_MAIL_ASPECT } from "../scene/duo/duoConstants.js";
 
@@ -923,6 +924,10 @@ export function startStageHost(canvas, options = {}) {
   requestAnimationFrame(() => scheduleDuoRaster("warm"));
 
   const fader = document.getElementById("fader");
+  // Pass J item 7 — Shift+K.
+  new GroundFogTuner({
+    onChange: (params) => worker.postMessage({ type: "groundFog", params })
+  });
   const pixelTuner = new PixelBudgetTuner({
     initial: REST_PIXEL_BUDGET_MP,
     onChange: (megapixels) => worker.postMessage({ type: "pixelBudget", megapixels })

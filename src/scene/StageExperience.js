@@ -124,6 +124,7 @@ import {
 import { restFidelityForIndex, restResource } from "./stage/restFidelity.js";
 import { createVignette0WarmState, stepVignette0Warm } from "./stage/warmVignette0.js";
 import { ChunkedTextureQueue } from "./stage/chunkedTextureUpload.js";
+import { SidekickGroundFog } from "./vignettes/SidekickGroundFog.js";
 import { STAGE_FLOOR_Y, measureBlockoutReferenceBounds, measureSceneBounds, snapAllGroupsToFloor, snapGroupToFloor } from "./vignettes/pcSceneBlockout.js";
 import { preloadPcTextures, setPcTextureLoadingManager } from "./vignettes/pcProductionMaterials.js";
 import { WaterCursor } from "../cursor/WaterCursor.js";
@@ -656,6 +657,7 @@ export class StageExperience {
     this._edgeTubeGlitchPass = this._edgeGlitchPass;
     this._mountNeonSystem();
     this._mountContactShadows();
+    this._mountSidekickGroundFog();
     this._initCameraRig();
     this._updatePlaceholderVisibility(0);
 
@@ -1274,6 +1276,10 @@ export class StageExperience {
           this.spotLight.castShadow = on;
           applied = true;
         }
+        break;
+      case "ground-fog":
+        this._abGroundFogOff = !on;
+        applied = Boolean(this.groundFog);
         break;
       case "lantern-shadow":
         if (lanternLight) {
@@ -2213,6 +2219,64 @@ export class StageExperience {
   /** Soft contact pads under each stop (POV spot + neon) — MeshBasic floor cannot receive maps. */
   _mountContactShadows() {
     this.contactShadows = this.vignettes.map((vig) => new VignetteContactShadows(vig.group));
+  }
+
+  /**
+   * Pass J item 7 — ground fog inside the Sidekick group: the stop fade,
+   * layer cull and warm compile of stop 2 all cover it automatically.
+   */
+  _mountSidekickGroundFog() {
+    const group = this.vignettes?.[2]?.group;
+    if (!group || this.groundFog) return;
+    this.groundFog = new SidekickGroundFog();
+    group.add(this.groundFog.mesh);
+  }
+
+  _tickSidekickGroundFog(time) {
+    const fog = this.groundFog;
+    if (!fog) return;
+    const visible = !this._abGroundFogOff && (this.neon?.getStopFadeRaw?.(2) ?? 0) > 0;
+    fog.mesh.visible = visible;
+    if (!visible) return;
+    const light = this.neon?.stopLights?.[2]?.light;
+    const maxL = this.neon?._maxLight || 1;
+    fog.update({
+      time,
+      floorY: STAGE_FLOOR_Y,
+      neonColor: this.neon?.entries?.[2]?.dominant ?? null,
+      neonLevel: light ? light.intensity / maxL : 0,
+      phoneRoot: this.vignettes?.[2]?.instance?.sidekickRoot ?? null
+    });
+  }
+
+  /** DEV — `window.__stageDebug("setGroundFogParams", { density: 0.2 })`. */
+  setGroundFogParams(partial = {}) {
+    return this.groundFog?.setParams(partial) ?? null;
+  }
+
+  getGroundFogParams() {
+    return this.groundFog?.getParams() ?? null;
+  }
+
+  /** DEV — ground fog placement / state. */
+  debugGroundFog() {
+    const f = this.groundFog;
+    if (!f) return null;
+    const u = f.material.uniforms;
+    const w = new THREE.Vector3();
+    f.mesh.getWorldPosition(w);
+    return {
+      visible: f.mesh.visible,
+      layers: f.mesh.layers.mask,
+      meshLocal: f.mesh.position.toArray().map((v) => +v.toFixed(3)),
+      meshWorld: w.toArray().map((v) => +v.toFixed(3)),
+      groupWorldY: +(this.vignettes?.[2]?.group?.position?.y ?? 0).toFixed(3),
+      floorY: u.uFloorY.value,
+      box: { center: u.uBoxCenter.value.toArray().map((v) => +v.toFixed(3)), half: u.uBoxHalf.value.toArray().map((v) => +v.toFixed(3)), on: u.uBoxOn.value },
+      opacity: u.uOpacity.value,
+      color: u.uColor.value.toArray().map((v) => +v.toFixed(3)),
+      density: u.uDensity.value
+    };
   }
 
   _refreshContactShadows() {
@@ -5409,6 +5473,7 @@ export class StageExperience {
     }
     this._tickAccentLights(time, dt, s.index);
     this._tickContactShadows();
+    this._tickSidekickGroundFog(time);
 
     const neonPos =
       this.neon?.stopLights?.[s.index]?.light?.position ?? null;
@@ -5421,7 +5486,10 @@ export class StageExperience {
       this.wetFloor?.setBubbleCenter?.(neonPos);
       const destOpaque = (this.neon?.getStopFadeRaw?.(s.index) ?? 1) >= 1;
       if (this.wetFloor?._bakePending && destOpaque) {
-        const baked = this.wetFloor.update?.(time, { probeWorld: neonPos, hideExtra: [] });
+        const baked = this.wetFloor.update?.(time, {
+          probeWorld: neonPos,
+          hideExtra: this.groundFog?.mesh ? [this.groundFog.mesh] : []
+        });
         if (baked) {
           this._frameCause = "wet-bake";
           // Pass F: confirmed via the flight recorder that this single-frame
@@ -5439,6 +5507,7 @@ export class StageExperience {
     const hideExtra = [];
     if (vig?.grassRoot) hideExtra.push(vig.grassRoot);
     if (vig?.grassEngine?.root) hideExtra.push(vig.grassEngine.root);
+    if (this.groundFog?.mesh) hideExtra.push(this.groundFog.mesh);
     const glow = this.neon?.entries?.[s.index]?.floorGlow;
     if (glow) hideExtra.push(glow);
     const al = this.accentLights;
