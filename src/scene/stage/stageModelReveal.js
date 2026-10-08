@@ -223,6 +223,87 @@ export async function compileHeldRoot(renderer, scene, camera, root, wrap = (fn)
   noteFlight("compileHeldRoot-done", { root: root?.name || "(unnamed)" });
 }
 
+/**
+ * Pass K item 1 — every variant of a held root in one batch: all
+ * `compileAsync` calls are issued together (KHR_parallel_shader_compile links
+ * them off the main thread; three polls completion, nothing forces a link
+ * mid-frame) and awaited, then each variant gets one small held draw — one
+ * per `yieldFrame` — for the shadow-depth programs and the ANGLE/Metal
+ * pipeline objects `compile` does not build. The old path ran three full
+ * compile+draw passes per root back to back, and with `onPropMounted`
+ * firing ~13 Archaeology roots unawaited they all resolved in one gap
+ * (380 ms, no frame presented).
+ * @param {THREE.WebGLRenderer} renderer
+ * @param {THREE.Scene} scene
+ * @param {THREE.Camera} camera
+ * @param {THREE.Object3D} root
+ * @param {{ wraps?: Array<(fn: () => any) => any>, yieldFrame?: () => Promise<void> }} [opts]
+ */
+export async function compileHeldRootVariants(renderer, scene, camera, root, opts = {}) {
+  if (!renderer || !scene || !camera) return;
+  const wraps = opts.wraps ?? [(fn) => fn()];
+  const yieldFrame = opts.yieldFrame ?? (async () => {});
+  const name = root?.name || "(unnamed)";
+  syncCompileCamera(camera);
+  const lights = enableLightsOnHoldLayer(scene);
+  const prevTarget = renderer.getRenderTarget();
+  const prevAutoClear = renderer.autoClear;
+  renderer.setRenderTarget(_compileTarget);
+  renderer.autoClear = true;
+  const pending = [];
+  try {
+    for (const wrap of wraps) pending.push(wrap(() => renderer.compileAsync(scene, _compileCamera)));
+  } finally {
+    renderer.setRenderTarget(prevTarget);
+    renderer.autoClear = prevAutoClear;
+    for (const light of lights) light.layers.disable(GPU_HOLD_LAYER);
+  }
+  await Promise.all(pending);
+  noteFlight("compileHeldRoot-done", { root: name, variants: wraps.length });
+  for (const wrap of wraps) {
+    await yieldFrame();
+    syncCompileCamera(camera);
+    const held = enableLightsOnHoldLayer(scene);
+    const target = renderer.getRenderTarget();
+    const autoClear = renderer.autoClear;
+    const prevNeeds = renderer.shadowMap.needsUpdate;
+    renderer.shadowMap.needsUpdate = true;
+    renderer.setRenderTarget(_compileTarget);
+    renderer.autoClear = true;
+    try {
+      wrap(() => renderer.render(scene, _compileCamera));
+    } finally {
+      renderer.setRenderTarget(target);
+      renderer.autoClear = autoClear;
+      renderer.shadowMap.needsUpdate = prevNeeds;
+      for (const light of held) light.layers.disable(GPU_HOLD_LAYER);
+    }
+  }
+}
+
+function syncCompileCamera(camera) {
+  _compileCamera.position.copy(camera.position);
+  _compileCamera.quaternion.copy(camera.quaternion);
+  if (camera.isPerspectiveCamera) {
+    _compileCamera.fov = camera.fov;
+    _compileCamera.aspect = camera.aspect;
+    _compileCamera.near = camera.near;
+    _compileCamera.far = camera.far;
+    _compileCamera.updateProjectionMatrix();
+  }
+  _compileCamera.updateMatrixWorld(true);
+}
+
+function enableLightsOnHoldLayer(scene) {
+  const lights = [];
+  scene.traverse((obj) => {
+    if (!obj.isLight || obj.layers.isEnabled(GPU_HOLD_LAYER)) return;
+    lights.push(obj);
+    obj.layers.enable(GPU_HOLD_LAYER);
+  });
+  return lights;
+}
+
 const GPU_TEXTURE_KEYS = [
   "map",
   "normalMap",
@@ -312,9 +393,10 @@ export async function warmMeshesChunked(root, renderer, yieldFrame, onSlowTextur
           });
         }
         tagFrame("material-warm");
-        // One texture per step — do not yield into the live fog-depth +
-        // beauty frame here (that compiled each new program inside a >1s
-        // present and stretched ~45s), just cap the cost per iteration.
+        // Pass K item 1 — one texture per frame slot. Safe now that the root
+        // is held on GPU_HOLD_LAYER while this runs (the old ">1 s present"
+        // came from yielding with the root live on the beauty camera).
+        if (yieldFrame) await yieldFrame();
       }
     }
   }

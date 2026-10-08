@@ -108,7 +108,7 @@ import {
 import { INTRO_TRACK_DESCENT } from "./stage/stageCameraTrack.js";
 import {
   GPU_HOLD_LAYER,
-  compileHeldRoot,
+  compileHeldRootVariants,
   releaseRootToCamera,
   setGroupRenderOpacity,
   withAuthoredVariant,
@@ -3932,6 +3932,30 @@ export class StageExperience {
     return sorted[Math.floor(sorted.length * 0.2)];
   }
 
+  /** DEV/Pass K — what the hold is waiting on (Enter gate inputs). */
+  debugHoldGate() {
+    const desktop = this.vignettes?.[1]?.instance;
+    const sidekick = this.vignettes?.[2]?.instance;
+    const arch = this.vignettes?.[3]?.instance;
+    const q = this.chunkedTextures;
+    return {
+      t: Math.round(performance.now()),
+      warmPhase: this._vignette0Warm?.phase,
+      bustReady: Boolean(this._vignette0Warm?.bustReady),
+      liveAt: this._vignette0Warm?._liveAt ?? null,
+      enterArmed: Boolean(this._enterArmed),
+      enterShown: Boolean(this._enterShown),
+      chunkPending: q?.pending ?? null,
+      chunkJobs: (q?.jobs || []).map((j) => `${j.w}x${j.h}:${j.label || j.texture?.name || ""}`).slice(0, 6),
+      uploadStop: Boolean(this._uploadStop),
+      pc: Boolean(desktop?._pcSceneReady || desktop?.pcRoot),
+      sidekick: Boolean(sidekick?._modelLoadSettled),
+      sidekickStarted: Boolean(sidekick?._modelLoadStarted),
+      arch: Boolean(arch?._modelLoadSettled),
+      archStarted: Boolean(arch?._modelLoadStarted)
+    };
+  }
+
   /** DEV/Pass K — time spent paced vs uncapped per stop, plus current state. */
   debugPacingStats() {
     const out = {};
@@ -5447,7 +5471,38 @@ export class StageExperience {
    * Upload maps, compile once while the root is on GPU_HOLD_LAYER, then show.
    * Not one compile per mesh inside the live fog-depth + beauty frame.
    */
-  async _compileThenShow(root) {
+  /**
+   * Pass K item 1 — held roots are integrated one at a time through a single
+   * queue (onPropMounted fires these unawaited; ~13 Archaeology roots used to
+   * resolve together in one 380 ms gap). A root queued twice shares one run.
+   * @param {THREE.Object3D} root
+   */
+  _compileThenShow(root) {
+    if (!root || !this.renderer) return Promise.resolve();
+    if (!this._heldRuns) this._heldRuns = new Map();
+    const queued = this._heldRuns.get(root);
+    if (queued) return queued;
+    const prev = this._heldQueue ?? Promise.resolve();
+    const run = prev.then(() => this._compileThenShowNow(root));
+    const settled = run.catch((error) => console.warn("[StageExperience] Held integrate failed:", error));
+    this._heldQueue = settled;
+    this._heldRuns.set(root, settled);
+    return settled;
+  }
+
+  /**
+   * One frame slot for background GPU work (held textures, compiles, draws).
+   * Item 4 tightens this to idle-only post-land slicing.
+   */
+  _bgSlot() {
+    return this._yieldFrame();
+  }
+
+  /**
+   * Upload maps, compile once while the root is on GPU_HOLD_LAYER, then show.
+   * Not one compile per mesh inside the live fog-depth + beauty frame.
+   */
+  async _compileThenShowNow(root) {
     if (!root || !this.renderer) return;
     let held = false;
     root.traverse((obj) => {
@@ -5464,13 +5519,19 @@ export class StageExperience {
     if (this._compileThenShowSucceeded.length < 20) {
       this._compileThenShowSucceeded.push({ root: root.name || "(unnamed)", t: Math.round(performance.now()) });
     }
+    await this._bgSlot();
     this._holdStableLightVariant();
-    const warmResult = await warmMeshesChunked(root, this.renderer, null, (info) => {
-      if (!this._slowTextureLog) this._slowTextureLog = [];
-      if (this._slowTextureLog.length < 20) {
-        this._slowTextureLog.push({ root: root.name || "(unnamed)", ...info });
+    const warmResult = await warmMeshesChunked(
+      root,
+      this.renderer,
+      () => this._bgSlot(),
+      (info) => {
+        if (!this._slowTextureLog) this._slowTextureLog = [];
+        if (this._slowTextureLog.length < 20) {
+          this._slowTextureLog.push({ root: root.name || "(unnamed)", ...info });
+        }
       }
-    });
+    );
     if (!this._textureWarmStats) {
       this._textureWarmStats = { uploaded: 0, skipped: 0, ms: 0, byRoot: [] };
     }
@@ -5481,27 +5542,22 @@ export class StageExperience {
       this._textureWarmStats.byRoot.push({ root: root.name || "(unnamed)", ...warmResult });
     }
     try {
-      // Counter, not a boolean: onPropMounted fires `_compileThenShow` without
-      // awaiting it, so several props' pre-compiles can overlap — one
-      // finishing must not clear the flag while a sibling is still mid-compile.
       this._inPreCompile = (this._inPreCompile || 0) + 1;
-      await spanFrame("shader-compile", async () => {
-        await compileHeldRoot(this.renderer, this.scene, this.camera, root);
-        // Pass J — also the final opaque state (roots mount mid intro-reveal,
-        // transparent) and the hop-fade state, so neither builds programs or
-        // GPU pipelines live on the first hop onto this stop.
-        await compileHeldRoot(this.renderer, this.scene, this.camera, root, (fn) =>
-          withAuthoredVariant(root, fn)
-        );
-        await compileHeldRoot(this.renderer, this.scene, this.camera, root, (fn) =>
-          withFadeVariant(root, fn)
-        );
+      await this._bgSlot();
+      this._holdStableLightVariant();
+      // Live state, final opaque state (roots mount mid intro-reveal,
+      // transparent) and the hop-fade state — so none of them builds a
+      // program or GPU pipeline live on the first hop onto this stop.
+      await compileHeldRootVariants(this.renderer, this.scene, this.camera, root, {
+        wraps: [(fn) => fn(), (fn) => withAuthoredVariant(root, fn), (fn) => withFadeVariant(root, fn)],
+        yieldFrame: () => this._bgSlot()
       });
     } catch (error) {
       console.warn("[StageExperience] Held compile failed:", error);
     } finally {
       this._inPreCompile -= 1;
     }
+    await this._bgSlot();
     releaseRootToCamera(root);
     // Pass J: a root released into a stop that is currently culled must
     // not render for even one frame before the next layer sync.
