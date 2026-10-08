@@ -3871,8 +3871,8 @@ export class StageExperience {
    * an EMA of ticks drifts up with every stall and once read a 120 Hz panel
    * as 60 Hz, switching pacing off exactly when it was needed.
    *
-   * Policy on a high-refresh display: start paced at 60 Hz once the world is
-   * visible (a full frame here costs more GPU than 8.3 ms). Uncapped gets a
+   * Policy on a high-refresh display: start paced at 60 Hz from the first
+   * rendered frame (a full frame here costs more GPU than 8.3 ms). Uncapped gets a
    * probe only while settled with no input, after 6 s of paced frames that
    * all landed on the even cadence; >= 3 unexplained rendered frames > 33 ms
    * within 1.5 s re-pace it (cooldown before the next probe doubles each
@@ -3883,7 +3883,10 @@ export class StageExperience {
    * @param {number} now
    */
   _tickFramePacing(frameMs, now) {
-    if (this._paceForced != null || !this.world?.visible) return;
+    // From the first rendered frame: the hold and the spiral render too, and
+    // unpaced at 120 Hz the spiral's bursty frames walked the governor 0→3
+    // and dropped a floor notch before land.
+    if (this._paceForced != null) return;
     const refresh = this._displayRefreshMs();
     if (refresh == null) return;
     const highRefresh = refresh < 12;
@@ -5615,6 +5618,9 @@ export class StageExperience {
     this._bgTokenFrame = this._frameNo;
     this._bgTokenKind = kind;
     this._bgTokenAt = performance.now();
+    // Pass K item 9 — the unit's cost lands on this frame or the next ones:
+    // explained (same 250 ms window as the other background causes).
+    this._bgWorkAt = this._bgTokenAt;
     if (!this._bgStats) this._bgStats = { pausedChecks: 0, byKind: {} };
     const row = this._bgStats.byKind[kind] || (this._bgStats.byKind[kind] = { units: 0, postLand: 0 });
     row.units += 1;
