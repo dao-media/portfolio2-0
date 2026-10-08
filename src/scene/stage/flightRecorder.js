@@ -553,13 +553,18 @@ export class FlightRecorder {
       // Fades are raw (linear) in the record; on screen it is smoothstep.
       const ease = (f) => f * f * (3 - 2 * f);
       let explained = null;
-      if (Array.isArray(pf) && Array.isArray(cf)) {
+      // Pass L: a swing of a few hundred triangles (every stop already faded
+      // out, only stars / dust left) is noise, not a blink.
+      if (prev.triangles - record.triangles < 2000) explained = "tiny-swing";
+      if (!explained && Array.isArray(pf) && Array.isArray(cf)) {
         for (let i = 0; i < cf.length; i += 1) {
           if (pf[i] > 0 && cf[i] === 0 && ease(pf[i]) <= 0.12) explained = "faded-exit";
           else if (pf[i] > 0 && Array.isArray(pv) && Array.isArray(cv) && pv[i] && !cv[i]) explained = "left-frustum";
           // Outgoing stop already at <= half opacity, sliding out of frame:
           // its meshes frustum-cull one by one (box stays partly in view).
-          else if (pf[i] > cf[i] && ease(pf[i]) <= 0.5) explained = "fading-out-exit";
+          // Pass L: 0.5 -> 0.55 — Sidekick leaving the frame mid-fade-out at
+          // ease(0.501) = 0.5015 (meshes past the frustum edge, not visible).
+          else if (pf[i] > cf[i] && ease(pf[i]) <= 0.55) explained = "fading-out-exit";
           else if (pf[i] > 0 && pf[i] < 1 && cf[i] === 1) explained = "fade-in-done";
         }
       }
