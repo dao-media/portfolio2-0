@@ -1279,6 +1279,22 @@ export class StageExperience {
           applied = true;
         }
         break;
+      case "neon":
+        // Tubes, floor glow and PointLights to 0 (light count unchanged, so
+        // no program changes) — applied after neon.update each frame.
+        this._abNeonOff = !on;
+        applied = Boolean(this.neon);
+        break;
+      case "sidekick-phone":
+        if (this.vignettes?.[2]?.instance?.sidekickRoot) {
+          this.vignettes[2].instance.sidekickRoot.visible = on;
+          applied = true;
+        }
+        break;
+      case "contact-pads":
+        this._abPadsOff = !on;
+        applied = Boolean(this.contactShadows?.length);
+        break;
       case "ground-fog":
         this._abGroundFogOff = !on;
         applied = Boolean(this.groundFog);
@@ -3773,6 +3789,135 @@ export class StageExperience {
     return (this._duoSyncLog || []).slice();
   }
 
+  /** Pass K — incoming screen bitmaps per kind (count, pixels). */
+  _countBitmap(kind, bitmap) {
+    if (!this._bitmapCounts) this._bitmapCounts = {};
+    const row = this._bitmapCounts[kind] || (this._bitmapCounts[kind] = { count: 0, px: 0, w: 0, h: 0 });
+    row.count += 1;
+    row.w = bitmap?.width ?? 0;
+    row.h = bitmap?.height ?? 0;
+    row.px += row.w * row.h;
+  }
+
+  debugChunkStepCost() {
+    return this.chunkedTextures?.stepCost ?? null;
+  }
+
+  debugBitmapCounts() {
+    return { t: Math.round(performance.now()), counts: JSON.parse(JSON.stringify(this._bitmapCounts || {})) };
+  }
+
+  /**
+   * DEV/Pass K — intervals between frames that were actually rendered
+   * (unlike debugMeasureFps, which times every rAF tick, skipped or not).
+   */
+  debugRenderedIntervals(seconds = 5) {
+    this._renderStamps = [];
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const t = this._renderStamps;
+        this._renderStamps = null;
+        const iv = [];
+        for (let i = 1; i < t.length; i += 1) iv.push(t[i] - t[i - 1]);
+        const sorted = iv.slice().sort((a, b) => a - b);
+        const pick = (q) => +(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] ?? 0).toFixed(1);
+        const mean = iv.reduce((a, b) => a + b, 0) / Math.max(1, iv.length);
+        resolve({
+          frames: iv.length,
+          fps: +(1000 / mean).toFixed(1),
+          p50: pick(0.5),
+          p95: pick(0.95),
+          max: +(sorted[sorted.length - 1] ?? 0).toFixed(1),
+          over33: iv.filter((x) => x > 33).length,
+          over50: iv.filter((x) => x > 50).length
+        });
+      }, seconds * 1000);
+    });
+  }
+
+  /**
+   * Pass K item 1.4 — was the frame that just ended paying for background
+   * work? Its own cause (compile / texture / bake / reveal), or any frame
+   * within 250 ms of background GPU work (a warm draw or held compile shows
+   * up as a GPU stall on the *following* frames, with cause "render").
+   * @param {number} now
+   */
+  _frameExplained(now) {
+    const cause = this._lastCause || "render";
+    if (/^(compile|texture|shadow-bake|wet-bake|reveal-render|warm|resize)/.test(cause)) {
+      this._bgWorkAt = now;
+      return true;
+    }
+    if (this._vignette0Warm && !this._vignette0Warm.done) return true;
+    if (this._introIntegrationActive || (this._inPreCompile ?? 0) > 0) return true;
+    return now - (this._bgWorkAt ?? -Infinity) < 250;
+  }
+
+  /**
+   * Pass K — adaptive frame pacing (see the skip at the top of _animate).
+   * On a high-refresh display, pace to 60 Hz once unexplained stalls show up
+   * (>= 3 rendered intervals > 33 ms within 1.5 s); after 6 s of paced frames
+   * all on the even cadence, probe uncapped again, and if the stalls come
+   * straight back re-pace with a 20 s cooldown before the next probe. Never
+   * switches mid-hop. Every switch is a flight milestone ("pace").
+   * @param {number} now
+   */
+  _tickFramePacing(now) {
+    const prev = this._lastRenderAt;
+    this._lastRenderAt = now;
+    if (prev == null || this._paceForced != null || !this.introComplete) return;
+    const iv = now - prev;
+    const highRefresh = (this._tickEma ?? 16.7) < 11;
+    if (!highRefresh) {
+      if (this._paceMs) this._setPace(0, "display-60hz");
+      return;
+    }
+    const moving = !this.cameraRig?.state?.isSettled;
+    if (!this._stalls) this._stalls = [];
+    if (iv > 33 && !this._lastFrameExplained) this._stalls.push(now);
+    while (this._stalls.length && now - this._stalls[0] > 1500) this._stalls.shift();
+    if (moving) return;
+    if (!this._paceMs) {
+      if (this._stalls.length >= 3) {
+        this._setPace(16.67, now - (this._probeAt ?? -Infinity) < 1600 ? "probe-failed" : "stalls");
+        if (now - (this._probeAt ?? -Infinity) < 1600) this._probeCooldownUntil = now + 20000;
+        this._stalls.length = 0;
+        this._evenSince = now;
+      }
+      return;
+    }
+    if (iv > 19) this._evenSince = now;
+    if (now - (this._evenSince ?? now) > 6000 && now > (this._probeCooldownUntil ?? 0)) {
+      this._probeAt = now;
+      this._setPace(0, "probe");
+    }
+  }
+
+  _setPace(ms, reason) {
+    this._paceMs = ms;
+    this._lastPacedAt = null;
+    if (this._stalls) this._stalls.length = 0;
+    noteFlight("pace", { ms, reason });
+  }
+
+  /** DEV/Pass K — force pacing (ms; 0 = every tick) or null to return to adaptive. */
+  setFramePacing(ms = null) {
+    if (ms == null) {
+      this._paceForced = null;
+      return { adaptive: true, paceMs: this._paceMs };
+    }
+    this._paceForced = Math.max(0, Number(ms) || 0);
+    this._paceMs = this._paceForced;
+    this._lastPacedAt = null;
+    return { adaptive: false, paceMs: this._paceMs };
+  }
+
+  /** DEV — drop a labelled milestone into the flight dump (test harness marks). */
+  flightMark(label) {
+    noteFlight("mark", { label: String(label) });
+    return this._flight?.frameIndex ?? null;
+  }
+
   /** DEV — `window.__stageDebug("debugStopFade")`. */
   debugStopFade() {
     const n = this.vignettes?.length ?? 0;
@@ -3931,6 +4076,7 @@ export class StageExperience {
     this._floorMp = next;
     this._resizeSkipScene = true;
     this._floorResizeAt = (this.clock?.elapsedTime ?? 0) + 1;
+    noteFlight("floor-notch", { dir: "down", mp: next, cause: this._lastCause });
   }
 
   _raiseFloorNotch() {
@@ -3995,6 +4141,9 @@ export class StageExperience {
       this._floorIgnoreNext = false;
       return;
     }
+    // Pass K item 1.4 — background-work frames never drop a notch (and do
+    // not reset the recover timer either: they are not the scene's cost).
+    if (this._lastFrameExplained) return;
     if (frameMs >= FLOOR_DROP_MS) {
       this._dropFloorNotch();
       this._floorUnderSec = 0;
@@ -4976,6 +5125,7 @@ export class StageExperience {
 
   _completeIntroMotion() {
     if (this._introMotionComplete) return;
+    noteFlight("land", { t: Math.round(performance.now()) });
     this._introTrackT = 1;
     this._introMotionComplete = true;
     this.introComplete = true;
@@ -5477,8 +5627,22 @@ export class StageExperience {
         }
       }
     }
+    if (this._abNeonOff) {
+      for (let i = 0; i < (this.neon.entries?.length ?? 0); i += 1) {
+        const e = this.neon.entries[i];
+        if (e.tube) e.tube.visible = false;
+        if (e.floorGlow) e.floorGlow.visible = false;
+        if (stops?.[i]?.light) stops[i].light.intensity = 0;
+      }
+    }
     this._tickAccentLights(time, dt, s.index);
     this._tickContactShadows();
+    if (this._abPadsOff) {
+      for (const rig of this.contactShadows ?? []) {
+        if (rig.spotPad) rig.spotPad.visible = false;
+        if (rig.neonPad) rig.neonPad.visible = false;
+      }
+    }
     this._tickSidekickGroundFog(time);
 
     const neonPos =
@@ -6356,10 +6520,12 @@ export class StageExperience {
   }
 
   applyCrtBitmap(bitmap, state) {
+    this._countBitmap("applyCrtBitmap", bitmap);
     this._crtPlaceholder?.applyBitmap?.(bitmap, state);
   }
 
   applySidekickBitmap(bitmap) {
+    this._countBitmap("applySidekickBitmap", bitmap);
     if (
       this._sidekickBitmap &&
       this._sidekickBitmap !== bitmap &&
@@ -6402,6 +6568,7 @@ export class StageExperience {
   }
 
   applyDuoBitmap(bitmap, meta = null) {
+    this._countBitmap("applyDuoBitmap", bitmap);
     // Pass J item 6 — latency log: overlay change -> texture swapped here.
     if (meta) {
       if (!this._duoSyncLog) this._duoSyncLog = [];
@@ -7411,6 +7578,30 @@ export class StageExperience {
       requestAnimationFrame(this._animate);
       return;
     }
+    // Pass K — frame pacing. On a 120 Hz display rAF fires every 8.3 ms while
+    // a frame here costs ~14–17 ms of GPU: submissions outrun the GPU, the
+    // swap queue fills, and delivery turns bursty (7–11 ms frames, then a
+    // 30 + 60 ms pair; settled p95 81 ms at a 60 fps average) — and those
+    // spikes walk the governor down while idle. Skipping alternate ticks
+    // gives every frame a full 16.7 ms. A skipped tick issues no GL calls,
+    // so nothing is presented and the last frame simply stays up.
+    {
+      // Display tick estimate (raw rAF cadence, rendered or skipped).
+      const nowTick = performance.now();
+      if (this._lastTickAt != null) {
+        const tick = nowTick - this._lastTickAt;
+        if (tick > 2 && tick < 40) this._tickEma = this._tickEma == null ? tick : this._tickEma + (tick - this._tickEma) * 0.05;
+      }
+      this._lastTickAt = nowTick;
+    }
+    if (this._paceMs > 0) {
+      const now = performance.now();
+      if (this._lastPacedAt != null && now - this._lastPacedAt < this._paceMs - 4) {
+        requestAnimationFrame(this._animate);
+        return;
+      }
+      this._lastPacedAt = now;
+    }
     this.frameBudget?.begin();
     this._flight?.beginFrame();
     const wall = performance.now();
@@ -7430,6 +7621,7 @@ export class StageExperience {
       this._lastCause = label;
       this._lastGap = { ms: Math.round(since), tasks };
     }
+    this._lastFrameExplained = this._frameExplained(wall);
     this._observeFloor(frameMs, dt);
     const workT0 = performance.now();
     this._prePartMs = 0;
@@ -7591,11 +7783,16 @@ export class StageExperience {
       this._landFrameMs.push(+frameMs.toFixed(2));
     }
     this._tickRestDpr(Boolean(this.cameraRig?.state?.isSettled), this.cameraRig?.state?.index ?? this.current ?? 0);
+    const govLevelWas = this.perfGovernor?.level;
     this.perfGovernor?.tick?.(dt, {
       settled: Boolean(this.cameraRig?.state?.isSettled),
       fullDpr: this._fullPixelRatio,
-      frameMs
+      frameMs,
+      explained: this._lastFrameExplained
     });
+    if (this.perfGovernor && this.perfGovernor.level !== govLevelWas) {
+      noteFlight("governor", { from: govLevelWas, to: this.perfGovernor.level, emaMs: +this.perfGovernor.emaMs.toFixed(1), cause: this._lastCause });
+    }
     this._syncPerfGovernorSideEffects();
 
     if (this.ui?.readout) {
@@ -7838,6 +8035,8 @@ export class StageExperience {
     // anything hidden during the render that only gets restored afterward.
     this._flight?.sampleVisibilityAtPresent(skippedBeautyThisFrame);
     if (this._flight && !skippedBeautyThisFrame) this._noteTriangleSwing();
+    if (this._renderStamps) this._renderStamps.push(performance.now());
+    if (!skippedBeautyThisFrame) this._tickFramePacing(performance.now());
     if (!this._faderDismissed) {
       const progs = this.renderer.info.programs?.length ?? 0;
       const clean =
@@ -7918,6 +8117,8 @@ export class StageExperience {
         cpuSections: this._preSections.slice(),
         rigSections: (this._lastRigSteps || []).slice(),
         stopFade: this.neon?._stopFade ? this.neon._stopFade.map((f) => +f.toFixed(3)) : null,
+        composerW: this.post?.drawWidth ?? null,
+        explained: this._lastFrameExplained === true,
         theta: +(this.cameraRig?.state?.theta ?? 0).toFixed(4),
         stopInView: this._stopsInView(),
         // Pass I item 3/4 — whatever _noteGap captured since the last frame

@@ -77,6 +77,11 @@ export class StagePerfGovernor {
     const ramp = MOTION_DPR_RAMP_SEC > 0 ? safeDt / MOTION_DPR_RAMP_SEC : 1;
     this.motionDprFactor += (this._motionTarget - this.motionDprFactor) * Math.min(1, ramp);
 
+    // Pass K — a frame whose cost is background work (warm compile, held
+    // draw, late texture upload, bake) says nothing about the scene's steady
+    // cost: it must not move the EMA or the down/up hold timers. Motion DPR
+    // (above) still ramps.
+    if (opts.explained) return;
     const frameMs = Math.max(0, opts.frameMs || 16.7);
     const k = PERF_GOVERNOR_EMA_SEC > 0 ? 1 - Math.exp(-safeDt / PERF_GOVERNOR_EMA_SEC) : 1;
     this.emaMs += (frameMs - this.emaMs) * k;

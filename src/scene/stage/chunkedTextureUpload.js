@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { noteFlight } from "./flightRecorder.js";
 import { CHUNK_TEXTURE_EDGE, CHUNK_TEXTURE_ROWS } from "./constants.js";
 
 /**
@@ -344,6 +345,26 @@ export class ChunkedTextureQueue {
    * @returns {boolean} true if this frame uploaded something
    */
   step(renderer) {
+    const t0 = performance.now();
+    const job = this.jobs[0];
+    const result = this._step(renderer);
+    // Pass K — per-step cost by kind and texture size (a single step was
+    // measured at 238 ms on Dane's machine; the frame budget only checks
+    // between steps, so one step must itself stay cheap).
+    const ms = performance.now() - t0;
+    if (result && job) {
+      if (!this.stepCost) this.stepCost = {};
+      const key = `${result}:${job.w}`;
+      const row = this.stepCost[key] || (this.stepCost[key] = { n: 0, maxMs: 0, totalMs: 0 });
+      row.n += 1;
+      row.totalMs += ms;
+      if (ms > row.maxMs) row.maxMs = Math.round(ms * 10) / 10;
+      if (ms >= 8) noteFlight("chunk-step", { kind: result, w: job.w, h: job.h, ms: Math.round(ms) });
+    }
+    return result;
+  }
+
+  _step(renderer) {
     const job = this.jobs[0];
     if (!job || !renderer) return false;
     const gl = renderer.getContext();

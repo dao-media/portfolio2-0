@@ -33,7 +33,7 @@
 
 const RING_SIZE = 240;
 /** Notes kept for the whole session (not just inside snapshot windows). */
-const MILESTONES = new Set(["fader-dismiss", "fade-variants", "shadow-bake", "bake", "stop-cull", "cull-reapplied"]);
+const MILESTONES = new Set(["fader-dismiss", "fade-variants", "shadow-bake", "bake", "stop-cull", "cull-reapplied", "land", "mark", "chunk-step", "governor", "floor-notch", "pace"]);
 const MAX_SNAPSHOTS_PER_KIND = 6;
 const PRE_FRAMES = 120;
 const POST_FRAMES = 30;
@@ -90,6 +90,11 @@ export class FlightRecorder {
     /** Pass J — triangle drops the BLINK rule attributed to an intended hop exit. */
     this._explainedDrops = {};
     this._milestones = [];
+    /** Pass K — every frame, compact: [frame, t, frameMs, cpuWorkMs, cause, phase, composerW, explained]. */
+    this._frameLog = [];
+    /** Pass K — periodic settled samples (60-frame windows), FIFO. */
+    this._settledSamples = [];
+    this._lastSampleT = -Infinity;
     /** Pass J item 8 — top 3 frames per cpu / rig section, whole session. */
     this._sectionPeaks = {};
     this._prevProgramCount = renderer?.info?.programs?.length ?? 0;
@@ -439,6 +444,25 @@ export class FlightRecorder {
     }
     this.ring.push(record);
     if (this.ring.length > RING_SIZE) this.ring.shift();
+    if (this._frameLog.length < 40000) {
+      this._frameLog.push([
+        record.frame,
+        record.t,
+        record.frameMs,
+        record.cpuWorkMs,
+        record.frameCause,
+        record.phase,
+        ctx.composerW ?? null,
+        ctx.explained ? 1 : 0
+      ]);
+    }
+    // Pass K item 1.5 — a 60-frame window every 2 s while settled, so a
+    // sustained-heavy stretch (no single SLOW spike) still leaves evidence.
+    if (record.phase === "settled" && record.t - this._lastSampleT >= 2000) {
+      this._lastSampleT = record.t;
+      this._settledSamples.push({ kind: "SETTLED-SAMPLE", frame: record.frame, t: record.t, pre: this.ring.slice(-60) });
+      if (this._settledSamples.length > 40) this._settledSamples.shift();
+    }
 
     // GPU timer results land on a *later* frame than the one they measured
     // — patch the already-pushed record for that frame (and any already-
@@ -616,6 +640,9 @@ export class FlightRecorder {
       explainedDrops: { ...this._explainedDrops },
       milestones: this._milestones.slice(),
       sectionPeaks: this._sectionPeaks,
+      frameLogColumns: ["frame", "t", "frameMs", "cpuWorkMs", "cause", "phase", "composerW", "explained"],
+      frameLog: this._frameLog,
+      settledSamples: this._settledSamples,
       snapshotCounts: this.snapshots.reduce((acc, s) => {
         acc[s.kind] = (acc[s.kind] ?? 0) + 1;
         return acc;

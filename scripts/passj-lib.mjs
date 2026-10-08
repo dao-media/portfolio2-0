@@ -8,14 +8,32 @@ import { chromium } from "playwright";
 export const W = 1837;
 export const H = 1222;
 
-export async function bootStage({ port = 5190, holdMs = 15_000, query = "flight=1", log = console.log } = {}) {
-  const browser = await chromium.launch({
-    channel: "chrome",
-    headless: false,
-    args: [`--window-size=${W},${H + 87}`, "--window-position=0,0"]
-  });
-  const context = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 2 });
-  const page = await context.newPage();
+export async function bootStage({
+  port = 5190,
+  holdMs = 15_000,
+  query = "flight=1",
+  log = console.log,
+  // Pass K: a persistent profile keeps the HTTP cache warm between runs, so
+  // Enter appears as early as it does on Dane's machine (~6.5 s, not ~48 s).
+  profileDir = null
+} = {}) {
+  const launchArgs = [`--window-size=${W},${H + 87}`, "--window-position=0,0"];
+  let browser;
+  let context;
+  if (profileDir) {
+    context = await chromium.launchPersistentContext(profileDir, {
+      channel: "chrome",
+      headless: false,
+      args: launchArgs,
+      viewport: { width: W, height: H },
+      deviceScaleFactor: 2
+    });
+    browser = { close: () => context.close() };
+  } else {
+    browser = await chromium.launch({ channel: "chrome", headless: false, args: launchArgs });
+    context = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 2 });
+  }
+  const page = context.pages()[0] ?? (await context.newPage());
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
