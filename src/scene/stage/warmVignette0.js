@@ -151,6 +151,9 @@ export function stepVignette0Warm(stage, state) {
       return state;
     }
     bakeWarmMaterials(stage);
+    // Pass L L5 — Bust's dark environment before its own live step (still
+    // hidden), so Enter / the drop never wait on it and nothing swaps live.
+    stage._ensureStopEnv?.(0);
     stage._frameCause = "wet-bake";
     stage._skipBeauty = true;
     state.phase = "live";

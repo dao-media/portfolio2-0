@@ -126,6 +126,7 @@ import { restFidelityForIndex, restResource } from "./stage/restFidelity.js";
 import { createVignette0WarmState, stepVignette0Warm } from "./stage/warmVignette0.js";
 import { ChunkedTextureQueue } from "./stage/chunkedTextureUpload.js";
 import { SidekickGroundFog } from "./vignettes/SidekickGroundFog.js";
+import { captureStopDarkEnv } from "./stage/stopDarkEnv.js";
 import { STAGE_FLOOR_Y, measureBlockoutReferenceBounds, measureSceneBounds, snapAllGroupsToFloor, snapGroupToFloor } from "./vignettes/pcSceneBlockout.js";
 import { preloadPcTextures, setPcTextureLoadingManager } from "./vignettes/pcProductionMaterials.js";
 import { WaterCursor } from "../cursor/WaterCursor.js";
@@ -1340,6 +1341,14 @@ export class StageExperience {
           applied = true;
         }
         break;
+      case "apple-tree": {
+        const tree = this.vignettes?.[0]?.instance?.appleRoot;
+        if (tree) {
+          tree.visible = on;
+          applied = true;
+        }
+        break;
+      }
       case "dof":
         this._abDofOff = !on;
         applied = Boolean(this.post?.dofPass);
@@ -4099,52 +4108,8 @@ export class StageExperience {
     return { heavyMs: this._debugHeavyMs, governor: this.perfGovernor?.dump?.() ?? null, floorMp: this._floorMp ?? null };
   }
 
-  /**
-   * DEV/Pass K K2 — shadow-side fill study. Nothing here ships; default is
-   * "current". Variants (switchable live, restored exactly):
-   *  - "A": per-stop dark environment — a PMREM captured from the stop's own
-   *    position with everything hidden except that stop's emitters (its neon
-   *    tube + floor glow; lantern at Bust; CRT screen at Desktop; LCD at
-   *    Sidekick) over black, assigned as each of the stop's materials' own
-   *    envMap at the SAME intensity value it already uses (own envMapIntensity,
-   *    else scene.environmentIntensity).
-   *  - "B": RoomEnvironment at 0.25 (scene.environmentIntensity 0.6 → 0.25;
-   *    props carrying the studio env as their own envMap scaled by 0.25/0.6).
-   *    Touches a constrained value: comparison only.
-   *  - "C": N8AO on at rest (needs ?ao=1; off while the camera moves).
-   * @param {"current"|"A"|"B"|"C"} name
-   */
-  debugK2Variant(name = "current") {
-    this._k2Restore();
-    this._k2Variant = name;
-    if (name === "A") this._k2ApplyA();
-    else if (name === "B") this._k2ApplyB();
-    else if (name === "C") {
-      if (!this.post?.aoPass) return { variant: name, error: "N8AO needs ?ao=1" };
-      this._k2AoAtRest = true;
-    }
-    return { variant: name, envIntensity: this.scene.environmentIntensity, ao: Boolean(this.post?.aoPass?.enabled) };
-  }
-
-  _k2Restore() {
-    for (const [mat, saved] of this._k2Saved ?? []) {
-      mat.envMap = saved.envMap;
-      mat.envMapIntensity = saved.envMapIntensity;
-      mat.needsUpdate = true;
-    }
-    this._k2Saved = new Map();
-    if (this._k2EnvIntensity != null) this.scene.environmentIntensity = this._k2EnvIntensity;
-    this._k2EnvIntensity = null;
-    this._k2AoAtRest = false;
-    if (this.post?.aoPass) this.post.aoPass.enabled = false;
-  }
-
-  _k2Save(mat) {
-    if (!this._k2Saved.has(mat)) this._k2Saved.set(mat, { envMap: mat.envMap ?? null, envMapIntensity: mat.envMapIntensity });
-  }
-
-  /** Each stop's own emitters (meshes) for variant A. */
-  _k2Emitters(i) {
+  /** Pass L L5 — this stop's own emitters (meshes) for its dark environment. */
+  _stopEmitters(i) {
     const out = [];
     const e = this.neon?.entries?.[i];
     if (e?.tube) out.push(e.tube);
@@ -4158,74 +4123,63 @@ export class StageExperience {
     return out;
   }
 
-  _k2ApplyA() {
-    if (!this._k2EnvA) this._k2EnvA = [];
-    const pmrem = this._k2Pmrem || (this._k2Pmrem = new THREE.PMREMGenerator(this.renderer));
-    for (let i = 0; i < (this.vignettes?.length ?? 0); i += 1) {
-      if (!this._k2EnvA[i]) {
-        const keep = new Set();
-        for (const root of this._k2Emitters(i)) root.traverse((o) => keep.add(o));
-        const hidden = [];
-        this.scene.traverse((o) => {
-          if (!(o.isMesh || o.isPoints || o.isLine || o.isSprite) || keep.has(o) || !o.visible) return;
-          o.visible = false;
-          hidden.push(o);
-        });
-        // Stops may be culled by layer; enable everything on a temp mask.
-        const layerSaved = [];
-        for (const o of keep) {
-          layerSaved.push([o, o.layers.mask]);
-          o.layers.enableAll();
-        }
-        const bg = this.scene.background;
-        const env = this.scene.environment;
-        this.scene.background = new THREE.Color(0x000000);
-        this.scene.environment = null;
-        const center = new THREE.Vector3();
-        this.vignettes[i].group.getWorldPosition(center);
-        center.y += 1.0;
-        try {
-          this._k2EnvA[i] = pmrem.fromScene(this.scene, 0.04, 0.05, 60, { position: center }).texture;
-        } finally {
-          this.scene.background = bg;
-          this.scene.environment = env;
-          for (const o of hidden) o.visible = true;
-          for (const [o, m] of layerSaved) o.layers.mask = m;
-        }
-      }
-      const envTex = this._k2EnvA[i];
-      this.vignettes[i].group.traverse((obj) => {
-        if (!obj.isMesh || !obj.material) return;
-        for (const mat of Array.isArray(obj.material) ? obj.material : [obj.material]) {
-          if (!mat || !("envMap" in mat) || !mat.isMeshStandardMaterial) continue;
-          // Leave dedicated reflection captures (CRT glass cube, etc.) alone.
-          if (mat.envMap && mat.envMap !== this.liveEnv?.getStudioEnvironment?.()) continue;
-          this._k2Save(mat);
-          const intensity = mat.envMap ? mat.envMapIntensity : this.scene.environmentIntensity;
-          mat.envMap = envTex;
-          mat.envMapIntensity = intensity;
+  /**
+   * Pass L L5 (K2 variant A) — capture stop i's dark environment once. Stop
+   * 3's props that carry the studio env as their own envMap move to it at
+   * their own intensity. Returns the texture (or null without a renderer).
+   * @param {number} i
+   */
+  _ensureStopEnv(i) {
+    if (!this._stopEnvs) this._stopEnvs = [];
+    if (this._stopEnvs[i]) return this._stopEnvs[i];
+    const group = this.vignettes?.[i]?.group;
+    if (!this.renderer || !group) return null;
+    const pmrem = this._stopEnvPmrem || (this._stopEnvPmrem = new THREE.PMREMGenerator(this.renderer));
+    const t0 = performance.now();
+    const tex = captureStopDarkEnv(this.renderer, pmrem, this.scene, { group, emitters: this._stopEmitters(i) });
+    this._stopEnvs[i] = tex;
+    const studio = this.liveEnv?.getStudioEnvironment?.();
+    group.traverse((obj) => {
+      if (!obj.isMesh || !obj.material) return;
+      for (const mat of Array.isArray(obj.material) ? obj.material : [obj.material]) {
+        if (mat?.envMap && mat.envMap === studio) {
+          mat.envMap = tex;
           mat.needsUpdate = true;
         }
-      });
-    }
+      }
+    });
+    noteFlight("stop-env", { stop: i, ms: Math.round(performance.now() - t0) });
+    return tex;
   }
 
-  _k2ApplyB() {
-    const from = this.scene.environmentIntensity;
-    this._k2EnvIntensity = from;
-    const to = 0.25;
-    this.scene.environmentIntensity = to;
-    const studio = this.liveEnv?.getStudioEnvironment?.();
-    for (const v of this.vignettes ?? []) {
-      v.group.traverse((obj) => {
-        if (!obj.isMesh || !obj.material) return;
-        for (const mat of Array.isArray(obj.material) ? obj.material : [obj.material]) {
-          if (!mat?.envMap || mat.envMap !== studio) continue;
-          this._k2Save(mat);
-          mat.envMapIntensity = mat.envMapIntensity * (to / Math.max(1e-6, from));
-        }
-      });
+  /**
+   * Pass L L5 — scene.environment follows the visible stop (only one stop is
+   * ever visible). Studio env through the hold / until a stop's env exists.
+   */
+  _syncStopEnvironment() {
+    if (this._blackHoleActive || !this._stopEnvs) return;
+    const fades = this.neon?._stopFade;
+    if (!fades) return;
+    let best = -1;
+    let bv = 0;
+    for (let i = 0; i < fades.length; i += 1) {
+      if (fades[i] > bv) {
+        bv = fades[i];
+        best = i;
+      }
     }
+    if (best < 0) return;
+    const env = this._stopEnvs[best] ?? this.liveEnv?.getStudioEnvironment?.() ?? null;
+    if (env && this.scene.environment !== env) this.scene.environment = env;
+  }
+
+  /** DEV/Pass L — which environment each stop uses. */
+  debugStopEnv() {
+    return {
+      current: this.scene.environment?.name || (this.scene.environment === this.liveEnv?.getStudioEnvironment?.() ? "studio" : null),
+      built: (this._stopEnvs || []).map((t) => Boolean(t)),
+      environmentIntensity: this.scene.environmentIntensity
+    };
   }
 
   /**
@@ -4247,7 +4201,7 @@ export class StageExperience {
             mesh: obj.name || "(unnamed)",
             material: mat.name || "(unnamed)",
             envMapIntensity: +(+mat.envMapIntensity).toFixed(3),
-            source: mat.envMap === studio ? "studio RoomEnvironment" : mat.envMap?.isCubeTexture || mat.envMap?.mapping === THREE.CubeReflectionMapping ? "cube capture" : "other PMREM/texture"
+            source: mat.envMap === studio ? "studio RoomEnvironment" : String(mat.envMap?.name || "").startsWith("stop-dark-env") ? "stop dark env" : mat.envMap?.isCubeTexture || mat.envMap?.mapping === THREE.CubeReflectionMapping ? "cube capture" : "other PMREM/texture"
           });
         }
       });
@@ -6178,6 +6132,12 @@ export class StageExperience {
       return;
     }
 
+    // Pass L L5 — stops 1-3's dark environments, now that their emitters
+    // (CRT screen, LCD) exist. One per background slot.
+    for (let i = 1; i < (this.vignettes?.length ?? 0); i += 1) {
+      await this._bgSlot();
+      this._ensureStopEnv(i);
+    }
     noteFlight("mark", { label: this.introComplete ? "integrate-done-post-land" : "integrate-done-hold" });
     this._introIntegrationSettled = true;
     window.setTimeout(() => {
@@ -6215,6 +6175,7 @@ export class StageExperience {
         if (stops?.[i]?.light) stops[i].light.intensity = 0;
       }
     }
+    this._syncStopEnvironment();
     this._tickAccentLights(time, dt, s.index);
     this._tickContactShadows();
     if (this._abPadsOff) {
@@ -8495,7 +8456,6 @@ export class StageExperience {
     preT = this._markPre("water-cursor-rim", preT);
 
     this._tickCursorDof(dt);
-    if (this._k2AoAtRest && this.post?.aoPass) this.post.aoPass.enabled = Boolean(this.cameraRig?.state?.isSettled);
     if (this._descentPendingWarm && this.chunkedTextures?.pending) {
       // Black screen between the spiral ending and the drop arming: the
       // world is hidden (nothing presented), and the drop is waiting on

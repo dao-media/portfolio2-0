@@ -34,7 +34,7 @@
 
 const RING_SIZE = 240;
 /** Notes kept for the whole session (not just inside snapshot windows). */
-const MILESTONES = new Set(["fader-dismiss", "fade-variants", "shadow-bake", "bake", "stop-cull", "cull-reapplied", "land", "mark", "chunk-step", "governor", "floor-notch", "pace", "programs", "warm-step", "pace-stats", "compileHeldRoot-done", "enter-shown", "bust-ready", "bust-load", "warm-phase", "slow-frame", "bg-unit"]);
+const MILESTONES = new Set(["fader-dismiss", "fade-variants", "shadow-bake", "bake", "stop-cull", "cull-reapplied", "land", "mark", "chunk-step", "governor", "floor-notch", "pace", "programs", "warm-step", "pace-stats", "compileHeldRoot-done", "enter-shown", "bust-ready", "bust-load", "warm-phase", "slow-frame", "bg-unit", "stop-env"]);
 const MAX_SNAPSHOTS_PER_KIND = 6;
 const PRE_FRAMES = 120;
 const POST_FRAMES = 30;
