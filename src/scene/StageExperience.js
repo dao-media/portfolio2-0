@@ -396,6 +396,10 @@ const INACTIVE_MASK = 1 << INACTIVE_VIGNETTE_LAYER;
  * frames first (a failed probe costs one slow frame; back-off 20 → 160 s).
  */
 const PACE_PROBE_STILL_MS = 20000;
+/** Pass L — a floor drop needs this many unexplained >= FLOOR_DROP_MS frames… */
+const FLOOR_DROP_SUSTAIN = 3;
+/** …within this window (ms). Thresholds themselves are unchanged. */
+const FLOOR_DROP_WINDOW_MS = 1000;
 /** Pass K item 4 — CPU budget of one frame's chunk-upload slot (post-land). */
 const CHUNK_SLOT_MS = 3.5;
 /** Pass K item 4 — background work waits this long after the last input. */
@@ -3966,6 +3970,9 @@ export class StageExperience {
       const probing = now - (this._probeAt ?? -Infinity) < 1600;
       if (this._stalls.length >= 3 || (probing && this._stalls.length >= 1)) {
         if (probing) {
+          // Pass L: a stop that fails a probe stays paced for the session.
+          if (!this._probeFailedStops) this._probeFailedStops = new Set();
+          this._probeFailedStops.add(this._probeStop ?? this.cameraRig?.state?.index ?? this.current ?? 0);
           this._probeFails = (this._probeFails ?? 0) + 1;
           this._probeCooldownUntil = now + Math.min(160000, 20000 * 2 ** (this._probeFails - 1));
         }
@@ -3992,7 +3999,8 @@ export class StageExperience {
     this._evenWin.push([now, frameMs]);
     while (this._evenWin.length && now - this._evenWin[0][0] > 6000) this._evenWin.shift();
     const span = now - (this._evenSince ?? now);
-    if (span > PACE_PROBE_STILL_MS && now > (this._probeCooldownUntil ?? 0)) {
+    const stopNow = this.cameraRig?.state?.index ?? this.current ?? 0;
+    if (span > PACE_PROBE_STILL_MS && now > (this._probeCooldownUntil ?? 0) && !this._probeFailedStops?.has(stopNow)) {
       const limit = this._paceMs + refresh * 0.6;
       let uneven = 0;
       let worst = 0;
@@ -4003,6 +4011,7 @@ export class StageExperience {
       const share = uneven / Math.max(1, this._evenWin.length);
       if (share <= 0.05 && worst <= 33) {
         this._probeAt = now;
+        this._probeStop = stopNow;
         this._setPace(0, "probe", { refresh, unevenShare: +share.toFixed(3), worstMs: Math.round(worst) });
         this._evenWin.length = 0;
       }
@@ -4533,12 +4542,28 @@ export class StageExperience {
     // Pass K item 1.4 — background-work frames never drop a notch (and do
     // not reset the recover timer either: they are not the scene's cost).
     if (this._lastFrameExplained) return;
+    // Pass L (approved rule change, values unchanged): drop only on a
+    // sustained miss — FLOOR_DROP_SUSTAIN unexplained frames >= FLOOR_DROP_MS
+    // within FLOOR_DROP_WINDOW_MS — not on one late frame. At idle Bust one
+    // late display tick (paced frames 18-22 ms here) used to cost a notch.
     if (frameMs >= FLOOR_DROP_MS) {
-      this._dropFloorNotch();
+      const now = performance.now();
+      if (!this._floorMisses) this._floorMisses = [];
+      this._floorMisses.push(now);
+      while (this._floorMisses.length && now - this._floorMisses[0] > FLOOR_DROP_WINDOW_MS) this._floorMisses.shift();
       this._floorUnderSec = 0;
+      if (this._floorMisses.length >= FLOOR_DROP_SUSTAIN) {
+        this._floorMisses.length = 0;
+        this._dropFloorNotch();
+      }
       return;
     }
-    if (frameMs <= FLOOR_RECOVER_MS) {
+    // Pass L: while paced, "recovered" means the frame fits the pace
+    // interval (+1 ms) — 19-22 ms frames at 60 Hz pacing are not headroom,
+    // and counting them under FLOOR_RECOVER_MS (26) re-raised straight back
+    // into the notch that had just missed (the 1.3 <-> 1.6 MP cycle).
+    const recoverMs = this._paceMs > 0 ? this._paceMs + 1 : FLOOR_RECOVER_MS;
+    if (frameMs <= recoverMs) {
       this._floorUnderSec += Math.min(0.05, dt || 0);
       if (this._floorUnderSec >= FLOOR_RECOVER_SEC && this._floorMp != null) {
         this._raiseFloorNotch();
