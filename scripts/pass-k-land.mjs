@@ -6,8 +6,9 @@
  *
  * Usage: node scripts/pass-k-land.mjs <label> [--port 5192] [--warmup]
  *   --warmup  one throwaway boot first so the profile's HTTP cache is hot
+ *   --cold    fresh, empty Chrome profile (cold HTTP cache)
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { bootStage, W, H } from "./passj-lib.mjs";
 
@@ -15,17 +16,21 @@ const args = process.argv.slice(2);
 const label = args.find((a) => !a.startsWith("--") && !/^\d+$/.test(a)) || "land";
 const port = args.includes("--port") ? Number(args[args.indexOf("--port") + 1]) : 5192;
 const OUT = resolve("tmp/pass-k", label);
-const profileDir = resolve("tmp/pass-k/chrome-profile");
+const cold = args.includes("--cold");
+const profileDir = resolve(cold ? "tmp/pass-k/chrome-profile-cold" : "tmp/pass-k/chrome-profile");
+if (cold) rmSync(profileDir, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 
 if (args.includes("--warmup")) {
-  const warm = await bootStage({ port, holdMs: 0, profileDir });
+  // Always the warm profile: also warms Vite's own transform cache, so a
+  // --cold run measures the browser's cold HTTP cache, not a cold dev server.
+  const warm = await bootStage({ port, holdMs: 0, profileDir: resolve("tmp/pass-k/chrome-profile") });
   await warm.sleep(5000);
   await warm.browser.close();
 }
 
 const t0 = Date.now();
-const { browser, page, dbg, sleep, hopTo, shot } = await bootStage({ port, holdMs: 250, profileDir });
+const { browser, page, dbg, sleep, hopTo, shot, enterMs } = await bootStage({ port, holdMs: 250, profileDir });
 console.log(`landed after ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 await page.mouse.move(W * 0.12, H * 0.15);
 await sleep(10_000);
@@ -38,6 +43,8 @@ await dbg("flightMark", "sidekick-idle-start");
 await sleep(20_000);
 await dbg("flightMark", "sidekick-idle-end");
 await shot(`${OUT}/sidekick-settled.png`);
+const pacing = await dbg("debugPacingStats");
+const chunkCost = await dbg("debugChunkStepCost");
 const flight = await dbg("flightDump");
 writeFileSync(`${OUT}/flight.json`, JSON.stringify(flight));
 await browser.close();
@@ -66,6 +73,10 @@ const landEnd = ms("land-idle-end")?.frame ?? land;
 const skA = ms("sidekick-idle-start")?.frame ?? 0;
 const skB = ms("sidekick-idle-end")?.frame ?? 0;
 const result = {
+  enterMs,
+  pacing,
+  chunkCost,
+  paceSwitches: flight.milestones.filter((m) => m.kind === "pace").map((m) => [m.frame, m.data.ms, m.data.reason, m.data.stop]),
   landWindow: score("land -> +10 s", land, landEnd),
   sidekickWindow: score("Sidekick 20 s idle", skA, skB)
 };

@@ -33,7 +33,7 @@
 
 const RING_SIZE = 240;
 /** Notes kept for the whole session (not just inside snapshot windows). */
-const MILESTONES = new Set(["fader-dismiss", "fade-variants", "shadow-bake", "bake", "stop-cull", "cull-reapplied", "land", "mark", "chunk-step", "governor", "floor-notch", "pace"]);
+const MILESTONES = new Set(["fader-dismiss", "fade-variants", "shadow-bake", "bake", "stop-cull", "cull-reapplied", "land", "mark", "chunk-step", "governor", "floor-notch", "pace", "programs", "warm-step", "pace-stats", "compileHeldRoot-done"]);
 const MAX_SNAPSHOTS_PER_KIND = 6;
 const PRE_FRAMES = 120;
 const POST_FRAMES = 30;
@@ -98,6 +98,7 @@ export class FlightRecorder {
     /** Pass J item 8 — top 3 frames per cpu / rig section, whole session. */
     this._sectionPeaks = {};
     this._prevProgramCount = renderer?.info?.programs?.length ?? 0;
+    this._seenPrograms = new Set(renderer?.info?.programs ?? []);
     this._frameUploads = 0;
     this._frameResizes = [];
     this._frameBakes = [];
@@ -233,7 +234,7 @@ export class FlightRecorder {
   /** Any module can report an event into the frame currently being built. */
   note(kind, data) {
     this._pendingNotes.push({ kind, data, t: Math.round(performance.now()) });
-    if (MILESTONES.has(kind) && this._milestones.length < 100) {
+    if (MILESTONES.has(kind) && this._milestones.length < 1500) {
       this._milestones.push({ kind, data, frame: this.frameIndex, t: Math.round(performance.now()) });
     }
     if (kind === "texture-upload") this._frameUploads += 1;
@@ -354,6 +355,20 @@ export class FlightRecorder {
     const programs = this.renderer?.info?.programs?.length ?? 0;
     const programsCreated = Math.max(0, programs - this._prevProgramCount);
     this._prevProgramCount = programs;
+    // Pass K item 1 — name every program that appears, with its cache key,
+    // so a live link can be traced to the parameter that differed from the
+    // variant the warm-up compiled.
+    if (programsCreated > 0) {
+      const list = this.renderer.info.programs;
+      if (!this._seenPrograms) this._seenPrograms = new Set();
+      const fresh = [];
+      for (const p of list) {
+        if (this._seenPrograms.has(p)) continue;
+        this._seenPrograms.add(p);
+        if (fresh.length < 24) fresh.push({ name: p.name, key: p.cacheKey });
+      }
+      if (fresh.length) this.note("programs", { n: fresh.length, list: fresh });
+    }
 
     // Harvest whatever the PBO readback from ~1-2 frames ago turned up
     // (non-blocking — null if that fence hasn't signaled yet), then queue

@@ -44,9 +44,11 @@ export async function bootStage({
     page.evaluate(([m, x]) => (window.__stageDebug ? window.__stageDebug(m, ...x) : null), [method, a]);
   const sleep = (ms) => page.waitForTimeout(ms);
   await page.bringToFront();
+  const gotoAt = Date.now();
   await page.goto(`http://127.0.0.1:${port}/?${query}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#bh-enter:not([hidden])", { timeout: 240_000 });
-  log("enter visible");
+  const enterMs = Date.now() - gotoAt;
+  log(`enter visible after ${(enterMs / 1000).toFixed(1)} s`);
   await sleep(holdMs);
   await page.click("#bh-enter");
   await page.waitForSelector("body:not(.is-black-hole)", { timeout: 90_000 });
@@ -74,5 +76,5 @@ export async function bootStage({
     }
   }
   const shot = (path, clip) => page.screenshot({ path, ...(clip ? { clip } : {}) });
-  return { browser, page, dbg, sleep, hopTo, shot, waitSettled, errors };
+  return { browser, page, dbg, sleep, hopTo, shot, waitSettled, errors, enterMs };
 }

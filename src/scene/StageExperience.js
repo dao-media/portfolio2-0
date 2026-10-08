@@ -3854,50 +3854,101 @@ export class StageExperience {
   }
 
   /**
-   * Pass K — adaptive frame pacing (see the skip at the top of _animate).
-   * On a high-refresh display, pace to 60 Hz once unexplained stalls show up
-   * (>= 3 rendered intervals > 33 ms within 1.5 s); after 6 s of paced frames
-   * all on the even cadence, probe uncapped again, and if the stalls come
-   * straight back re-pace with a 20 s cooldown before the next probe. Never
-   * switches mid-hop. Every switch is a flight milestone ("pace").
+   * Pass K item 8 — adaptive frame pacing (see the skip at the top of
+   * _animate), driven by the rendered-frame meter: `frameMs` of frames that
+   * actually rendered (paced-skipped ticks never reach the meter). The
+   * display refresh comes from the raw rAF ticks, but as a low percentile —
+   * an EMA of ticks drifts up with every stall and once read a 120 Hz panel
+   * as 60 Hz, switching pacing off exactly when it was needed.
+   *
+   * Policy on a high-refresh display: start paced at 60 Hz once the world is
+   * visible (a full frame here costs more GPU than 8.3 ms). Uncapped gets a
+   * probe only while settled with no input, after 6 s of paced frames that
+   * all landed on the even cadence; >= 3 unexplained rendered frames > 33 ms
+   * within 1.5 s re-pace it (cooldown before the next probe doubles each
+   * time a probe fails, 20 s → 160 s). Switching *to* paced is allowed
+   * mid-motion (it only removes bursts); switching to uncapped is not.
+   * Every switch is a flight milestone ("pace") with its trigger.
+   * @param {number} frameMs rendered-frame interval
    * @param {number} now
    */
-  _tickFramePacing(now) {
-    const prev = this._lastRenderAt;
-    this._lastRenderAt = now;
-    if (prev == null || this._paceForced != null || !this.introComplete) return;
-    const iv = now - prev;
-    const highRefresh = (this._tickEma ?? 16.7) < 11;
+  _tickFramePacing(frameMs, now) {
+    if (this._paceForced != null || !this.world?.visible) return;
+    const refresh = this._displayRefreshMs();
+    if (refresh == null) return;
+    const highRefresh = refresh < 12;
+    const stop = this.cameraRig?.state?.index ?? this.current ?? 0;
+    if (this.introComplete && frameMs > 0 && frameMs < 1000) {
+      if (!this._paceStats) this._paceStats = {};
+      const row = this._paceStats[stop] || (this._paceStats[stop] = { pacedMs: 0, uncappedMs: 0, switches: 0 });
+      if (this._paceMs > 0) row.pacedMs += frameMs;
+      else row.uncappedMs += frameMs;
+    }
     if (!highRefresh) {
-      if (this._paceMs) this._setPace(0, "display-60hz");
+      if (this._paceMs) this._setPace(0, "display-60hz", { refresh });
       return;
     }
-    const moving = !this.cameraRig?.state?.isSettled;
+    if (this._paceMs == null) {
+      this._setPace(16.67, "initial-high-refresh", { refresh });
+      this._evenSince = now;
+      return;
+    }
     if (!this._stalls) this._stalls = [];
-    if (iv > 33 && !this._lastFrameExplained) this._stalls.push(now);
+    if (frameMs > 33 && !this._lastFrameExplained) this._stalls.push(now);
     while (this._stalls.length && now - this._stalls[0] > 1500) this._stalls.shift();
-    if (moving) return;
     if (!this._paceMs) {
       if (this._stalls.length >= 3) {
-        this._setPace(16.67, now - (this._probeAt ?? -Infinity) < 1600 ? "probe-failed" : "stalls");
-        if (now - (this._probeAt ?? -Infinity) < 1600) this._probeCooldownUntil = now + 20000;
-        this._stalls.length = 0;
+        const probing = now - (this._probeAt ?? -Infinity) < 1600;
+        if (probing) {
+          this._probeFails = (this._probeFails ?? 0) + 1;
+          this._probeCooldownUntil = now + Math.min(160000, 20000 * 2 ** (this._probeFails - 1));
+        }
+        this._setPace(16.67, probing ? "probe-failed" : "stalls", {
+          refresh,
+          stalls: this._stalls.length,
+          worstMs: Math.round(frameMs)
+        });
         this._evenSince = now;
       }
       return;
     }
-    if (iv > 19) this._evenSince = now;
+    if (frameMs > 19 || this._lastFrameExplained) this._evenSince = now;
+    const still = Boolean(this.cameraRig?.state?.isSettled) && now - (this._lastInputAt ?? -Infinity) > 1000;
+    if (!still) {
+      this._evenSince = Math.max(this._evenSince ?? now, now - 4000);
+      return;
+    }
     if (now - (this._evenSince ?? now) > 6000 && now > (this._probeCooldownUntil ?? 0)) {
       this._probeAt = now;
-      this._setPace(0, "probe");
+      this._setPace(0, "probe", { refresh, evenMs: Math.round(now - this._evenSince) });
     }
   }
 
-  _setPace(ms, reason) {
+  /** Display refresh interval from raw rAF ticks (20th percentile of the last 120). */
+  _displayRefreshMs() {
+    const ticks = this._rawTicks;
+    if (!ticks || ticks.length < 60) return null;
+    const sorted = ticks.slice().sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length * 0.2)];
+  }
+
+  /** DEV/Pass K — time spent paced vs uncapped per stop, plus current state. */
+  debugPacingStats() {
+    const out = {};
+    for (const [stop, row] of Object.entries(this._paceStats || {})) {
+      out[stop] = { pacedS: +(row.pacedMs / 1000).toFixed(1), uncappedS: +(row.uncappedMs / 1000).toFixed(1), switches: row.switches };
+    }
+    return { paceMs: this._paceMs ?? null, refreshMs: this._displayRefreshMs(), probeFails: this._probeFails ?? 0, perStop: out };
+  }
+
+  _setPace(ms, reason, info = {}) {
     this._paceMs = ms;
     this._lastPacedAt = null;
     if (this._stalls) this._stalls.length = 0;
-    noteFlight("pace", { ms, reason });
+    const stop = this.cameraRig?.state?.index ?? this.current ?? 0;
+    const row = this._paceStats?.[stop];
+    if (row) row.switches += 1;
+    noteFlight("pace", { ms, reason, stop, settled: Boolean(this.cameraRig?.state?.isSettled), ...info });
   }
 
   /** DEV/Pass K — force pacing (ms; 0 = every tick) or null to return to adaptive. */
@@ -6620,6 +6671,7 @@ export class StageExperience {
   }
 
   handleHostPointer(msg) {
+    this._lastInputAt = performance.now();
     const event = this._hostPointerEvent(msg);
     this._updateHoverFromClient(event.clientX, event.clientY);
     if (this.cameraRig && !this.reducedMotion) {
@@ -6630,6 +6682,7 @@ export class StageExperience {
   }
 
   handleHostWheel(msg) {
+    this._lastInputAt = performance.now();
     this._onWheel?.({
       ...this._hostPointerEvent(msg),
       deltaY: msg.deltaY || 0,
@@ -6638,6 +6691,7 @@ export class StageExperience {
   }
 
   handleHostPointerDown(msg) {
+    this._lastInputAt = performance.now();
     const event = this._hostPointerEvent(msg);
     this.waterCursor?.setPressed?.(true);
     if (this._blackHoleActive && this._onBlackHolePointerDown) {
@@ -6657,6 +6711,7 @@ export class StageExperience {
   }
 
   handleHostKey(msg) {
+    this._lastInputAt = performance.now();
     const event = {
       key: msg.key,
       shiftKey: Boolean(msg.shiftKey),
@@ -6758,6 +6813,7 @@ export class StageExperience {
   }
 
   _updatePointerFromClient(clientX, clientY) {
+    this._lastInputAt = performance.now();
     const rect = this._getCanvasRect();
     const ndc = pointerNdcFromClient(clientX, clientY, rect);
     this.pointer.x = ndc.x;
@@ -7590,7 +7646,11 @@ export class StageExperience {
       const nowTick = performance.now();
       if (this._lastTickAt != null) {
         const tick = nowTick - this._lastTickAt;
-        if (tick > 2 && tick < 40) this._tickEma = this._tickEma == null ? tick : this._tickEma + (tick - this._tickEma) * 0.05;
+        if (!this._rawTicks) this._rawTicks = [];
+        if (tick > 2 && tick < 100) {
+          this._rawTicks.push(tick);
+          if (this._rawTicks.length > 120) this._rawTicks.shift();
+        }
       }
       this._lastTickAt = nowTick;
     }
@@ -8036,7 +8096,7 @@ export class StageExperience {
     this._flight?.sampleVisibilityAtPresent(skippedBeautyThisFrame);
     if (this._flight && !skippedBeautyThisFrame) this._noteTriangleSwing();
     if (this._renderStamps) this._renderStamps.push(performance.now());
-    if (!skippedBeautyThisFrame) this._tickFramePacing(performance.now());
+    if (!skippedBeautyThisFrame) this._tickFramePacing(frameMs, performance.now());
     if (!this._faderDismissed) {
       const progs = this.renderer.info.programs?.length ?? 0;
       const clean =
