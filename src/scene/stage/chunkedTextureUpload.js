@@ -75,6 +75,20 @@ function isMipmapFilter(mode) {
   );
 }
 
+/** Pass K — a readable name for a chunked texture (flight log). */
+/** Pass K item 5 — target CPU cost of one strip step, and the first strip's height. */
+const STRIP_TARGET_MS = 1.5;
+const STRIP_FIRST_ROWS = 32;
+
+export function chunkLabel(texture) {
+  if (!texture) return "";
+  if (texture.userData?.__label) return texture.userData.__label;
+  if (texture.name) return texture.name;
+  const src = texture.userData?.__chunkSource ?? texture.source?.data;
+  const url = src?.src || texture.userData?.url || "";
+  return url ? String(url).split("/").pop() : texture.uuid.slice(0, 8);
+}
+
 export function isChunkCandidate(texture) {
   if (!texture?.isTexture || texture.isDataTexture || texture.isRenderTargetTexture) return false;
   if (texture.userData.__chunkClaimed || texture.userData.__chunkDone) return false;
@@ -359,7 +373,17 @@ export class ChunkedTextureQueue {
       row.n += 1;
       row.totalMs += ms;
       if (ms > row.maxMs) row.maxMs = Math.round(ms * 10) / 10;
-      if (ms >= 8) noteFlight("chunk-step", { kind: result, w: job.w, h: job.h, ms: Math.round(ms) });
+      if (ms >= 8) {
+        noteFlight("chunk-step", {
+          kind: result,
+          w: job.w,
+          h: job.h,
+          ms: Math.round(ms),
+          blitMs: job._lastBlitMs != null ? Math.round(job._lastBlitMs) : null,
+          name: chunkLabel(job.texture),
+          src: job.source?.constructor?.name ?? null
+        });
+      }
     }
     return result;
   }
@@ -400,8 +424,20 @@ export class ChunkedTextureQueue {
     if (!job.coarse) {
       const mip = mipSize(job.w, job.h, 32);
       const crop = Math.min(32, job.w, job.h);
-      const tile = this._blit(job, 0, 0, crop, crop);
-      gl.texImage2D(gl.TEXTURE_2D, mip.level, job.internal, gl.RGBA, gl.UNSIGNED_BYTE, tile);
+      const tb = performance.now();
+      if (this._direct(job)) {
+        // Pass K item 5 — straight from the ImageBitmap (top-left crop, as
+        // before). The 2D-canvas blit's first draw read the *whole* 4096²
+        // bitmap back (21.8 ms standalone, 100–301 ms measured in the live
+        // stage on the first late step); a direct sub-rectangle upload
+        // never does (1.9 ms first strip, 0.8 ms after — see README).
+        gl.texImage2D(gl.TEXTURE_2D, mip.level, job.internal, crop, crop, 0, gl.RGBA, gl.UNSIGNED_BYTE, job.source);
+        job._lastBlitMs = 0;
+      } else {
+        const tile = this._blit(job, 0, 0, crop, crop);
+        job._lastBlitMs = performance.now() - tb;
+        gl.texImage2D(gl.TEXTURE_2D, mip.level, job.internal, gl.RGBA, gl.UNSIGNED_BYTE, tile);
+      }
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL, mip.level);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, mip.level);
       job.coarse = true;
@@ -415,13 +451,33 @@ export class ChunkedTextureQueue {
     }
 
     const tileW = job.w;
-    const tileH = CHUNK_TEXTURE_ROWS;
+    // Pass K item 5 — strip height adapts per texture so one step fits the
+    // frame budget: ms/row is measured on every strip (it ranged ~0.03–0.3
+    // ms/row for a 4096-wide map depending on GPU contention — a fixed 128
+    // rows cost 15–40 ms post-land, up to 102 ms pre-land).
+    const tileH = job.rows ?? Math.min(CHUNK_TEXTURE_ROWS, STRIP_FIRST_ROWS);
+    const stripT0 = performance.now();
     const w = Math.min(tileW, job.w - job.x);
     const h = Math.min(tileH, job.h - job.y);
-    const tile = this._blit(job, job.x, job.y, w, h);
-    const flip = job.texture.flipY !== false;
-    const destY = flip ? job.h - (job.y + h) : job.y;
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, job.x, destY, gl.RGBA, gl.UNSIGNED_BYTE, tile);
+    if (this._direct(job)) {
+      gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, job.x);
+      gl.pixelStorei(gl.UNPACK_SKIP_ROWS, job.y);
+      try {
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, job.x, job.y, w, h, gl.RGBA, gl.UNSIGNED_BYTE, job.source);
+      } finally {
+        gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0);
+        gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
+      }
+    } else {
+      const tile = this._blit(job, job.x, job.y, w, h);
+      const flip = job.texture.flipY !== false;
+      const destY = flip ? job.h - (job.y + h) : job.y;
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, job.x, destY, gl.RGBA, gl.UNSIGNED_BYTE, tile);
+    }
+    const perRow = (performance.now() - stripT0) / Math.max(1, h);
+    job.msPerRow = job.msPerRow == null ? perRow : job.msPerRow * 0.5 + perRow * 0.5;
+    const fit = Math.floor(STRIP_TARGET_MS / Math.max(1e-4, job.msPerRow) / 8) * 8;
+    job.rows = Math.max(8, Math.min(CHUNK_TEXTURE_ROWS * 2, fit));
     job.x += w;
     if (job.x >= job.w) {
       job.x = 0;
@@ -429,6 +485,23 @@ export class ChunkedTextureQueue {
     }
     if (job.y >= job.h) this._finish(renderer, job);
     return "strip";
+  }
+
+  /**
+   * Pass K item 5 — upload sub-rectangles straight from the source instead
+   * of via the 2D-canvas tile: only for an ImageBitmap that needs no flip
+   * (WebGL ignores UNPACK_FLIP_Y for ImageBitmaps; the canvas path is what
+   * implements flipY:true) on a WebGL2 context (UNPACK_SKIP_* on DOM sources).
+   * GLTF maps are all flipY:false ImageBitmaps in the worker.
+   * @param {object} job
+   */
+  _direct(job) {
+    return (
+      typeof ImageBitmap !== "undefined" &&
+      job.source instanceof ImageBitmap &&
+      job.texture.flipY === false &&
+      typeof WebGL2RenderingContext !== "undefined"
+    );
   }
 
   /**

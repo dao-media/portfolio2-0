@@ -359,6 +359,7 @@ export async function warmMeshesChunked(root, renderer, yieldFrame, onSlowTextur
           skipped += 1;
           continue;
         }
+        if (!tex.userData.__label) tex.userData.__label = `${root?.name || "root"}/${mat.name || "mat"}.${key}`;
         tex.needsUpdate = true;
         // DEV — separates GPU sync-point wait from actual upload cost for the
         // known-slow Ishtar Gate texture (diagnosis only; gl.finish() is not
