@@ -2272,11 +2272,19 @@ export class StageExperience {
     if (!visible) return;
     const light = this.neon?.stopLights?.[2]?.light;
     const maxL = this.neon?._maxLight || 1;
+    if (!this._fogLights) this._fogLights = [{ position: new THREE.Vector3(), color: new THREE.Color(), level: 0 }];
+    const L = this._fogLights[0];
+    if (light) {
+      light.getWorldPosition(L.position);
+      L.color.copy(light.color);
+      L.level = light.intensity / maxL;
+    } else {
+      L.level = 0;
+    }
     fog.update({
       time,
       floorY: STAGE_FLOOR_Y,
-      neonColor: this.neon?.entries?.[2]?.dominant ?? null,
-      neonLevel: light ? light.intensity / maxL : 0,
+      lights: this._fogLights,
       phoneRoot: this.vignettes?.[2]?.instance?.sidekickRoot ?? null
     });
   }
@@ -2288,6 +2296,34 @@ export class StageExperience {
 
   getGroundFogParams() {
     return this.groundFog?.getParams() ?? null;
+  }
+
+  /**
+   * DEV/Pass K K3 — the fog footprint (a floor disc around the phone)
+   * projected to CSS px: { x, y, w, h, cx, cy }.
+   */
+  debugGroundFogScreenBox() {
+    const f = this.groundFog;
+    if (!f) return null;
+    const u = f.material.uniforms;
+    const r = f.footprintRadius?.() ?? (f.params.radius + f.params.sizeMax * 0.5);
+    const c = (u.uPhoneCenter ?? u.uBoxCenter).value;
+    const css = this._viewportCssSize();
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const v = new THREE.Vector3();
+    for (let k = 0; k < 16; k += 1) {
+      const a = (k / 16) * Math.PI * 2;
+      v.set(c.x + Math.cos(a) * r, STAGE_FLOOR_Y, c.z + Math.sin(a) * r).project(this.camera);
+      const x = (v.x * 0.5 + 0.5) * css.w;
+      const y = (1 - (v.y * 0.5 + 0.5)) * css.h;
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    }
+    v.set(c.x, STAGE_FLOOR_Y, c.z).project(this.camera);
+    return {
+      x: Math.round(minX), y: Math.round(minY), w: Math.round(maxX - minX), h: Math.round(maxY - minY),
+      cx: Math.round((v.x * 0.5 + 0.5) * css.w), cy: Math.round((1 - (v.y * 0.5 + 0.5)) * css.h), radius: +r.toFixed(2)
+    };
   }
 
   /** DEV — ground fog placement / state. */
@@ -2304,9 +2340,12 @@ export class StageExperience {
       meshWorld: w.toArray().map((v) => +v.toFixed(3)),
       groupWorldY: +(this.vignettes?.[2]?.group?.position?.y ?? 0).toFixed(3),
       floorY: u.uFloorY.value,
-      box: { center: u.uBoxCenter.value.toArray().map((v) => +v.toFixed(3)), half: u.uBoxHalf.value.toArray().map((v) => +v.toFixed(3)), on: u.uBoxOn.value },
+      phone: { center: u.uPhoneCenter.value.toArray().map((v) => +v.toFixed(3)), half: u.uPhoneHalf.value.toArray().map((v) => +v.toFixed(3)), on: u.uPhoneOn.value },
+      radius: +u.uRadius.value.toFixed(3),
+      H: +u.uH.value.toFixed(3),
+      top: +u.uTop.value.toFixed(3),
       opacity: u.uOpacity.value,
-      color: u.uColor.value.toArray().map((v) => +v.toFixed(3)),
+      light0: u.uLightColor.value[0].toArray().map((v) => +v.toFixed(3)),
       density: u.uDensity.value
     };
   }

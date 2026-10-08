@@ -1,21 +1,20 @@
 import { GROUND_FOG_DEFAULTS } from "../scene/vignettes/SidekickGroundFog.js";
 
 /**
- * Pass J item 7 — live Sidekick ground-fog panel. Shift+K. The worker owns
+ * Pass J item 7 / Pass K K3 — live Sidekick ground-fog panel. Shift+K. The worker owns
  * the fog; this panel only posts param patches (and logs the full set on
  * every change so a FINALIZE is a copy-paste into GROUND_FOG_DEFAULTS).
  */
 const SLIDERS = [
-  ["density", 0, 0.5, 0.01],
-  ["brightness", 0, 1, 0.01],
-  ["tintMix", 0, 1, 0.01],
-  ["radius", 0.5, 4, 0.05],
-  ["top", 0.2, 1.5, 0.01],
-  ["floorFeather", 0.02, 0.5, 0.01],
-  ["propSoft", 0.02, 0.5, 0.01],
-  ["squash", 0.2, 1, 0.01],
+  ["density", 0, 8, 0.05],
+  ["height", 0.05, 0.6, 0.01],
+  ["extent", 1.5, 6, 0.05],
+  ["noiseScale", 0.3, 5, 0.05],
   ["speed", 0, 4, 0.05],
-  ["count", 4, 48, 1]
+  ["edgeSoft", 0.1, 0.9, 0.01],
+  ["lightGain", 0, 4, 0.05],
+  ["propSoft", 0.02, 0.5, 0.01],
+  ["steps", 4, 12, 1]
 ];
 
 export class GroundFogTuner {
