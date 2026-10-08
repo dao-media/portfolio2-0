@@ -1341,6 +1341,56 @@ export class StageExperience {
           applied = true;
         }
         break;
+      case "apple-tree-noshadow": {
+        // DEV — same material, but the tree stops sampling shadow maps.
+        const tree = this.vignettes?.[0]?.instance?.appleRoot;
+        if (tree) {
+          tree.traverse((o) => {
+            if (!o.isMesh) return;
+            o.receiveShadow = on;
+            for (const m of [].concat(o.material)) if (m) m.needsUpdate = true;
+          });
+          applied = true;
+        }
+        break;
+      }
+      case "apple-tree-frontside": {
+        // DEV — same material, front faces only (the GLB is doubleSided).
+        const tree = this.vignettes?.[0]?.instance?.appleRoot;
+        if (tree) {
+          tree.traverse((o) => {
+            if (!o.isMesh) return;
+            for (const m of [].concat(o.material)) {
+              if (!m) continue;
+              if (m.userData._abSide == null) m.userData._abSide = m.side;
+              m.side = on ? m.userData._abSide : THREE.FrontSide;
+              m.needsUpdate = true;
+            }
+          });
+          applied = true;
+        }
+        break;
+      }
+      case "apple-tree-cheap": {
+        // DEV — same geometry, trivial shading (unlit, no texture): splits the
+        // tree's cost into geometry/raster vs per-pixel shading.
+        const tree = this.vignettes?.[0]?.instance?.appleRoot;
+        if (tree) {
+          if (!this._abCheapMat) this._abCheapMat = new THREE.MeshBasicMaterial({ color: 0x334422 });
+          tree.traverse((o) => {
+            if (!o.isMesh) return;
+            if (!on) {
+              if (!o.userData._abMat) o.userData._abMat = o.material;
+              o.material = this._abCheapMat;
+            } else if (o.userData._abMat) {
+              o.material = o.userData._abMat;
+              delete o.userData._abMat;
+            }
+          });
+          applied = true;
+        }
+        break;
+      }
       case "apple-tree": {
         const tree = this.vignettes?.[0]?.instance?.appleRoot;
         if (tree) {

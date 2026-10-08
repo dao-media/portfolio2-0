@@ -29,8 +29,17 @@ export const GLOBE = Object.freeze({
   emissiveIntensity: 0.92,
   /** Atmosphere colour; halo peak at the limb and inner-scattering peak. Kept low: a wide band over the bloom threshold washed the whole disc blue. */
   rim: 0x6aa6ff,
-  rimPeak: 0.55,
-  innerPeak: 0.28,
+  rimPeak: 0.32,
+  innerPeak: 0.1,
+  /**
+   * The globe's own light (Dane: the shelf needs more of it). The neon
+   * default (reach 2.75 m, decay 3.5) spent 1.6 m of its reach inside the
+   * sphere and barely touched the shelf 2-3 m out; same shape as Bust's
+   * lantern instead. Neon stops keep the global values.
+   */
+  lightMax: 45,
+  lightDistance: 9,
+  lightDecay: 1.75,
   /** Floor pool scale vs a tube's (the globe is ~3.6x the old one). */
   poolScale: 3.4,
   /** Seconds per revolution. */
@@ -116,6 +125,7 @@ export function makeNeonGlobe(def = {}) {
   root.userData.tubeLength = GLOBE.centerY + GLOBE.radius;
   root.userData.flameLocalY = GLOBE.centerY;
   root.userData.globeWarm = new THREE.Color(GLOBE.light);
+  root.userData.globeLight = { maxIntensity: GLOBE.lightMax, distance: GLOBE.lightDistance, decay: GLOBE.lightDecay };
   root.position.set(xz[0], 0, xz[1]);
 
   const tex = new THREE.TextureLoader(def.loadingManager ?? undefined).load(GLOBE_URL);

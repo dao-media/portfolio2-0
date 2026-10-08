@@ -290,7 +290,7 @@ export class NeonSystem {
     vignette.group.updateMatrixWorld(true);
     tube.getWorldPosition(_TUBE_WORLD);
 
-    const lanternKnobs = tube.userData?.lanternLight ?? null;
+    const lanternKnobs = tube.userData?.lanternLight ?? tube.userData?.globeLight ?? null;
     const light = new THREE.PointLight(
       dominant,
       0,
@@ -709,7 +709,8 @@ export class NeonSystem {
       }
 
       const light = this.stopLights[i].light;
-      light.intensity = displayLevel * this._maxLight;
+      const maxL = isGlobe ? tube.userData.globeLight?.maxIntensity ?? this._maxLight : this._maxLight;
+      light.intensity = displayLevel * maxL;
       // Same shadow #define on every stop. Only the settled tube contributes.
       const shouldCast =
         i === activeIndex &&
@@ -733,7 +734,7 @@ export class NeonSystem {
       // Portal stops contribute no neon fog — daylight Spot owns in-scatter.
       light.userData.fogIntensity = portalLit
         ? 0
-        : arriveLevel * this._maxLight;
+        : arriveLevel * maxL;
       // Cast light MUST match the visible tube — same mid-UV sample as emissive
       // (map.offset.y = _gradientPhase). No slow phase / rate-cap lag.
       if (isGlobe) {
