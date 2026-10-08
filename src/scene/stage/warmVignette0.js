@@ -263,7 +263,11 @@ export function stepVignette0Warm(stage, state) {
     // queue (every upload branch treats that as "don't touch this frame")
     // for as long as this whole sequence ran, not just the frames that
     // actually needed it.
-    if (step.kind === "scene") stage._frameCause = "compile";
+    if (step.kind === "scene" && !state._liveCompilePending) stage._frameCause = "compile";
+    if (state._liveStepNoted !== state._liveAt) {
+      state._liveStepNoted = state._liveAt;
+      noteFlight("warm-step", { at: state._liveAt, kind: step.kind, stop: step.stop ?? null, notch: step.notch ?? null, bustReady: state.bustReady });
+    }
     if (step.kind === "env") {
       const desktop = stage.vignettes?.[1]?.instance;
       if (!desktop?.glassMesh || !stage.liveEnv) {
@@ -277,12 +281,43 @@ export function stepVignette0Warm(stage, state) {
     }
     if (step.kind === "scene") {
       bakeWarmMaterials(stage);
+      // Pass K item 3 — Bust's own step (still hidden, pre-drop) keeps the
+      // full composer draw: it is free there and it also links every post
+      // pass. Every later stop runs on frames the user may be watching:
+      // await its compileAsync (polled each tick, never a forced link
+      // mid-frame), then one tiny beauty-only draw per tick (live, authored,
+      // fade) — enough to upload buffers/textures, bake its static shadow
+      // and build the blend pipelines. No full-size composer draw, no
+      // gl.finish.
+      const tiny = state.bustReady;
       if (!state._liveReady) {
-        compileLiveScene(stage, step);
         state._liveReady = true;
+        state._liveCompiled = false;
+        state._liveDrawAt = 0;
+        state._liveCompilePending = true;
+        const t0 = performance.now();
+        compileLiveScene(stage, step).then(
+          () => {
+            state._liveCompiled = true;
+            state._liveCompilePending = false;
+            noteFlight("warm-step", { at: state._liveAt, kind: "scene-linked", stop: step.stop, ms: Math.round(performance.now() - t0) });
+          },
+          () => {
+            state._liveCompiled = true;
+            state._liveCompilePending = false;
+          }
+        );
         return state;
       }
-      drawLiveScene(stage, step);
+      if (!state._liveCompiled) return state;
+      if (tiny) {
+        stage._frameCause = "warm-draw";
+        drawLiveSceneTiny(stage, step, state._liveDrawAt);
+        state._liveDrawAt += 1;
+        if (state._liveDrawAt < (step.hop ? 1 : 3)) return state;
+      } else {
+        drawLiveScene(stage, step);
+      }
       state._liveReady = false;
       state._liveAt += 1;
       return state;
@@ -380,12 +415,10 @@ function liveSteps() {
   for (let stop = 1; stop < 4; stop += 1) {
     deferred.push({ kind: "scene", stop, hop: false, from: stop });
   }
-  for (let from = 0; from < 4; from += 1) {
-    for (let to = 0; to < 4; to += 1) {
-      if (from === to) continue;
-      deferred.push({ kind: "scene", stop: to, hop: true, from });
-    }
-  }
+  // Pass K item 3 — the 12 from→to hop combos are gone: each was a full
+  // composer draw of two stops at once, and the per-stop live/authored/fade
+  // draws above already build every program and pipeline a hop uses (a hop
+  // shows the same two stops' materials in those same states).
   deferred.push({ kind: "hole" }, { kind: "smaa" });
   for (let stop = 0; stop < 4; stop += 1) deferred.push({ kind: "edge", stop });
   deferred.push({ kind: "duo" }, { kind: "lens" });
@@ -580,6 +613,68 @@ function drawLiveScene(stage, step) {
     }
   });
   stage.renderer?.getContext()?.finish?.();
+}
+
+/** Pass K item 3 — 64×64 offscreen target with the composer input's format. */
+let _tinyTarget = null;
+function tinyTarget(stage) {
+  const input = composerTarget(stage);
+  if (!input) return null;
+  const tex = input.texture;
+  if (
+    !_tinyTarget ||
+    _tinyTarget.texture.type !== tex.type ||
+    _tinyTarget.texture.format !== tex.format ||
+    _tinyTarget.samples !== input.samples
+  ) {
+    _tinyTarget?.dispose();
+    _tinyTarget = new THREE.WebGLRenderTarget(64, 64, {
+      type: tex.type,
+      format: tex.format,
+      colorSpace: tex.colorSpace,
+      depthBuffer: input.depthBuffer,
+      stencilBuffer: input.stencilBuffer,
+      samples: input.samples
+    });
+  }
+  return _tinyTarget;
+}
+
+/**
+ * One tiny beauty-only draw of `step.stop` at its live pose: variant 0 =
+ * live state (+ its static shadow bake), 1 = authored opaque, 2 = hop fade.
+ */
+function drawLiveSceneTiny(stage, step, variant) {
+  const renderer = stage.renderer;
+  const target = tinyTarget(stage);
+  if (!renderer || !stage.scene || !stage.camera || !target) return;
+  withLivePose(stage, step, () => {
+    const prevTarget = renderer.getRenderTarget();
+    const prevNeeds = renderer.shadowMap.needsUpdate;
+    if (variant === 0 && !step.hop) {
+      renderer.shadowMap.needsUpdate = true;
+      const light = stage.neon?.stopLights?.[step.stop]?.light;
+      if (light?.castShadow && light.shadow && !light.shadow.map) {
+        light.shadow.needsUpdate = true;
+        light.userData.shadowBakes = (light.userData.shadowBakes ?? 0) + 1;
+        light.userData.shadowPrebaked = true;
+        noteFlight("shadow-bake", { light: light.name, reason: "warm" });
+      }
+    }
+    const group = stage.vignettes?.[step.stop]?.group;
+    const draw = () => renderer.render(stage.scene, stage.camera);
+    renderer.setRenderTarget(target);
+    try {
+      if (variant === 1) withAuthoredVariant(group, draw);
+      else if (variant === 2) withFadeVariant(group, draw);
+      else draw();
+    } catch (error) {
+      console.warn("[warmVignette0] tiny draw failed:", error);
+    } finally {
+      renderer.setRenderTarget(prevTarget);
+      renderer.shadowMap.needsUpdate = prevNeeds;
+    }
+  });
 }
 
 function drawHoleFrame(stage) {
