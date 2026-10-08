@@ -16,12 +16,13 @@ import { BLACK_HOLE_HORIZON_FRAC, BLACK_HOLE_WORLD_DIAMETER } from "./BlackHoleM
 /**
  * View-elevation sine of the horizon blend on the landed vignettes.
  * The night sky is black at {@link SKY_HORIZON_LOW} (just under the
- * horizon) and full by {@link SKY_HORIZON_HIGH} (~11°). Stars fade
- * inside that same band. The flight turns that fade off so the corner
+ * horizon) and full by {@link SKY_HORIZON_HIGH} (~20°). Stars fade
+ * inside that same band. Pass J widened it from 0.2 (~11°) so star density
+ * ramps up over a broad band instead of sitting in a line on the horizon. The flight turns that fade off so the corner
  * arc stays bright while the camera looks downhill.
  */
 export const SKY_HORIZON_LOW = -0.03;
-export const SKY_HORIZON_HIGH = 0.2;
+export const SKY_HORIZON_HIGH = 0.34;
 const BLACK_HOLE_DISK_RADIUS = BLACK_HOLE_WORLD_DIAMETER * 0.5;
 /**
  * Inner edge of the warp, as a multiple of the event-horizon radius.

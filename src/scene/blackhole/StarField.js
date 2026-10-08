@@ -43,11 +43,11 @@ export const STAR_FIELD_MAX_SIZE_PX = 1.5;
 export const STAR_FIELD_SIZE_EXPONENT = 6;
 /** Sprite falloff: fraction of the point's radius that's a soft feather (the rest is a flat, fully-opaque core) — a small value reads as a point, not a disc. */
 export const STAR_FIELD_SPRITE_SOFTNESS = 0.16;
-/** Point sprites below this many device px alias as the camera rotates (sub-pixel coverage flickers on/off) — never rendered smaller; alpha is scaled down instead so a "small" star still reads small and dim without popping. */
+/** Minimum gaussian footprint, CSS px: sigma never drops under 0.4 × this (0.8 CSS px → FWHM ~1.9 CSS / ~3.3 device px at DSF 1.75), so sub-pixel motion cannot blink a star. Brightness carries the size difference (energy-conserving peak). */
 export const STAR_FIELD_MIN_RENDER_PX = 2;
 /** Twinkle: per-star brightness modulation, ± this fraction of base brightness. 0 disables. */
-export const STAR_FIELD_TWINKLE_AMOUNT = 0.12;
-/** Twinkle rate multiplier — each star's own random rate (0.3–1.5 Hz, baked into aFreq) times this. */
+export const STAR_FIELD_TWINKLE_AMOUNT = 0.1;
+/** Twinkle rate multiplier — each star's own random rate (0.2–0.8 Hz, baked into aFreq) times this. */
 export const STAR_FIELD_TWINKLE_SPEED = 1;
 /** Seconds for the horizon fade to move from off to on (or back) at the ring/flight handoff. */
 export const STAR_FIELD_HORIZON_FADE_TIME = 1.1;
@@ -94,6 +94,7 @@ const StarFieldShader = {
     uniform float uMinSizePx;
     uniform float uMaxSizePx;
     uniform float uMinRenderPx;
+    uniform float uMaxBrightness;
     uniform float uTwinkleAmount;
     uniform float uTwinkleSpeed;
     uniform float uTime;
@@ -110,6 +111,8 @@ const StarFieldShader = {
     varying float vMag;
     varying float vPhase;
     varying float vElev;
+    varying float vSigma;
+    varying float vPeak;
 
     void main() {
       vColor = aColor;
@@ -151,21 +154,33 @@ const StarFieldShader = {
       // parallax under any translation — drop, hop, zoom, or cursor shear.
       vec3 viewDir = mat3(viewMatrix) * skyDir;
       // Twinkle: a slow, per-star, never-zero brightness wobble — each star
-      // has its own random rate (aFreq, 0.3-1.5 Hz) and phase, so the field
+      // has its own random rate (aFreq, 0.2-0.8 Hz) and phase, so the field
       // doesn't pulse in unison. uTwinkleAmount = 0 disables it outright.
       vBright = 1.0 + uTwinkleAmount * sin(uTime * aFreq * uTwinkleSpeed * 6.28318 + aPhase);
       float px = clamp(aSize, uMinSizePx, uMaxSizePx);
-      // Sub-pixel point sprites alias as the camera rotates: a star under
-      // ~1 device px covers a pixel inconsistently frame to frame, reading
-      // as pop-in/pop-out rather than a steady dim point. Never render
-      // smaller than uMinRenderPx; instead scale alpha by the squared ratio
-      // of intended to rendered size, so a "small" star still reads small
-      // and dim through reduced coverage, not through sub-pixel geometry.
-      float intendedPx = max(px * uPixelRatio, 0.01);
-      float renderedPx = max(intendedPx, uMinRenderPx);
-      gl_PointSize = renderedPx;
-      float sizeRatio = intendedPx / renderedPx;
-      vAlpha = sizeRatio * sizeRatio;
+      // Pass J — analytic gaussian star. The old sprite was a flat-core disc
+      // ~2 device px wide: rasterization snaps that footprint to whole
+      // pixels, so a sub-pixel drift flipped pixels fully on or off and the
+      // star blinked. Now the sprite is a gaussian evaluated against the
+      // exact sub-pixel center (gl_PointCoord is relative to it).
+      //  - Footprint is fixed in CSS px (sigma >= uMinRenderPx * 0.4 CSS px,
+      //    i.e. >= ~3 device px FWHM at DSF 1.75–2), then converted to the
+      //    pixels this pass actually renders into (uPixelRatio = composer
+      //    draw width / CSS width). The rest-resolution ramp after a hop
+      //    changes that ratio; the on-screen star must not change with it.
+      //  - Peak = energy / (2 pi sigma^2) in CSS units, so the summed
+      //    brightness is the same wherever the center lands: a sampled
+      //    gaussian with sigma >= 0.5 px sums to within ~1.5% of its
+      //    integral on any lattice offset — motion changes it smoothly.
+      float sigmaCss = max(px * 0.5, uMinRenderPx * 0.4);
+      float sigma = sigmaCss * uPixelRatio;
+      vSigma = sigma;
+      // Energy = what a flat disc of the intended CSS diameter emits.
+      float energy = uMaxBrightness * aBright * 0.785398 * px * px;
+      vPeak = energy / (6.2831853 * sigmaCss * sigmaCss);
+      // 3.2 sigma each side + 1 px so the sprite never clips the tail.
+      gl_PointSize = ceil(sigma * 6.4) + 1.0;
+      vAlpha = 1.0;
       gl_Position = projectionMatrix * vec4(viewDir, 1.0);
       // Pin every sky point to the far plane — depthWrite is already off;
       // depthTest stays on so the black-hole disk still occludes stars.
@@ -181,19 +196,17 @@ const StarFieldShader = {
     varying float vBright;
     varying float vMag;
     varying float vElev;
+    varying float vSigma;
+    varying float vPeak;
 
     void main() {
-      // Hard, flat core out to (0.5 - softness), feathering only in the
-      // outer softness-wide ring — a point, not a disc, even at a few
-      // device pixels across.
-      float r = length(gl_PointCoord - vec2(0.5));
-      float edge0 = max(0.0, 0.5 - uSpriteSoftness);
-      float core = 1.0 - smoothstep(edge0, 0.5, r);
-      if (core < 0.02) discard;
+      // Offset of this pixel center from the star's exact center, device px.
+      vec2 d = (gl_PointCoord - vec2(0.5)) * (ceil(vSigma * 6.4) + 1.0);
+      float g = exp(-dot(d, d) / (2.0 * vSigma * vSigma));
       float horizon = mix(1.0, smoothstep(${SKY_HORIZON_LOW.toFixed(3)}, ${SKY_HORIZON_HIGH.toFixed(3)}, vElev), uHorizonFade);
-      float alpha = core * vAlpha * horizon;
-      if (alpha < 0.003) discard;
-      gl_FragColor = vec4(vColor * vBright * vMag * uMaxBrightness, alpha);
+      float lum = vPeak * vBright * g * horizon * vAlpha;
+      if (lum < 0.0005) discard;
+      gl_FragColor = vec4(vColor * lum, 1.0);
     }
   `
 };
@@ -253,7 +266,7 @@ function buildAttributes(tuning) {
     brights[i] =
       tuning.minBright + Math.pow(Math.random(), tuning.baseExponent) * (1 - tuning.minBright);
     phases[i] = Math.random() * Math.PI * 2;
-    freqs[i] = 0.3 + Math.random() * 1.2;
+    freqs[i] = 0.2 + Math.random() * 0.6;
   }
 
   for (let j = 0; j < bandCount; j += 1) {
@@ -292,7 +305,7 @@ function buildAttributes(tuning) {
     brights[i] =
       tuning.minBright + Math.pow(Math.random(), tuning.bandExponent) * (1 - tuning.minBright);
     phases[i] = Math.random() * Math.PI * 2;
-    freqs[i] = 0.3 + Math.random() * 1.2;
+    freqs[i] = 0.2 + Math.random() * 0.6;
   }
 
   return { positions, colors, sizes, brights, phases, freqs, count };

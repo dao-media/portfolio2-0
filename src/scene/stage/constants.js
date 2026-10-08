@@ -2,8 +2,18 @@ import * as THREE from "three";
 
 export const STAGE_RADIUS = 18;
 
-/** Seamless floor, backdrop, and canvas clear color. */
+/** Studio shell / hemi ground tint. Not the sky — see {@link SKY_BG}. */
 export const STAGE_BG = 0x070709;
+
+/**
+ * Sky behind the stars and the canvas clear color. Must equal what the far
+ * ground actually renders to: the wet floor crushes everything outside the
+ * neon bubble to exactly 0 (`WetFloorSystem._installBubbleMask`), so the far
+ * ground is (0,0,0) after tone mapping. STAGE_BG (#070709) here drew a
+ * 3 px step at the horizon on every stop (Pass J item 4: sky 7,7,9 over
+ * ground 0,0,0). Stars' black point = ground black.
+ */
+export const SKY_BG = 0x000000;
 
 /**
  * Legacy fraction. Rest resolution is `REST_PIXEL_BUDGET_MP`, not this multiplier.

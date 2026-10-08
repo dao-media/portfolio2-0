@@ -70,6 +70,7 @@ import {
   placeOnStage,
   STAGE_RADIUS,
   STAGE_BG,
+  SKY_BG,
   REST_DPR,
   REST_PIXEL_BUDGET_MP,
   FLOOR_DROP_MS,
@@ -383,6 +384,8 @@ function diffProgramKeys(warmKey, liveKey) {
   return parts.join(" ") || "opaque";
 }
 
+const _STAR_CSS = new THREE.Vector2();
+
 export class StageExperience {
   /**
    * @param {HTMLCanvasElement} canvas
@@ -477,7 +480,7 @@ export class StageExperience {
     });
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(STAGE_BG);
+    this.scene.background = new THREE.Color(SKY_BG);
 
     this.renderer = new THREE.WebGLRenderer({
       canvas,
@@ -497,7 +500,7 @@ export class StageExperience {
     this.renderer.toneMappingExposure = this._envLight.exposure;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.setClearColor(STAGE_BG, 1);
+    this.renderer.setClearColor(SKY_BG, 1);
     this.chunkedTextures = new ChunkedTextureQueue();
     this._installChunkedUploads();
     this._installGlProbe();
@@ -1916,6 +1919,157 @@ export class StageExperience {
   debugReadFrameLuminance(x, y, w, h) {
     return new Promise((resolve) => {
       this._pendingFrameReadback = { x, y, w, h, resolve };
+    });
+  }
+
+  /**
+   * Pass J item 5 — track `count` ring stars for `seconds`: every presented
+   * frame, read an 11×11 device-px patch around each star's projected
+   * center (same rotation-only projection as the shader) and sum its
+   * background-subtracted luminance. Resolves per-star min/max/mean and the
+   * worst frame-to-frame jump as a % of that star's mean. DEV probe only —
+   * the per-frame readPixels stall is the probe's own cost.
+   * `window.__stageDebug("debugStarTrack", 10, 20)`.
+   */
+  debugStarTrack(seconds = 10, count = 20) {
+    const field = this.starField;
+    const pos = field?.geometry?.getAttribute?.("position");
+    const bright = field?.geometry?.getAttribute?.("aBright");
+    if (!pos) return Promise.resolve(null);
+    const cam = this.camera;
+    cam.updateMatrixWorld(true);
+    const canvas = this.renderer.domElement;
+    const W0 = canvas.width;
+    let W = canvas.width;
+    let H = canvas.height;
+    const sizes = new Set();
+    const frameInfo = [];
+    const v = new THREE.Vector3();
+    const v4 = new THREE.Vector4();
+    const project = (i, out) => {
+      v.fromBufferAttribute(pos, i).normalize().transformDirection(cam.matrixWorldInverse);
+      v4.set(v.x, v.y, v.z, 1).applyMatrix4(cam.projectionMatrix);
+      if (v4.w <= 0) return false;
+      out.x = ((v4.x / v4.w) * 0.5 + 0.5) * W;
+      out.y = ((v4.y / v4.w) * 0.5 + 0.5) * H;
+      return true;
+    };
+    // Candidates: upper sky (past the horizon fade), away from the props,
+    // spread across magnitudes, no neighbour within 14 px.
+    const cands = [];
+    const p = { x: 0, y: 0 };
+    for (let i = 0; i < pos.count; i += 1) {
+      const y = pos.getY(i) / Math.hypot(pos.getX(i), pos.getY(i), pos.getZ(i));
+      if (y < 0.12) continue;
+      if (!project(i, p)) continue;
+      if (p.x < W * 0.08 || p.x > W * 0.92 || p.y < H * 0.6 || p.y > H * 0.96) continue;
+      p.x /= W;
+      p.y /= H;
+      cands.push({ i, x: p.x * W, y: p.y * H, mag: bright?.getX(i) ?? 1 });
+    }
+    cands.sort((a, b) => b.mag - a.mag);
+    const picked = [];
+    // One star per magnitude quantile (brightest → dimmest), so the dim
+    // end — where blinking actually shows — is sampled, not just the top.
+    for (let q = 0; q < count; q += 1) {
+      const start = Math.floor((q / count) * cands.length);
+      const end = Math.floor(((q + 1) / count) * cands.length);
+      for (let k = start; k < end; k += 1) {
+        const c = cands[k];
+        if (picked.some((o) => Math.hypot(o.x - c.x, o.y - c.y) < 14)) continue;
+        if (cands.some((o) => o !== c && Math.hypot(o.x - c.x, o.y - c.y) < 9)) continue;
+        picked.push(c);
+        break;
+      }
+    }
+    const series = picked.map(() => []);
+    const track = picked.map(() => ({ x0: Infinity, x1: -Infinity, y0: Infinity, y1: -Infinity }));
+    const gl = this.renderer.getContext();
+    const R = 5;
+    const N = (2 * R + 1) * (2 * R + 1);
+    const buf = new Uint8Array(N * 4);
+    return new Promise((resolve) => {
+      const deadline = performance.now() + seconds * 1000;
+      this._starTrackHook = () => {
+        cam.updateMatrixWorld(true);
+        // Canvas can resize mid-probe (rest DPR / governor) — project into
+        // the live buffer, report in first-frame pixel units.
+        W = canvas.width;
+        H = canvas.height;
+        sizes.add(`${W}x${H}`);
+        frameInfo.push([
+          +(this.renderer.getPixelRatio?.() ?? 0).toFixed(3),
+          this.post?.drawWidth ?? 0,
+          +(this.starField?.material?.uniforms?.uPixelRatio?.value ?? 0).toFixed(3)
+        ]);
+        const unit = (W0 / W) * (W0 / W);
+        for (let s = 0; s < picked.length; s += 1) {
+          if (!project(picked[s].i, p)) {
+            series[s].push(null);
+            continue;
+          }
+          const tr = track[s];
+          tr.x0 = Math.min(tr.x0, p.x);
+          tr.x1 = Math.max(tr.x1, p.x);
+          tr.y0 = Math.min(tr.y0, p.y);
+          tr.y1 = Math.max(tr.y1, p.y);
+          const rx = Math.round(p.x) - R;
+          const ry = Math.round(p.y) - R;
+          if (rx < 0 || ry < 0 || rx + 2 * R >= W || ry + 2 * R >= H) {
+            series[s].push(null);
+            continue;
+          }
+          gl.readPixels(rx, ry, 2 * R + 1, 2 * R + 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+          // Background = median of the patch border ring.
+          const ring = [];
+          let sum = 0;
+          for (let yy = 0; yy <= 2 * R; yy += 1) {
+            for (let xx = 0; xx <= 2 * R; xx += 1) {
+              const o = (yy * (2 * R + 1) + xx) * 4;
+              const lum = 0.299 * buf[o] + 0.587 * buf[o + 1] + 0.114 * buf[o + 2];
+              sum += lum;
+              if (yy === 0 || xx === 0 || yy === 2 * R || xx === 2 * R) ring.push(lum);
+            }
+          }
+          ring.sort((a, b) => a - b);
+          const bg = ring[ring.length >> 1];
+          series[s].push(Math.max(0, sum - bg * N) * unit);
+        }
+        if (performance.now() < deadline) return;
+        this._starTrackHook = null;
+        const rows = picked.map((c, s) => {
+          const vals = series[s].filter((x) => x != null);
+          if (!vals.length) return { star: c.i, frames: 0 };
+          const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+          let maxJump = 0;
+          let prev = null;
+          for (const x of series[s]) {
+            if (x != null && prev != null && mean > 0) {
+              maxJump = Math.max(maxJump, Math.abs(x - prev) / mean);
+            }
+            prev = x;
+          }
+          return {
+            star: c.i,
+            mag: +c.mag.toFixed(2),
+            frames: vals.length,
+            min: +Math.min(...vals).toFixed(1),
+            max: +Math.max(...vals).toFixed(1),
+            mean: +mean.toFixed(1),
+            minPctOfMean: mean > 0 ? +((Math.min(...vals) / mean) * 100).toFixed(1) : null,
+            maxPctOfMean: mean > 0 ? +((Math.max(...vals) / mean) * 100).toFixed(1) : null,
+            maxFrameJumpPct: +(maxJump * 100).toFixed(1),
+            driftPx: +Math.hypot(track[s].x1 - track[s].x0, track[s].y1 - track[s].y0).toFixed(2)
+          };
+        });
+        resolve({
+          seconds,
+          bufferSizes: [...sizes],
+          stars: rows,
+          series: series.slice(0, 4).map((a) => a.map((x) => (x == null ? null : Math.round(x)))),
+          frameInfo
+        });
+      };
     });
   }
 
@@ -6881,11 +7035,10 @@ export class StageExperience {
       // dedicated, layer-masked camera instead (see stageModelReveal.js) and
       // never touches `.visible` on anything, so there's nothing left to
       // defend against here.
-      const pixelRatio = this.renderer?.getPixelRatio?.() ?? this.pixelRatio ?? 1;
+      // uPixelRatio is set right before post.render (composer draw size).
       updateStarField(this.starField, this.camera, t, dt, {
         horizonFadeOn: !this._blackHoleActive,
-        lensActive: this._blackHoleActive,
-        pixelRatio
+        lensActive: this._blackHoleActive
       });
     }
     if (this.flightStarStreak) {
@@ -7163,6 +7316,18 @@ export class StageExperience {
     const revealNow = Boolean(this._revealPending);
     const skippedBeautyThisFrame = this._skipBeauty;
     if (!this._skipBeauty) {
+      // Pass J item 5 — the composer renders at its own internal size
+      // (rest-resolution ramp / governor) and upscales to the canvas; the
+      // renderer pixel ratio does not move when that internal size steps.
+      // Star sprites must be sized in the pixels they are actually drawn
+      // into, or every step shrinks the whole sky at once (measured 7–16%
+      // single-frame jumps). Set here, after every resize this tick.
+      const starU = this.starField?.material?.uniforms?.uPixelRatio;
+      if (starU) {
+        const cssW = this.renderer.getSize(_STAR_CSS).x;
+        const drawW = this.post?.drawWidth ?? 0;
+        if (cssW > 0 && drawW > 0) starU.value = drawW / cssW;
+      }
       this._flight?.beginGpuTimer();
       this.post.render(this.scene, this.camera, t, {
         grainStrength: this._postGrainStrength
@@ -7177,6 +7342,7 @@ export class StageExperience {
     // Pass G — sampled right here, not at the end of the tick: catches
     // anything hidden during the render that only gets restored afterward.
     this._flight?.sampleVisibilityAtPresent(skippedBeautyThisFrame);
+    if (this._starTrackHook && !this._skipBeauty) this._starTrackHook();
     if (this._pendingFrameReadback && !this._skipBeauty) {
       const { x, y, w, h, resolve } = this._pendingFrameReadback;
       this._pendingFrameReadback = null;
