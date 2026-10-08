@@ -14,9 +14,13 @@ import {
   NEON_MAX_EMISSIVE,
   NEON_MAX_LIGHT,
   NEON_SHADOW,
+  STOP_FADE_IN_RAD,
+  STOP_FADE_IN_SEC,
+  STOP_FADE_OUT_SEC,
   vignetteAngle
 } from "../stage/constants.js";
 import { restResource } from "../stage/restFidelity.js";
+import { noteFlight } from "../stage/flightRecorder.js";
 import { makeNeonTube } from "./makeNeonTube.js";
 import { makeNeonLantern, LANTERN_WARM, LANTERN_LIGHT, BUST_LANTERN_HEIGHT_M } from "./makeNeonLantern.js";
 import { sampleNeonMapUv } from "./neonGradientTexture.js";
@@ -88,6 +92,18 @@ export class NeonSystem {
      * Cleared once the camera leaves that stop so later hops fade in normally.
      */
     this._prelitIndex = -1;
+    /** Set once allowNeon goes true (intro landed) — prelight never re-arms. */
+    this._introDone = false;
+    /**
+     * Pass J — one opacity ramp per stop (content, tube/lantern, floor glow,
+     * contact pads, PointLight). Only the resting/arriving stop is ever > 0.
+     * Time-based: out over STOP_FADE_OUT_SEC as a hop starts, in over
+     * STOP_FADE_IN_SEC once the camera is within STOP_FADE_IN_RAD of it.
+     * @type {number[]}
+     */
+    this._stopFade = [];
+    /** Stop whose fade-in has started; held until the active stop changes. */
+    this._fadeInLatched = -1;
     this._gradientPhase = 0;
     /** @deprecated Alias of `_gradientPhase` — PointLight always tracks the live tube. */
     this._lightColorPhase = 0;
@@ -121,8 +137,84 @@ export class NeonSystem {
    */
   prelightStop(index = 0) {
     const n = this.entries.length;
-    if (!n) return;
+    // Pass J: intro-only. After the first reveal the lantern follows the
+    // stop fade like every other stop — no permanent prelight.
+    if (!n || this._introDone) return;
     this._prelitIndex = ((index % n) + n) % n;
+  }
+
+  /**
+   * Pass J — advance every stop's fade. Call once per frame before anything
+   * reads {@link getStopFade} (model reveal, layer cull, neon update).
+   * @param {number} theta Camera orbit angle
+   * @param {{ activeIndex?: number, settled?: boolean, dt?: number, allowNeon?: boolean }} opts
+   * @returns {number[]}
+   */
+  tickStopFades(theta, opts = {}) {
+    const n = this.entries.length;
+    if (!n) return this._stopFade;
+    const activeIndex = ((opts.activeIndex ?? 0) % n + n) % n;
+    const settled = Boolean(opts.settled);
+    const allowNeon = opts.allowNeon !== false;
+    // Cap like the model reveal so a hitch does not swallow the ramp.
+    const dt = Math.min(Math.max(opts.dt ?? 1 / 60, 0), 1 / 24);
+    while (this._stopFade.length < n) this._stopFade.push(0);
+
+    if (this._fadeInLatched !== activeIndex) this._fadeInLatched = -1;
+    const dist = angularDistance(theta, this.entries[activeIndex].theta);
+    if (!allowNeon) {
+      // Intro (hold / spiral / drop): the arrival stop is owned by the
+      // synchronized Bust reveal, not by this ramp. Snap, never ramp.
+      for (let i = 0; i < n; i += 1) this._stopFade[i] = i === activeIndex ? 1 : 0;
+      return this._stopFade;
+    }
+    if (settled || this.reducedMotion || dist <= STOP_FADE_IN_RAD) {
+      this._fadeInLatched = activeIndex;
+    }
+    for (let i = 0; i < n; i += 1) {
+      const target = i === this._fadeInLatched ? 1 : 0;
+      const f = this._stopFade[i];
+      if (this.reducedMotion) this._stopFade[i] = target;
+      else if (target > f) this._stopFade[i] = Math.min(1, f + dt / STOP_FADE_IN_SEC);
+      else if (target < f) this._stopFade[i] = Math.max(0, f - dt / STOP_FADE_OUT_SEC);
+    }
+    return this._stopFade;
+  }
+
+  /**
+   * Pass J item 2 — apply a governor shadow-size change only at the very
+   * start of this stop's fade-in (casters on camera, opacity near 0), and
+   * re-render the map in that same frame, so no frame ever shows the stop
+   * without its shadow. Returns true if the map will exist this frame.
+   * @param {THREE.Light} light
+   * @param {number} arriveLevel
+   */
+  _shadowReady(light, arriveLevel) {
+    const pend = light.userData.pendingShadowSize;
+    if (pend && arriveLevel > 0 && arriveLevel < 0.2) {
+      light.shadow.mapSize.set(pend, pend);
+      light.shadow.map?.dispose?.();
+      light.shadow.map = null;
+      light.shadow.needsUpdate = true;
+      light.userData.shadowBakes = (light.userData.shadowBakes ?? 0) + 1;
+      delete light.userData.pendingShadowSize;
+      noteFlight("shadow-bake", { light: light.name, reason: "resize-at-fade-in", size: pend });
+    }
+    return light.shadow.map != null || light.shadow.needsUpdate === true;
+  }
+
+  /**
+   * Eased (smoothstep) fade for a stop, 0..1.
+   * @param {number} index
+   */
+  getStopFade(index = 0) {
+    const f = this._stopFade[index] ?? 0;
+    return f * f * (3 - 2 * f);
+  }
+
+  /** Raw (linear) fade — 0 means the stop is culled. */
+  getStopFadeRaw(index = 0) {
+    return this._stopFade[index] ?? 0;
   }
 
   armArriveForActiveStop(index = 0) {
@@ -325,6 +417,10 @@ export class NeonSystem {
     const settled = Boolean(opts.settled);
     const dt = Math.min(Math.max(opts.dt ?? 1 / 60, 0), 0.05);
     const allowNeon = opts.allowNeon !== false;
+    if (allowNeon && !this._introDone) {
+      this._introDone = true;
+      this._prelitIndex = -1;
+    }
 
     if (activeIndex !== this._lastActiveIndex) {
       this._lastActiveIndex = activeIndex;
@@ -422,6 +518,16 @@ export class NeonSystem {
         arriveLevel = 1;
         level = 1;
       }
+      // Pass J — the stop fade is the one envelope for the whole stop.
+      // After the intro it replaces the angle-based arrive smoothstep (the
+      // old mid-hop blackout + snap-in); the tube strike flicker still
+      // rides on top of it.
+      if (allowNeon) {
+        const fade = this.getStopFade(i);
+        const flick = arriveLevel > 1e-4 ? level / arriveLevel : 1;
+        arriveLevel = fade;
+        level = fade * flick;
+      }
       this.entries[i]._arriveLevel = arriveLevel;
 
       const portalLit = this._portalStops.has(i);
@@ -461,7 +567,11 @@ export class NeonSystem {
         const bake = restResource(i, "lantern-shadow-bake");
         light.castShadow = true;
         light.shadow.autoUpdate = false;
-        light.shadow.intensity = shouldCast ? 1 : 0;
+        // Pass J item 2: the map is baked during warm and kept; its strength
+        // rides the stop fade (casters are static) instead of snapping
+        // 0 -> 1 on the settle frame — that snap was the shadow pop-in.
+        light.shadow.intensity =
+          this._shadowReady(light, arriveLevel) && !this.reducedMotion ? arriveLevel : 0;
         if (bake) {
           const wasCasting = light.userData.shadowCasting === true;
           const prebaked =
@@ -471,6 +581,7 @@ export class NeonSystem {
             light.userData.shadowBakeDeferred === true &&
             light.shadow.map == null;
           if (flush) {
+            noteFlight("shadow-bake", { light: light.name, reason: "lantern-flush" });
             light.shadow.needsUpdate = true;
             light.userData.shadowBakeDeferred = false;
             light.userData.shadowPrebaked = true;
@@ -482,7 +593,10 @@ export class NeonSystem {
               light.userData.shadowBakeDeferred = true;
               light.shadow.needsUpdate = false;
             }
-            if (shouldCast && light.shadow.map == null) light.shadow.needsUpdate = true;
+            if (shouldCast && light.shadow.map == null) {
+          noteFlight("shadow-bake", { light: light.name, reason: "no-map-on-settle" });
+          light.shadow.needsUpdate = true;
+        }
           }
           light.userData.shadowCasting = shouldCast;
         } else if (shouldCast && light.shadow.map == null) {
@@ -585,8 +699,15 @@ export class NeonSystem {
       light.castShadow = true;
       if (light.shadow) {
         light.shadow.autoUpdate = false;
-        light.shadow.intensity = shouldCast ? 1 : 0;
-        if (shouldCast && light.shadow.map == null) light.shadow.needsUpdate = true;
+        // Pass J item 2: same as the lantern — a baked, static map whose
+        // strength follows the stop fade (no snap on settle). Only a stop
+        // with no map yet bakes, once, on its first settle.
+        light.shadow.intensity =
+          this._shadowReady(light, arriveLevel) && !this.reducedMotion ? arriveLevel : 0;
+        if (shouldCast && light.shadow.map == null) {
+          noteFlight("shadow-bake", { light: light.name, reason: "no-map-on-settle" });
+          light.shadow.needsUpdate = true;
+        }
       }
       // Fog / haze integrate over the volume — use arrive only (no strike flicker).
       // Portal stops contribute no neon fog — daylight Spot owns in-scatter.
@@ -694,19 +815,13 @@ export class NeonSystem {
       root.add(child);
     }
 
-    let lit;
-    if (opts.latched) {
-      // C04: latched-at-rest → content is ON from the latch alone.
-      lit = true;
-    } else {
-      // Archaeology arrive: ON threshold ABOVE OFF threshold. The old 1e-3 / 0.02
-      // pair turned content on at 1e-3 then immediately off until 0.02 —
-      // three-frame chatter while approaching a stop.
-      const wasLit = Boolean(entry._contentLit);
-      lit = wasLit ? arriveLevel > 0.02 : arriveLevel > 0.08;
-    }
+    // Pass J: content is never toggled here any more. The stop fade
+    // ramps its opacity and StageExperience culls the whole stop by layer
+    // at fade 0 — a binary `visible` flip at an arrive threshold was the
+    // mid-hop blackout and the un-ramped snap-in.
+    const lit = arriveLevel > 0;
     entry._contentLit = lit;
-    root.visible = lit;
+    root.visible = true;
   }
 
   /**

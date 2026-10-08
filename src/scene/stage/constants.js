@@ -253,6 +253,17 @@ export const VIGNETTE_FOG_LIGHT_DECAY = 1.85;
 export const NEON_LIGHT_FALLOFF = Math.PI;
 /** Only the focused stop lights; fade up inside this angular window (rad) of rest. */
 export const NEON_ARRIVE_RAD = 0.55;
+
+/**
+ * Pass J — only the resting/arriving stop is visible. The outgoing stop
+ * fades out over STOP_FADE_OUT_SEC the moment the hop starts; the incoming
+ * stop fades in over STOP_FADE_IN_SEC once the camera is within
+ * STOP_FADE_IN_RAD of it (or settles). One ramp for the whole stop —
+ * content, tube/lantern, floor glow, contact pads, PointLight.
+ */
+export const STOP_FADE_OUT_SEC = 0.2;
+export const STOP_FADE_IN_SEC = 0.25;
+export const STOP_FADE_IN_RAD = 0.3;
 /**
  * Neon strike flicker starts when remaining hop arc ≤ this fraction of a full
  * stop-to-stop step (last ~7% of travel). Not on settle — by then it is already lit.

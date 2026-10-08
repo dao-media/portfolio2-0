@@ -32,6 +32,8 @@
  */
 
 const RING_SIZE = 240;
+/** Notes kept for the whole session (not just inside snapshot windows). */
+const MILESTONES = new Set(["fader-dismiss", "fade-variants", "shadow-bake", "bake"]);
 const MAX_SNAPSHOTS_PER_KIND = 6;
 const PRE_FRAMES = 120;
 const POST_FRAMES = 30;
@@ -83,6 +85,11 @@ export class FlightRecorder {
     this._reasonCounts = {};
     /** @type {object[]} up to 10, sorted desc by frameMs, independent of SLOW's refire throttle. */
     this._topSlow = [];
+    /** Pass J — every resize this session with its frame's phase and stop fades. */
+    this._resizeLog = [];
+    /** Pass J — triangle drops the BLINK rule attributed to an intended hop exit. */
+    this._explainedDrops = {};
+    this._milestones = [];
     this._prevProgramCount = renderer?.info?.programs?.length ?? 0;
     this._frameUploads = 0;
     this._frameResizes = [];
@@ -219,6 +226,9 @@ export class FlightRecorder {
   /** Any module can report an event into the frame currently being built. */
   note(kind, data) {
     this._pendingNotes.push({ kind, data, t: Math.round(performance.now()) });
+    if (MILESTONES.has(kind) && this._milestones.length < 100) {
+      this._milestones.push({ kind, data, frame: this.frameIndex, t: Math.round(performance.now()) });
+    }
     if (kind === "texture-upload") this._frameUploads += 1;
     if (kind === "resize") this._frameResizes.push(data);
     if (kind === "bake") this._frameBakes.push(data);
@@ -380,6 +390,12 @@ export class FlightRecorder {
       // already-measured render calls), for naming which section spikes.
       cpuWorkMs: ctx.cpuWorkMs != null ? +ctx.cpuWorkMs.toFixed(2) : null,
       cpuSections: ctx.cpuSections ?? null,
+      // Pass J item 8 — the "rig" span broken into its own laps.
+      rigSections: ctx.rigSections ?? null,
+      // Pass J item 1 — per-stop fade (0 = culled) at this present.
+      stopFade: ctx.stopFade ?? null,
+      theta: ctx.theta ?? null,
+      stopInView: ctx.stopInView ?? null,
       gapTasks: ctx.gapTasks ?? null,
       gapSinceMs: ctx.gapSinceMs ?? null,
       // Pass G: `renderer.info.render` resets on every individual
@@ -402,6 +418,11 @@ export class FlightRecorder {
       events: this._pendingNotes.length ? this._pendingNotes.slice() : null
     };
 
+    if (record.resizes && this._resizeLog.length < 300) {
+      for (const rz of record.resizes) {
+        this._resizeLog.push({ frame: record.frame, phase: record.phase, stopFade: record.stopFade, ...rz });
+      }
+    }
     this.ring.push(record);
     if (this.ring.length > RING_SIZE) this.ring.shift();
 
@@ -440,7 +461,36 @@ export class FlightRecorder {
       prev.triangles > 0 &&
       record.triangles < prev.triangles * 0.5
     ) {
-      this._fire("BLINK", record, `triangles ${prev.triangles} -> ${record.triangles}`);
+      // Pass J: a stop that just reached fade 0 having already ramped down
+      // to near-invisible is the intended hop exit, not a blink. Anything
+      // that left from a visible fade (> 0.1) is still a hard cut.
+      // Explained drops: a stop that reached fade 0 from <= 0.1 (faded
+      // exit); a stop with fade > 0 that left the frustum (slid out of
+      // frame under its fade-out); a stop that just finished fading in
+      // (transparent double-sided meshes stop drawing in two passes).
+      // Anything else — a visible stop losing geometry in place — is a cut.
+      const pf = prev.stopFade;
+      const cf = record.stopFade;
+      const pv = prev.stopInView;
+      const cv = record.stopInView;
+      // Fades are raw (linear) in the record; on screen it is smoothstep.
+      const ease = (f) => f * f * (3 - 2 * f);
+      let explained = null;
+      if (Array.isArray(pf) && Array.isArray(cf)) {
+        for (let i = 0; i < cf.length; i += 1) {
+          if (pf[i] > 0 && cf[i] === 0 && ease(pf[i]) <= 0.12) explained = "faded-exit";
+          else if (pf[i] > 0 && Array.isArray(pv) && Array.isArray(cv) && pv[i] && !cv[i]) explained = "left-frustum";
+          // Outgoing stop already at <= half opacity, sliding out of frame:
+          // its meshes frustum-cull one by one (box stays partly in view).
+          else if (pf[i] > cf[i] && ease(pf[i]) <= 0.5) explained = "fading-out-exit";
+          else if (pf[i] > 0 && pf[i] < 1 && cf[i] === 1) explained = "fade-in-done";
+        }
+      }
+      if (explained) {
+        this._explainedDrops[explained] = (this._explainedDrops[explained] ?? 0) + 1;
+      } else {
+        this._fire("BLINK", record, `triangles ${prev.triangles} -> ${record.triangles}`);
+      }
     }
 
     if (record.skipBeauty) {
@@ -548,6 +598,9 @@ export class FlightRecorder {
       totalCountsByPhase: { ...this._totalCountsByPhase },
       reasonCounts: { ...this._reasonCounts },
       topSlow: this._topSlow.slice(),
+      resizeLog: this._resizeLog.slice(),
+      explainedDrops: { ...this._explainedDrops },
+      milestones: this._milestones.slice(),
       snapshotCounts: this.snapshots.reduce((acc, s) => {
         acc[s.kind] = (acc[s.kind] ?? 0) + 1;
         return acc;

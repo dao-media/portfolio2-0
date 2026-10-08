@@ -93,8 +93,17 @@ export function stepGroupReveal(root, start, end, dt, duration = 1.35) {
   return opacity;
 }
 
-/** Off the beauty and fog-depth cameras until `compileHeldRoot` runs. */
-export const GPU_HOLD_LAYER = 3;
+/**
+ * Off the beauty and fog-depth cameras until `compileHeldRoot` runs.
+ *
+ * Pass J: this was 3 — the same number as WET_FLOOR_LAYER, which the main
+ * camera enables to see the wet floor. Every "held" root was therefore on
+ * the beauty camera the whole time it was held, drawing (and building
+ * programs/pipelines) live: measured +491k triangles on settled Bust frames
+ * from PC/Sidekick roots at stop fade 0, with 109–351 ms beauty frames.
+ * Layer 8 is used by nothing else; no live camera enables it.
+ */
+export const GPU_HOLD_LAYER = 8;
 
 export function holdRootOffCamera(root) {
   if (!root) return;
@@ -163,7 +172,7 @@ _compileCamera.layers.set(GPU_HOLD_LAYER);
  * @param {THREE.Camera} camera
  * @param {THREE.Object3D} [root]
  */
-export async function compileHeldRoot(renderer, scene, camera, root) {
+export async function compileHeldRoot(renderer, scene, camera, root, wrap = (fn) => fn()) {
   if (!renderer || !scene || !camera) return;
   noteFlight("compileHeldRoot-start", { root: root?.name || "(unnamed)" });
   const prevTarget = renderer.getRenderTarget();
@@ -193,7 +202,9 @@ export async function compileHeldRoot(renderer, scene, camera, root) {
   // different program keys, and the ACES ones showed up as hop 0→3 leaks.
   renderer.setRenderTarget(_compileTarget);
   renderer.autoClear = true;
-  const linked = renderer.compileAsync(scene, _compileCamera);
+  // `wrap` (Pass J): run compile + draw with `root` in a given material
+  // state — withAuthoredVariant / withFadeVariant — restored synchronously.
+  const linked = wrap(() => renderer.compileAsync(scene, _compileCamera));
   renderer.setRenderTarget(prevTarget);
   renderer.autoClear = prevAutoClear;
   for (const light of lights) light.layers.disable(GPU_HOLD_LAYER);
@@ -204,7 +215,7 @@ export async function compileHeldRoot(renderer, scene, camera, root) {
   renderer.shadowMap.needsUpdate = true;
   renderer.setRenderTarget(_compileTarget);
   renderer.autoClear = true;
-  renderer.render(scene, _compileCamera);
+  wrap(() => renderer.render(scene, _compileCamera));
 
   renderer.setRenderTarget(prevTarget);
   renderer.autoClear = prevAutoClear;
@@ -308,4 +319,116 @@ export async function warmMeshesChunked(root, renderer, yieldFrame, onSlowTextur
     }
   }
   return { uploaded, skipped, ms: Math.round((performance.now() - t00) * 10) / 10 };
+}
+
+/**
+ * Pass J — put every opaque material under `root` into the mid-fade state
+ * (transparent, no depth write, half opacity) for the duration of `fn`, then
+ * restore each one exactly. Used to precompile *and* pre-draw the hop-fade
+ * variant while the stop is off screen: three keeps each compiled variant in
+ * the material's own program map for its lifetime, but on ANGLE/Metal the
+ * blend state is part of the GPU pipeline object, so only a real draw with
+ * blending on builds it (measured: 570–1520 ms on the first live fade of a
+ * stop with zero new programs). Restoring synchronously means nothing — an
+ * in-flight intro reveal included — ever observes the flip.
+ * @template T
+ * @param {THREE.Object3D | null | undefined} root
+ * @param {() => T} fn
+ * @returns {T}
+ */
+export function withFadeVariant(root, fn) {
+  const saved = [];
+  root?.traverse((obj) => {
+    if (!obj.isMesh || !obj.material) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const mat of mats) {
+      if (!mat || mat.transparent) continue;
+      saved.push([mat, mat.depthWrite, mat.opacity]);
+      mat.transparent = true;
+      mat.depthWrite = false;
+      mat.opacity = mat.opacity * 0.5;
+      mat.needsUpdate = true;
+    }
+  });
+  try {
+    return fn();
+  } finally {
+    for (const [mat, depthWrite, opacity] of saved) {
+      mat.transparent = false;
+      mat.depthWrite = depthWrite;
+      mat.opacity = opacity;
+      mat.needsUpdate = true;
+    }
+    if (saved.length) noteFlight("fade-variants", { root: root?.name || "(unnamed)", materials: saved.length });
+  }
+}
+
+/**
+ * Pass J — the counterpart of {@link withFadeVariant}: put every material
+ * under `root` that is mid-reveal (has a `__revealAuthored` snapshot from
+ * {@link setGroupRenderOpacity}) back into its authored, final state for the
+ * duration of `fn`. A stop whose warm step ran while the intro reveal had it
+ * transparent otherwise never builds its opaque variant until the first hop
+ * onto it (measured: pc_1 / pc_2 / cable_black / blinn1 / SCREENIMAGE
+ * compiling live, `opaque:0>1`).
+ * @template T
+ * @param {THREE.Object3D | null | undefined} root
+ * @param {() => T} fn
+ * @returns {T}
+ */
+export function withAuthoredVariant(root, fn) {
+  const saved = [];
+  root?.traverse((obj) => {
+    if (!obj.isMesh || !obj.material) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const mat of mats) {
+      const auth = mat?.userData?.__revealAuthored;
+      if (!auth || (mat.transparent === auth.transparent && mat.depthWrite === auth.depthWrite)) continue;
+      saved.push([mat, mat.transparent, mat.depthWrite, mat.opacity]);
+      mat.transparent = auth.transparent;
+      mat.depthWrite = auth.depthWrite;
+      mat.opacity = auth.opacity;
+      mat.needsUpdate = true;
+    }
+  });
+  try {
+    return fn();
+  } finally {
+    for (const [mat, transparent, depthWrite, opacity] of saved) {
+      mat.transparent = transparent;
+      mat.depthWrite = depthWrite;
+      mat.opacity = opacity;
+      mat.needsUpdate = true;
+    }
+  }
+}
+
+/**
+ * Compile the hop-fade variant of everything under `root` (see
+ * {@link withFadeVariant}). `compile` acquires programs before it returns.
+ * @param {THREE.WebGLRenderer} renderer
+ * @param {THREE.Object3D} root
+ * @param {THREE.Camera} camera
+ * @param {THREE.Scene} scene  live scene (lights)
+ * @param {THREE.WebGLRenderTarget | null} target  composer input (NoToneMapping key)
+ * @returns {Promise<unknown>}
+ */
+export function compileFadeVariants(renderer, root, camera, scene, target) {
+  if (!renderer || !root || !camera || !scene) return Promise.resolve();
+  const prev = renderer.getRenderTarget();
+  let pending = Promise.resolve();
+  const compile = () => {
+    try {
+      if (target) renderer.setRenderTarget(target);
+      return renderer.compileAsync(root, camera, scene);
+    } catch (error) {
+      console.warn("[stageModelReveal] fade-variant compile failed:", error);
+      return Promise.resolve();
+    } finally {
+      renderer.setRenderTarget(prev);
+    }
+  };
+  const authored = withAuthoredVariant(root, compile);
+  pending = withFadeVariant(root, compile);
+  return Promise.all([authored, pending]);
 }

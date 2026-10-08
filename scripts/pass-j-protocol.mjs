@@ -154,6 +154,9 @@ if (flag("horizon")) {
   }
 }
 
+extras.programLeak = await dbg("debugProgramLeakRows").catch(() => null);
+// Item 2: shadow-map renders per light over 5 s settled (back on Bust).
+extras.shadowsSettledBust = await dbg("debugShadowReport", 5).catch(() => null);
 const flight = await dbg("flightDump");
 writeFileSync(`${OUT}/flight.json`, JSON.stringify(flight, null, 1));
 const summary = {

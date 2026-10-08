@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { pointOnRing } from "../camera/ringLayout.js";
 import { FLOOR_MP_NOTCHES, INACTIVE_VIGNETTE_LAYER, VIGNETTE0_WARM_TEXTURES_PER_FRAME, VIGNETTE0_WARM_MOUNT_WAIT_MS } from "./constants.js";
+import { noteFlight } from "./flightRecorder.js";
+import { compileFadeVariants, withAuthoredVariant, withFadeVariant } from "./stageModelReveal.js";
 
 const TEXTURE_KEYS = [
   "map",
@@ -483,6 +485,15 @@ function compileLiveScene(stage, step) {
     } catch (error) {
       console.warn("[warmVignette0] live compile failed:", error);
     }
+    // Pass J — the hop fade's transparent variant for this stop, compiled
+    // under the same pose/lights while the stop is still off screen.
+    if (!step.hop) {
+      const group = stage.vignettes?.[step.stop]?.group;
+      pending = Promise.all([
+        pending,
+        compileFadeVariants(renderer, group, camera, scene, target)
+      ]);
+    }
   });
   renderer.setRenderTarget(prev);
   return pending;
@@ -534,10 +545,34 @@ function drawLiveScene(stage, step) {
     const renderer = stage.renderer;
     const prevNeeds = renderer?.shadowMap?.needsUpdate;
     if (renderer?.shadowMap) renderer.shadowMap.needsUpdate = true;
+    // Pass J item 2 — bake this stop's neon shadow now, with its casters
+    // on camera, so no stop ever bakes (and pops a shadow in) on a settle.
+    if (!step.hop) {
+      const light = stage.neon?.stopLights?.[step.stop]?.light;
+      if (light?.castShadow && light.shadow && !light.shadow.map) {
+        light.shadow.needsUpdate = true;
+        light.userData.shadowBakes = (light.userData.shadowBakes ?? 0) + 1;
+        light.userData.shadowPrebaked = true;
+        noteFlight("shadow-bake", { light: light.name, reason: "warm" });
+      }
+    }
     try {
       presentOffscreen(stage, () => {
         stage.post.render(stage.scene, stage.camera, 0, { grainStrength: 0 });
       });
+      // Pass J — draw this stop once more in its hop-fade state, so the
+      // blend pipeline objects exist before the first live fade.
+      if (!step.hop) {
+        const group = stage.vignettes?.[step.stop]?.group;
+        const draw = () =>
+          presentOffscreen(stage, () => {
+            stage.post.render(stage.scene, stage.camera, 0, { grainStrength: 0 });
+          });
+        // Final opaque state too — a stop still mid intro-reveal here would
+        // otherwise build it live on the first hop onto it.
+        withAuthoredVariant(group, draw);
+        withFadeVariant(group, draw);
+      }
     } catch (error) {
       console.warn("[warmVignette0] live draw failed:", error);
     } finally {

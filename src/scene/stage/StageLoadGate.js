@@ -14,6 +14,8 @@ export function createStageLoadGate({
   camera,
   post,
   bootMinMs = 2600,
+  canDismiss = null,
+  canDismissMaxMs = 8000,
   onReady
 }) {
   let assetsReady = false;
@@ -34,10 +36,22 @@ export function createStageLoadGate({
     }
 
     const wait = Math.max(0, bootMinMs - (performance.now() - bootStart));
-    setTimeout(() => {
+    const lift = () => {
       ready = true;
       bootSequence.dismiss();
       onReady?.();
+    };
+    setTimeout(() => {
+      // Pass J item 8: keep the fader up until the scene behind it has
+      // drawn clean frames (programs built, no heavy beauty) — the first
+      // hold frames used to compile in plain view (627/429/394 ms).
+      if (!canDismiss) return lift();
+      const t0 = performance.now();
+      const poll = () => {
+        if (canDismiss() || performance.now() - t0 >= canDismissMaxMs) lift();
+        else setTimeout(poll, 50);
+      };
+      poll();
     }, wait);
   };
 

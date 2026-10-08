@@ -110,6 +110,8 @@ import {
   compileHeldRoot,
   releaseRootToCamera,
   setGroupRenderOpacity,
+  withAuthoredVariant,
+  withFadeVariant,
   warmMeshesChunked
 } from "./stage/stageModelReveal.js";
 import { FlightRecorder, noteFlight, readFlightEnabled, setActiveFlightRecorder } from "./stage/flightRecorder.js";
@@ -430,7 +432,11 @@ export class StageExperience {
       };
       this.bootSequence = {
         setProgress: (progress) => this._hostPost?.({ type: "bootProgress", progress }),
-        dismiss: () => this._hostPost?.({ type: "ready" })
+        dismiss: () => {
+          this._faderDismissed = true;
+          noteFlight("fader-dismiss", { cleanFrames: this._preDismissClean ?? 0 });
+          this._hostPost?.({ type: "ready" });
+        }
       };
     } else {
       this.hud = new HUDController();
@@ -2239,6 +2245,9 @@ export class StageExperience {
       camera: this.camera,
       post: this.post,
       bootMinMs: this.reducedMotion ? 400 : BOOT_MIN_MS,
+      // Pass J item 8 — 4 consecutive presented frames with no new program
+      // and beauty under 40 ms before the fader may lift.
+      canDismiss: () => (this._preDismissClean ?? 0) >= 4,
       onReady: () => this._enableInteraction()
     });
 
@@ -2991,9 +3000,12 @@ export class StageExperience {
       const light = slot?.light;
       if (!light?.shadow) continue;
       if (light.shadow.mapSize.x === size) continue;
-      light.shadow.mapSize.set(size, size);
-      light.shadow.map?.dispose?.();
-      light.shadow.map = null;
+      // Pass J item 2: never drop a baked map here (that was a re-bake —
+      // and a shadow pop — on the next settle). NeonSystem swaps the size
+      // in at the start of that stop's next fade-in, re-rendering the map
+      // in the same frame.
+      if (light.shadow.map) light.userData.pendingShadowSize = size;
+      else light.shadow.mapSize.set(size, size);
     }
     this.renderer.shadowMap.needsUpdate = true;
   }
@@ -3317,56 +3329,249 @@ export class StageExperience {
     if (!s || !this.vignettes?.length) return;
     const to = s.index ?? 0;
     const settled = Boolean(s.isSettled);
-
-    if (this._wasSettledForCull && !settled) {
-      this._layerCullFromIndex = this._layerCullPrevIndex ?? to;
-    }
-    if (settled) {
-      this._layerCullFromIndex = to;
-    }
-    this._wasSettledForCull = settled;
-    this._layerCullPrevIndex = to;
     this._syncRestFidelity(settled, to);
 
-    const keep = new Set([to]);
-    if (!settled) keep.add(this._layerCullFromIndex);
-
+    // Pass J — only stops with a live fade (> 0) are on camera. The whole
+    // vignette group is culled (content, tube/lantern, floor glow, contact
+    // pads), not just neon-lit-content: the old rule kept every tube up for
+    // a "ring cue". Each culled object's own mask is saved and replaced by
+    // INACTIVE_VIGNETTE_LAYER alone (tubes/glow also sit on layer 2, which
+    // "disable layer 0" alone never hid), then restored on fade-in. Culled
+    // stops are re-walked every frame so a root mounted into a hidden stop
+    // can never render; GPU-held meshes stay owned by the hold.
     for (let i = 0; i < this.vignettes.length; i += 1) {
-      const vig = this.vignettes[i];
-      const entry = this.neon?.entries?.[i];
-      const active = keep.has(i);
-      /** @type {THREE.Object3D[]} */
-      const roots = [];
-      if (entry?.contentRoot) {
-        roots.push(entry.contentRoot);
-      } else if (vig?.group) {
-        for (const child of vig.group.children) {
-          if (
-            child === entry?.tube ||
-            child === entry?.floorGlow ||
-            child.name === "neon-tube" ||
-            child.name === "neon-floor-glow" ||
-            child.name?.startsWith?.("arch-portal")
-          ) {
-            continue;
+      const group = this.vignettes[i]?.group;
+      if (!group) continue;
+      const culled = this.introComplete
+        ? (this.neon?.getStopFadeRaw?.(i) ?? 1) <= 0
+        : !(i === to || (!settled && i === this._layerCullFromIndex));
+      const was = group.userData._stopCulled === true;
+      if (!culled && !was) continue;
+      group.userData._stopCulled = culled;
+      group.traverse((obj) => {
+        if (obj.isLight || obj === group) return;
+        if (obj.layers.isEnabled(GPU_HOLD_LAYER)) return;
+        const saved = obj.userData._stopCullMask;
+        if (culled) {
+          if (saved == null) {
+            obj.userData._stopCullMask = obj.layers.mask;
+            obj.layers.set(INACTIVE_VIGNETTE_LAYER);
           }
-          roots.push(child);
+        } else if (saved != null) {
+          obj.layers.mask = saved;
+          delete obj.userData._stopCullMask;
+        }
+      });
+    }
+    if (settled) this._layerCullFromIndex = to;
+    else if (this._layerCullFromIndex == null) this._layerCullFromIndex = to;
+  }
+
+  /**
+   * Pass J — advance the per-stop fades and apply one opacity ramp to each
+   * stop's whole group. Runs before the model reveal (which multiplies its
+   * own ramp by this) and before neon (lights / emissive follow it too).
+   * Writes only when a stop's fade moved, so a settled scene does no work.
+   * Before the intro lands nothing is written: the Bust arrival reveal owns
+   * those materials until then.
+   * @param {number} dt
+   */
+  _tickStopFades(dt) {
+    const s = this.cameraRig?.state;
+    if (!this.neon || !s) return;
+    this.neon.tickStopFades(s.theta, {
+      activeIndex: s.index,
+      settled: Boolean(s.isSettled),
+      dt,
+      allowNeon: Boolean(this.introComplete)
+    });
+    if (!this._appliedStopFade) this._appliedStopFade = [];
+    for (let i = 0; i < this.vignettes.length; i += 1) {
+      const f = this.neon.getStopFade(i);
+      const prev = this._appliedStopFade[i];
+      if (!this.introComplete) {
+        this._appliedStopFade[i] = f;
+        continue;
+      }
+      if (prev === f) continue;
+      this._appliedStopFade[i] = f;
+      const group = this.vignettes[i]?.group;
+      if (!group) continue;
+      // Hold opacity at 0 while culled; restore authored state at exactly 1.
+      setGroupRenderOpacity(group, f);
+      // Deferred roots still mid-reveal keep their own ramp under this one.
+      this._reapplyRevealUnderFade(i, f);
+    }
+  }
+
+  /**
+   * Model-reveal roots inside stop `index` ride under the stop fade.
+   * @param {number} index
+   * @param {number} fade
+   */
+  _reapplyRevealUnderFade(index, fade) {
+    const reveal = this._modelRevealOpacity;
+    if (reveal == null || reveal >= 1) return;
+    for (const root of this._modelRevealRootsForStop(index)) {
+      setGroupRenderOpacity(root, reveal * fade);
+    }
+  }
+
+  _modelRevealRootsForStop(index) {
+    if (index === 1) return [this.vignettes[1]?.instance?.pcRoot].filter(Boolean);
+    if (index === 2) return [this.vignettes[2]?.instance?.sidekickRoot].filter(Boolean);
+    if (index === 3) {
+      return this.vignettes[3]?.instance?.getMountedRoots?.({ fades: true }) ?? [];
+    }
+    return [];
+  }
+
+  /**
+   * Flight-recorder helper: is each stop's real bounding box inside the live
+   * frustum. Boxes are measured from the group (geometry bounds, not
+   * per-vertex) and refreshed whenever that stop is fully faded in, so late
+   * mounts are picked up without a per-frame setFromObject.
+   */
+  _stopsInView() {
+    const cam = this.camera;
+    if (!cam || !this.vignettes?.length) return null;
+    if (!this._flightFrustum) {
+      this._flightFrustum = new THREE.Frustum();
+      this._flightPV = new THREE.Matrix4();
+    }
+    this._flightPV.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    this._flightFrustum.setFromProjectionMatrix(this._flightPV);
+    return this.vignettes.map((v, i) => {
+      // The subject prop (bust / PC / phone / shelf), not the whole group:
+      // a small prop leaves frame while its tube and floor pads are still in view.
+      const group = this._accentSubjectForStop(i) ?? v?.group;
+      if (!group) return null;
+      const ud = group.userData;
+      const full = (this.neon?.getStopFadeRaw?.(i) ?? 0) >= 1;
+      if (!ud._flightBox || (full && !ud._flightBoxFresh)) {
+        ud._flightBox = (ud._flightBox ?? new THREE.Box3()).setFromObject(group);
+        ud._flightBoxFresh = full;
+      }
+      if (!full) ud._flightBoxFresh = false;
+      return ud._flightBox.isEmpty() ? false : this._flightFrustum.intersectsBox(ud._flightBox);
+    });
+  }
+
+  /**
+   * Flight only: on a frame whose beauty triangle count moved > 30%, record
+   * which top-level roots actually had meshes on the live camera (layer
+   * test + visible chain) and their triangle totals — names the source of a
+   * swing instead of inferring it.
+   */
+  _noteTriangleSwing() {
+    const tri = this.post?.renderPass?.lastSceneTriangles ?? 0;
+    const prev = this._flightPrevTri ?? tri;
+    this._flightPrevTri = tri;
+    if (!prev || Math.abs(tri - prev) / prev < 0.3) return;
+    const cam = this.camera;
+    const rows = {};
+    const visibleChain = (o) => {
+      for (let p = o; p; p = p.parent) if (p.visible === false) return false;
+      return true;
+    };
+    this.scene.traverse((obj) => {
+      if (!obj.isMesh || !obj.layers.test(cam.layers) || !visibleChain(obj)) return;
+      let top = obj;
+      let stop = null;
+      for (let p = obj; p && p.parent; p = p.parent) {
+        const vi = this.vignettes.findIndex((v) => v.group === p.parent);
+        if (vi >= 0) {
+          stop = vi;
+          top = p;
+          break;
+        }
+        top = p;
+      }
+      const key = `${stop ?? "scene"}:${top.name || top.type}`;
+      const geo = obj.geometry;
+      const n = geo?.index ? geo.index.count / 3 : (geo?.attributes?.position?.count ?? 0) / 3;
+      const inst = obj.isInstancedMesh ? obj.count : 1;
+      rows[key] = (rows[key] ?? 0) + Math.round(n * inst);
+    });
+    const top = Object.entries(rows)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8);
+    noteFlight("triangle-swing", { from: prev, to: tri, roots: top });
+  }
+
+  /**
+   * Pass J item 2 — which shadow maps actually re-render, per light, over
+   * `seconds` of live frames (wraps WebGLShadowMap.render and applies its
+   * own skip rules: renderer-level autoUpdate/needsUpdate, then per-light
+   * shadow.autoUpdate/needsUpdate). Also each shadow light's state now.
+   * `window.__stageDebug("debugShadowReport", 5)`.
+   */
+  debugShadowReport(seconds = 5) {
+    const sm = this.renderer.shadowMap;
+    const orig = sm.render;
+    const counts = new Map();
+    let frames = 0;
+    let lastFrame = -1;
+    sm.render = function (lights, scene, camera) {
+      if (sm.enabled && (sm.autoUpdate || sm.needsUpdate)) {
+        for (const light of lights) {
+          const sh = light.shadow;
+          if (!sh || !(sh.autoUpdate || sh.needsUpdate)) continue;
+          const key = light.name || `${light.type}#${light.id}`;
+          counts.set(key, (counts.get(key) ?? 0) + 1);
         }
       }
-      for (const root of roots) {
-        root.traverse((obj) => {
-          if (obj.isLight) return;
-          if (obj.layers.isEnabled(GPU_HOLD_LAYER)) return;
-          if (active) {
-            obj.layers.disable(INACTIVE_VIGNETTE_LAYER);
-            obj.layers.enable(0);
-          } else {
-            obj.layers.disable(0);
-            obj.layers.enable(INACTIVE_VIGNETTE_LAYER);
-          }
+      return orig.call(this, lights, scene, camera);
+    };
+    const t0 = performance.now();
+    return new Promise((resolve) => {
+      const tick = () => {
+        frames += 1;
+        if (performance.now() - t0 < seconds * 1000) {
+          requestAnimationFrame(tick);
+          return;
+        }
+        sm.render = orig;
+        const lights = [];
+        this.scene.traverse((o) => {
+          if (!o.isLight || !o.castShadow || !o.shadow) return;
+          lights.push({
+            name: o.name || `${o.type}#${o.id}`,
+            type: o.type,
+            intensity: +o.intensity.toFixed(3),
+            shadowIntensity: o.shadow.intensity,
+            autoUpdate: o.shadow.autoUpdate,
+            needsUpdate: o.shadow.needsUpdate,
+            mapSize: o.shadow.mapSize.x,
+            hasMap: Boolean(o.shadow.map),
+            prebaked: o.userData?.shadowPrebaked ?? null,
+            bakes: o.userData?.shadowBakes ?? null
+          });
         });
-      }
+        resolve({
+          seconds,
+          frames,
+          rendererAutoUpdate: sm.autoUpdate,
+          // Shadow-map passes per light during the window (any beauty or
+          // offscreen render that reached WebGLShadowMap).
+          renders: Object.fromEntries(counts),
+          lights
+        });
+      };
+      requestAnimationFrame(tick);
+    });
+  }
+
+  /** DEV — `window.__stageDebug("debugStopFade")`. */
+  debugStopFade() {
+    const n = this.vignettes?.length ?? 0;
+    const fades = [];
+    const culled = [];
+    for (let i = 0; i < n; i += 1) {
+      fades.push(+(this.neon?.getStopFadeRaw?.(i) ?? 0).toFixed(3));
+      culled.push(this.vignettes[i]?.group?.userData?._stopCulled === true);
     }
+    return { fades, culled, latched: this.neon?._fadeInLatched ?? null };
   }
 
   /**
@@ -4243,16 +4448,29 @@ export class StageExperience {
         this._restDprWait = true;
         return;
       }
+      // Pass J: never resize inside the arriving stop's fade-in ramp — the
+      // rest step lands only after that stop is fully faded in.
+      if ((this.neon?.getStopFadeRaw?.(index) ?? 1) < 1) return;
       this._restDprWait = false;
       this._restDprActive = true;
       this._applyRenderScale();
       return;
     }
     this._restDprWait = false;
-    if (this._restDprActive) {
+    if (this._restDprActive && !this._stopFadeRamping()) {
       this._restDprActive = false;
       this._applyRenderScale();
     }
+  }
+
+  /** Pass J — true while any stop's fade is strictly between 0 and 1. */
+  _stopFadeRamping() {
+    if (!this.introComplete || !this.neon) return false;
+    for (let i = 0; i < (this.vignettes?.length ?? 0); i += 1) {
+      const f = this.neon.getStopFadeRaw(i);
+      if (f > 0 && f < 1) return true;
+    }
+    return false;
   }
 
   debugRestFidelity() {
@@ -4286,7 +4504,9 @@ export class StageExperience {
       this.wetFloor?.setProbeEveryN?.(wetN);
     }
     const mul = this.perfGovernor.effectiveDprMul;
-    if (mul !== this._lastGovDprMul) {
+    // Pass J: a ladder step waits out any stop fade (<= 250 ms) so a resize
+    // never lands inside a hop's fade-out or arrival fade-in.
+    if (mul !== this._lastGovDprMul && !this._stopFadeRamping()) {
       this._lastGovDprMul = mul;
       this._applyRenderScale();
     }
@@ -4845,6 +5065,15 @@ export class StageExperience {
       this._inPreCompile = (this._inPreCompile || 0) + 1;
       await spanFrame("shader-compile", async () => {
         await compileHeldRoot(this.renderer, this.scene, this.camera, root);
+        // Pass J — also the final opaque state (roots mount mid intro-reveal,
+        // transparent) and the hop-fade state, so neither builds programs or
+        // GPU pipelines live on the first hop onto this stop.
+        await compileHeldRoot(this.renderer, this.scene, this.camera, root, (fn) =>
+          withAuthoredVariant(root, fn)
+        );
+        await compileHeldRoot(this.renderer, this.scene, this.camera, root, (fn) =>
+          withFadeVariant(root, fn)
+        );
       });
     } catch (error) {
       console.warn("[StageExperience] Held compile failed:", error);
@@ -4852,6 +5081,9 @@ export class StageExperience {
       this._inPreCompile -= 1;
     }
     releaseRootToCamera(root);
+    // Pass J: a root released into a stop that is currently culled must
+    // not render for even one frame before the next layer sync.
+    this._syncInactiveVignetteLayers();
     this._revealPending = true;
     await this._yieldFrame();
   }
@@ -5029,10 +5261,15 @@ export class StageExperience {
 
     const neonPos =
       this.neon?.stopLights?.[s.index]?.light?.position ?? null;
-    // Wet-floor cube bakes during the hop, not on the held frame.
+    // Wet-floor cube bakes during the hop, not on the held frame — and
+    // (Pass J) only once the incoming stop's fade has reached 1: earlier,
+    // the destination is still culled (missing from its own reflection) and
+    // the outgoing stop is mid-fade (a new blend pipeline inside the cube
+    // target, measured 769 ms on the first hop off Bust).
     if (!s.isSettled) {
       this.wetFloor?.setBubbleCenter?.(neonPos);
-      if (this.wetFloor?._bakePending) {
+      const destOpaque = (this.neon?.getStopFadeRaw?.(s.index) ?? 1) >= 1;
+      if (this.wetFloor?._bakePending && destOpaque) {
         const baked = this.wetFloor.update?.(time, { probeWorld: neonPos, hideExtra: [] });
         if (baked) {
           this._frameCause = "wet-bake";
@@ -5265,11 +5502,17 @@ export class StageExperience {
     }
 
     const opacity = this._modelRevealOpacity;
-    for (const root of roots) {
-      // Deferred Archaeology GLBs can mount after the fade already hit 1; stamp them.
-      if (opacity >= 1 && root.userData._revealStamped) continue;
-      setGroupRenderOpacity(root, opacity);
-      if (opacity >= 1) root.userData._revealStamped = true;
+    for (let i = 1; i <= 3; i += 1) {
+      // Pass J: the reveal rides under the stop fade (a hidden stop stays at
+      // 0, the arriving stop multiplies in). Stamp once both are at 1.
+      // Once the reveal is done, roots are stamped once (late Archaeology
+      // mounts included) and the stop fade owns their opacity from then on.
+      const fade = this.neon?.getStopFade?.(i) ?? 1;
+      for (const root of this._modelRevealRootsForStop(i)) {
+        if (opacity >= 1 && root.userData._revealStamped) continue;
+        setGroupRenderOpacity(root, opacity * fade);
+        if (opacity >= 1) root.userData._revealStamped = true;
+      }
     }
     if (opacity >= 1 && archaeology && !this._archRevealLogged) {
       this._archRevealLogged = true;
@@ -6956,7 +7199,7 @@ export class StageExperience {
     this._preSections = [];
     let preT = workT0;
     this._holdStableLightVariant();
-    if (this._resizeSkipScene) {
+    if (this._resizeSkipScene && !this._stopFadeRamping()) {
       this._resizeSkipScene = false;
       this._applyRenderScale();
     }
@@ -7081,9 +7324,10 @@ export class StageExperience {
     if (this.introComplete) {
       this._applyVignetteMotion(t);
     }
+    this._lastRigState = this._rigLap("programState", () => this._programState());
     this._lastRigSteps = (this._rigSteps || []).slice();
-    this._lastRigState = this._programState();
     preT = this._markPre("rig", preT);
+    this._tickStopFades(dt);
     this._tickModelReveal(dt);
     preT = this._markPre("reveal", preT);
     this._tickPostGrainStrength(dt);
@@ -7342,6 +7586,16 @@ export class StageExperience {
     // Pass G — sampled right here, not at the end of the tick: catches
     // anything hidden during the render that only gets restored afterward.
     this._flight?.sampleVisibilityAtPresent(skippedBeautyThisFrame);
+    if (this._flight && !skippedBeautyThisFrame) this._noteTriangleSwing();
+    if (!this._faderDismissed) {
+      const progs = this.renderer.info.programs?.length ?? 0;
+      const clean =
+        !skippedBeautyThisFrame &&
+        progs === this._preDismissProgs &&
+        performance.now() - beautyT0 < 40;
+      this._preDismissProgs = progs;
+      this._preDismissClean = clean ? (this._preDismissClean ?? 0) + 1 : 0;
+    }
     if (this._starTrackHook && !this._skipBeauty) this._starTrackHook();
     if (this._pendingFrameReadback && !this._skipBeauty) {
       const { x, y, w, h, resolve } = this._pendingFrameReadback;
@@ -7411,6 +7665,10 @@ export class StageExperience {
         // the real wall-clock spent inside this tick, workT0 to here.
         cpuWorkMs: this._lastWorkMs,
         cpuSections: this._preSections.slice(),
+        rigSections: (this._lastRigSteps || []).slice(),
+        stopFade: this.neon?._stopFade ? this.neon._stopFade.map((f) => +f.toFixed(3)) : null,
+        theta: +(this.cameraRig?.state?.theta ?? 0).toFixed(4),
+        stopInView: this._stopsInView(),
         // Pass I item 3/4 — whatever _noteGap captured since the last frame
         // (message handlers ≥20ms, setTimeout callbacks ≥20ms), regardless
         // of whether it won the `_lastCause` "gap:unaccounted" label race.
