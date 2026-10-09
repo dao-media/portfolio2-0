@@ -6,7 +6,7 @@
  *   stop's integrated / ready time relative to land.
  * --rush: double-hop to Sidekick the moment it lands (worst case for
  * "ready before a two-hop arrival").
- * Usage: node scripts/pass-m.mjs <label> [--port 5179] [--cold] [--wait 8000] [--rush] [--warmup] [--forceface] [--query k=v]
+ * Usage: node scripts/pass-m.mjs <label> [--port 5179] [--cold] [--wait 8000] [--rush] [--warmup] [--forceface] [--query k=v] [--trace]
  */
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
@@ -21,6 +21,8 @@ const rush = args.includes("--rush");
 // --forceface: every stop's static shadow uses the M3 face-by-face path.
 const forceFace = args.includes("--forceface");
 // --query k=v: extra page query (e.g. gaptiers=1)
+// --trace: Chrome trace around the Sidekick 2-hop, kept only if that window has a frame > 100 ms.
+const trace = args.includes("--trace");
 const query = args.includes("--query") ? `flight=1&${args[args.indexOf("--query") + 1]}` : "flight=1";
 const OUT = resolve("tmp/pass-m", label);
 mkdirSync(OUT, { recursive: true });
@@ -73,7 +75,37 @@ if (rush) {
   await hop(-1);
   await mark("hop3-start"); await hop(-1); await mark("hop3-end");
   await hop(1);
+  let cdp = null;
+  if (trace) {
+    cdp = await page.context().newCDPSession(page);
+    await cdp.send("Tracing.start", {
+      traceConfig: { includedCategories: ["gpu", "viz", "gpu.service", "disabled-by-default-gpu.service", "disabled-by-default-devtools.timeline", "devtools.timeline", "toplevel", "cc"] },
+      transferMode: "ReturnAsStream"
+    });
+  }
   await mark("sk-start"); await doubleHopToSidekick(); await mark("sk-end");
+  if (cdp) {
+    const done = new Promise((r) => cdp.once("Tracing.tracingComplete", r));
+    await cdp.send("Tracing.end");
+    const { stream } = await done;
+    const fl = await dbg("flightDump");
+    const a = fl.milestones.find((m) => m.kind === "mark" && m.data.label === "sk-start")?.frame;
+    const b = fl.milestones.find((m) => m.kind === "mark" && m.data.label === "sk-end")?.frame;
+    const ci = fl.frameLogColumns.indexOf("frameMs");
+    const fi = fl.frameLogColumns.indexOf("frame");
+    const worst = Math.max(0, ...fl.frameLog.filter((r) => r[fi] >= a && r[fi] <= b).map((r) => r[ci] ?? 0));
+    if (worst > 100) {
+      let data = "";
+      for (;;) {
+        const chunk = await cdp.send("IO.read", { handle: stream, size: 1 << 20 });
+        data += chunk.base64Encoded ? Buffer.from(chunk.data, "base64").toString() : chunk.data;
+        if (chunk.eof) break;
+      }
+      writeFileSync(`${OUT}/sk.trace.json`, data);
+      console.error(`kept trace (worst ${worst} ms)`);
+    }
+    await cdp.send("IO.close", { handle: stream }).catch(() => {});
+  }
 }
 const flight = await dbg("flightDump");
 const gaps = await dbg("debugGap");

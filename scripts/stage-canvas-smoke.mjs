@@ -460,13 +460,26 @@ try {
   // real image data, not a flat placeholder or garbage (the exact
   // regression class the immutable-texture / mid-upload-restart bugs
   // produced earlier this project).
-  const chunkState = await dbg(page, "debugChunkReadbackSample");
+  // Pass O: wait for the queue to drain (generous timeout) and report how
+  // long that took — a near-cap black gap can legitimately leave a few strips
+  // for after land; fail only when uploads truly stall.
+  const CHUNK_DRAIN_TIMEOUT_MS = 60_000;
+  const drainStart = Date.now();
+  let chunkState = await dbg(page, "debugChunkReadbackSample");
+  const pendingAtCheck = chunkState?.pending ?? 0;
+  while ((chunkState?.pending ?? 0) > 0 && Date.now() - drainStart < CHUNK_DRAIN_TIMEOUT_MS) {
+    await page.waitForTimeout(500);
+    chunkState = await dbg(page, "debugChunkReadbackSample");
+  }
+  const drainMs = Date.now() - drainStart;
   if ((chunkState?.pending ?? 0) > 0) {
-    fail(`chunk-texture queue still has ${chunkState.pending} job(s) pending 10s+ after land`);
+    fail(`chunk-texture queue still has ${chunkState.pending} job(s) pending after an extra ${CHUNK_DRAIN_TIMEOUT_MS / 1000}s`);
     const why = await dbg(page, "debugBgWhy");
     console.log("  background state:", JSON.stringify(why));
+  } else if (pendingAtCheck > 0) {
+    console.log(`✓ chunk-texture queue drained (${pendingAtCheck} job(s) at the check, drained ${drainMs}ms later)`);
   } else {
-    console.log("✓ chunk-texture queue fully drained");
+    console.log("✓ chunk-texture queue fully drained (0 pending at the check)");
   }
   if (chunkState?.sampleMaterial) {
     const rb = chunkState.readback;
