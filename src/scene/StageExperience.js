@@ -26,6 +26,7 @@ import { createFogParams } from "../fog/fogConfig.js";
 import { configureSpotShadow } from "./stage/configureSpotShadow.js";
 import { VignetteContactShadows } from "./stage/VignetteContactShadows.js";
 import { SidekickDropShadow } from "./vignettes/SidekickDropShadow.js";
+import { halton } from "./stage/filmLookStudy.js";
 import { LiveStageEnvironment } from "./stage/LiveStageEnvironment.js";
 import { buildStageStudioRoom } from "./stage/StageStudioRoom.js";
 import { buildStageFloor } from "./stage/StageFloor.js";
@@ -8683,6 +8684,192 @@ export class StageExperience {
     };
   }
 
+  /**
+   * DEV/Pass P — film-look study switchboard (nothing ships). Patch keys:
+   *  accum: bool (P2, SMAA off while on) · restMp: number | "native" | null (P1)
+   *  tone: "aces" | "agx" | "neutral" (P3) · exposure: number
+   *  film: 0 | { grain, halation } (P4) · ao: bool (P5, needs ?ao=1)
+   *  aniso: number | null (P6) · mipBase: { [textureName]: level } | null (P6)
+   */
+  debugFilmStudy(patch = {}) {
+    if (!this._study) {
+      this._study = {
+        accum: false,
+        saved: { full: this._fullPixelRatio, budget: this._pixelBudgetMp, tone: this.renderer.toneMapping, exposure: this.renderer.toneMappingExposure, smaa: this.post?.smaaPass?.enabled ?? false }
+      };
+    }
+    const st = this._study;
+    if ("accum" in patch) {
+      st.accum = Boolean(patch.accum);
+      if (this.post?.accumPass) {
+        this.post.accumPass.enabled = st.accum;
+        this.post.accumPass.setStill(false);
+      }
+      if (this.post?.smaaPass) this.post.smaaPass.enabled = st.accum ? false : st.saved.smaa;
+    }
+    if ("restMp" in patch) {
+      if (patch.restMp === "native") {
+        this._fullPixelRatio = 2;
+        this._pixelBudgetMp = 99;
+      } else if (patch.restMp == null) {
+        this._fullPixelRatio = st.saved.full;
+        this._pixelBudgetMp = st.saved.budget;
+      } else {
+        this._fullPixelRatio = st.saved.full;
+        this._pixelBudgetMp = Number(patch.restMp);
+      }
+      this._floorMp = null;
+      this._applyRenderScale();
+    }
+    // P3: renderer.toneMapping / toneMappingExposure do not reach the
+    // composed image (verified: 3x exposure changes nothing), so the study
+    // tone maps in the composer's last pass instead.
+    if ("tone" in patch || "exposure" in patch) {
+      this.post?.setStudyLook?.({
+        tone: "tone" in patch ? patch.tone : undefined,
+        exposure: patch.exposure == null ? 1 : Number(patch.exposure)
+      });
+    }
+    if ("film" in patch) this.post?.setFilmLook?.(patch.film || 0);
+    if ("ao" in patch && this.post?.aoPass) {
+      const ao = this.post.aoPass;
+      if (!st.aoSaved) st.aoSaved = { ...ao.configuration };
+      ao.enabled = Boolean(patch.ao);
+      if (patch.ao) {
+        // Contact darkening, not global contrast: short world radius, fast falloff.
+        // gammaCorrection off: the composer is linear until the final encode
+        // (on, N8AO brightened the whole frame instead of darkening contacts).
+        Object.assign(ao.configuration, { aoRadius: 0.35, distanceFalloff: 0.35, intensity: 2.5, halfRes: false, aoSamples: 16, denoiseSamples: 8, gammaCorrection: false });
+      } else Object.assign(ao.configuration, st.aoSaved);
+    }
+    if ("aniso" in patch) {
+      const max = this.renderer.capabilities.getMaxAnisotropy();
+      this._forEachStageTexture((tex) => {
+        if (tex.userData._studyAniso == null) tex.userData._studyAniso = tex.anisotropy;
+        tex.anisotropy = patch.aniso == null ? tex.userData._studyAniso : Math.min(max, Number(patch.aniso));
+        if (!tex.userData.__chunkClaimed) tex.needsUpdate = true;
+        else this.chunkedTextures?.syncParams?.(tex, this.renderer);
+      });
+    }
+    if ("mipBase" in patch) {
+      const gl = this.renderer.getContext();
+      const want = patch.mipBase ?? {};
+      this._forEachStageTexture((tex) => {
+        const level = want[tex.name] ?? 0;
+        if ((tex.userData._studyBase ?? 0) === level) return;
+        const glTex = this.renderer.properties.get(tex).__webglTexture;
+        if (!glTex) return;
+        this.renderer.state.bindTexture(gl.TEXTURE_2D, glTex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL, level);
+        tex.userData._studyBase = level;
+      });
+    }
+    return { accum: st.accum, restMp: this._pixelBudgetMp, full: this._fullPixelRatio, tone: this.post?._studyTone ?? "none", exposure: this.post?.studyExposure?.uniforms?.get("uExposure")?.value ?? 1, film: this.post?._filmLook ?? 0, ao: this.post?.aoPass?.enabled ?? null, draw: [this.post?.drawWidth, this.post?.drawHeight] };
+  }
+
+  /** DEV/Pass P — camera pose (for shot-to-shot framing checks) + accumulation count. */
+  debugCameraPose() {
+    const c = this.camera;
+    return { p: c.position.toArray().map((v) => +v.toFixed(4)), q: c.quaternion.toArray().map((v) => +v.toFixed(5)), fov: +c.fov.toFixed(3), settled: Boolean(this.cameraRig?.state?.isSettled), accumN: this.post?.accumPass?.enabled ? this.post.accumPass.n : null };
+  }
+
+  /** Pass P P2 — jitter the projection while the camera is still. Returns true if offset applied. */
+  _studyPreRender() {
+    const pass = this.post?.accumPass;
+    if (!this._study?.accum || !pass?.enabled) return false;
+    const cam = this.camera;
+    const sig = cam.matrixWorld.elements.concat(cam.projectionMatrix.elements, [this.post.drawWidth, this.post.drawHeight]);
+    const last = this._studySig;
+    let still = Boolean(last) && Boolean(this.cameraRig?.state?.isSettled);
+    if (still) for (let i = 0; i < sig.length; i += 1) if (Math.abs(sig[i] - last[i]) > 1e-7) { still = false; break; }
+    this._studySig = sig;
+    pass.setStill(still);
+    const idx = pass.sampleIndex;
+    if (idx <= 1) return false;
+    const w = this.post.drawWidth;
+    const h = this.post.drawHeight;
+    const k = ((idx - 1) % 16) + 1;
+    cam.setViewOffset(w, h, halton(k, 2) - 0.5, halton(k, 3) - 0.5, w, h);
+    return true;
+  }
+
+  _forEachStageTexture(fn) {
+    const seen = new Set();
+    const KEYS = ["map", "normalMap", "roughnessMap", "metalnessMap", "aoMap", "emissiveMap", "alphaMap", "bumpMap"];
+    this.scene.traverse((o) => {
+      for (const m of [].concat(o.material ?? [])) {
+        if (!m) continue;
+        for (const k of KEYS) {
+          const t = m[k];
+          if (t?.isTexture && !t.isRenderTargetTexture && !seen.has(t)) {
+            seen.add(t);
+            fn(t, o, k);
+          }
+        }
+      }
+    });
+  }
+
+  /**
+   * DEV/Pass P P6 — on-screen texel need per texture at the current view:
+   * each visible mesh's world box projected to device px (DSF 2, the real
+   * screen) ÷ its UV span = texels the texture needs across. Max over meshes.
+   */
+  debugTextureAudit() {
+    const dsf = 2;
+    const { w: cssW, h: cssH } = this._viewportCssSize();
+    const pxW = cssW * dsf;
+    const pxH = cssH * dsf;
+    const box = new THREE.Box3();
+    const v = new THREE.Vector3();
+    const rows = new Map();
+    this.scene.updateMatrixWorld(true);
+    this.scene.traverseVisible((o) => {
+      if (!o.isMesh || !o.geometry?.attributes?.uv || !o.layers.test(this.camera.layers)) return;
+      const g = o.geometry;
+      if (!g.userData._uvSpan) {
+        const uv = g.attributes.uv;
+        let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+        for (let i = 0; i < uv.count; i += 1) {
+          const u = uv.getX(i), vv = uv.getY(i);
+          if (u < u0) u0 = u; if (u > u1) u1 = u; if (vv < v0) v0 = vv; if (vv > v1) v1 = vv;
+        }
+        g.userData._uvSpan = [Math.max(1e-3, u1 - u0), Math.max(1e-3, v1 - v0)];
+      }
+      if (!g.boundingBox) g.computeBoundingBox();
+      box.copy(g.boundingBox).applyMatrix4(o.matrixWorld);
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, behind = false;
+      for (let i = 0; i < 8; i += 1) {
+        v.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).project(this.camera);
+        if (v.z > 1) behind = true;
+        x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y);
+      }
+      if (behind) return;
+      // clip to the screen
+      const sx = (Math.min(1, x1) - Math.max(-1, x0)) * 0.5 * pxW;
+      const sy = (Math.min(1, y1) - Math.max(-1, y0)) * 0.5 * pxH;
+      if (sx <= 1 || sy <= 1) return;
+      const [su, sv] = g.userData._uvSpan;
+      const need = Math.max(sx / su, sy / sv);
+      for (const m of [].concat(o.material ?? [])) {
+        for (const k of ["map", "normalMap", "roughnessMap", "metalnessMap", "emissiveMap", "aoMap", "alphaMap"]) {
+          const t = m?.[k];
+          if (!t?.isTexture || t.isRenderTargetTexture) continue;
+          const tw = t.image?.width > 1 ? t.image.width : t.userData?.__chunkW ?? 0;
+          const th = t.image?.height > 1 ? t.image.height : t.userData?.__chunkH ?? 0;
+          const key = t.uuid;
+          const r = rows.get(key) ?? { name: t.name || `${o.name}.${k}`, w: tw, h: th, need: 0, mesh: o.name, slot: k, mips: t.generateMipmaps !== false, aniso: t.anisotropy };
+          if (need > r.need) {
+            r.need = Math.round(need);
+            r.mesh = o.name;
+          }
+          rows.set(key, r);
+        }
+      }
+    });
+    return [...rows.values()].sort((a, b) => b.w * b.h - a.w * a.h);
+  }
+
   /** DEV/Pass O — synchronous GL calls since the last reset (`?vram=1`). */
   debugSyncCalls(reset = false) {
     const sync = this.renderer.getContext().__vram?.sync;
@@ -9494,9 +9681,11 @@ export class StageExperience {
         if (cssW > 0 && drawW > 0) starU.value = drawW / cssW;
       }
       this._flight?.beginGpuTimer();
+      const jittered = this._study ? this._studyPreRender() : false;
       this.post.render(this.scene, this.camera, t, {
         grainStrength: this._postGrainStrength
       });
+      if (jittered) this.camera.clearViewOffset();
       this._flight?.endGpuTimer();
       // Pass F — latches once, on the first real beauty frame this session
       // ever presents (effectively frame 1), and never goes false again. See

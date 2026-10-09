@@ -11,6 +11,7 @@ import {
 import { N8AOPostPass } from "n8ao";
 import { BLACK_HOLE_MSAA, CURSOR_DOF, NEON_BLOOM } from "./constants.js";
 import { installComposerSizePool } from "./composerSizePool.js";
+import { DisplayGrainEffect, ExposureEffect, HalationEffect, StillAccumulatePass, makeHalationBloom, makeToneMap } from "./filmLookStudy.js";
 import { FilmGrainEffect } from "./FilmGrainEffect.js";
 import { PortalAwareRenderPass } from "../vignettes/PortalAwareRenderPass.js";
 
@@ -138,11 +139,53 @@ export class PostPass {
     this.composer.addPass(this.smaaPass);
     this.composer.addPass(this.dofPass);
     this.composer.addPass(this.bloomPass);
+    // Pass P (DEV study, off): still-camera accumulation, before the last pass.
+    this.accumPass = new StillAccumulatePass();
+    this.accumPass.enabled = false;
+    this.composer.addPass(this.accumPass);
     this.composer.addPass(this.grainPass);
+    // Pass P (DEV study): halation + display grain swap into the last pass.
+    this.halBloom = makeHalationBloom();
+    this.halation = new HalationEffect({ texture: this.halBloom.texture });
+    this.displayGrain = new DisplayGrainEffect();
+    this._filmLook = 0;
+    this._studyTone = null;
+    this.studyExposure = new ExposureEffect();
+    this._toneMaps = {};
 
     this.setSize(options.width || 1, options.height || 1);
     this._syncDepthBlit();
     installComposerSizePool(this.renderer, this.composer);
+  }
+
+  /**
+   * DEV/Pass P P3/P4 — the last (to-screen) pass's effect list. Today it is
+   * grain only and the composed image is NOT tone mapped (renderer
+   * toneMapping / exposure never reach it). Study variants put an exposure
+   * multiply + tone map, and/or halation + display-res grain, in that pass.
+   * @param {{ tone?: string | null, exposure?: number, film?: 0 | { grain: number, halation: number } }} look
+   */
+  setStudyLook({ tone = this._studyTone, exposure, film = this._filmLook } = {}) {
+    this._studyTone = tone || null;
+    this._filmLook = film || 0;
+    if (exposure != null) this.studyExposure.uniforms.get("uExposure").value = exposure;
+    const effects = [];
+    if (this._studyTone) {
+      this._toneMaps[this._studyTone] ??= makeToneMap(this._studyTone);
+      effects.push(this.studyExposure, this._toneMaps[this._studyTone]);
+    }
+    if (this._filmLook) {
+      this.displayGrain.uniforms.get("uAmount").value = this._filmLook.grain;
+      this.halation.uniforms.get("uIntensity").value = this._filmLook.halation;
+      this.halation.uniforms.get("tHalation").value = this.halBloom.texture;
+      effects.push(this.halBloom, this.halation, this.displayGrain);
+    } else effects.push(this.grainEffect);
+    this.grainPass.setEffects(effects);
+  }
+
+  /** Back-compat for the P4 switch. */
+  setFilmLook(look) {
+    this.setStudyLook({ film: look || 0 });
   }
 
   /** Composer buffer width after the last draw-size swap. */
@@ -337,6 +380,7 @@ export class PostPass {
       this.volumetricPass.ensureSizeFromRenderer?.(this.renderer);
     }
     this.grainEffect.uniforms.get("uTime").value = time;
+    if (this._filmLook) this.displayGrain.uniforms.get("uTime").value = time;
     this.grainEffect.uniforms.get("uGrain").value = this.grain * grainStrength;
     this.composer.render();
   }
