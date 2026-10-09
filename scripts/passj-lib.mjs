@@ -15,7 +15,9 @@ export async function bootStage({
   log = console.log,
   // Pass K: a persistent profile keeps the HTTP cache warm between runs, so
   // Enter appears as early as it does on Dane's machine (~6.5 s, not ~48 s).
-  profileDir = null
+  profileDir = null,
+  // Pass M: runs (with dbg, page) right before the Enter click.
+  beforeClick = null
 } = {}) {
   const launchArgs = [`--window-size=${W},${H + 87}`, "--window-position=0,0"];
   let browser;
@@ -50,6 +52,7 @@ export async function bootStage({
   const enterMs = Date.now() - gotoAt;
   log(`enter visible after ${(enterMs / 1000).toFixed(1)} s`);
   await sleep(holdMs);
+  if (beforeClick) await beforeClick(dbg, page);
   await page.click("#bh-enter");
   await page.waitForSelector("body:not(.is-black-hole)", { timeout: 90_000 });
   for (let i = 0; i < 160; i += 1) {
