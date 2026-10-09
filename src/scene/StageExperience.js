@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { applyLightSkip } from "./stage/lightSkip.js";
 import gsap from "gsap";
 import { HUDController } from "../ui/HUDController.js";
 import { DesktopVignette, desktopVignetteMeta } from "./vignettes/DesktopVignette.js";
@@ -123,6 +124,7 @@ import {
   MOTION_DPR
 } from "./stage/stagePerfGovernor.js";
 import { restFidelityForIndex, restResource } from "./stage/restFidelity.js";
+import { analyzeOrientation } from "./vignettes/meshOrientation.js";
 import { createVignette0WarmState, debugFaceBakeCompare, stepVignette0Warm, warmStepBlocked, warmTouchStop } from "./stage/warmVignette0.js";
 import { ChunkedTextureQueue } from "./stage/chunkedTextureUpload.js";
 import { SidekickGroundFog } from "./vignettes/SidekickGroundFog.js";
@@ -403,6 +405,12 @@ const PACE_PROBE_STILL_MS = 20000;
  * warm, chunk uploads, stop envs) is done, but never more than this extra.
  * Dane's knob.
  */
+/** Pass N — same leaf test BustVignette uses (`_hardenTreeMaterials`). */
+function isAppleLeaf(o) {
+  const n = `${o.name} ${[].concat(o.material)[0]?.name ?? ""}`.toLowerCase();
+  return n.includes("leaf") || n.includes("lea");
+}
+
 export const GAP_HOLD_MAX_MS = 3000;
 /** Pass M — streak coast in the gap: m/s at gap start (decays) and the floor it eases to. */
 const GAP_STREAK_SPEED = 26;
@@ -414,7 +422,11 @@ const GAP_WARM_STEPS_PER_FRAME = 64;
 const GAP_WORK_MS = 30;
 const GAP_BG_SLOTS = 6;
 /** Pass M — each culled stop gets one tiny draw this often (frames); see _touchCulledStops. */
-const CULLED_TOUCH_FRAMES = 32;
+const CULLED_TOUCH_FRAMES = 36;
+/** Pass N N5 — Archaeology's meshes are touched in this many slices (~0.8 ms CPU each). */
+const ARCH_TOUCH_SLICES = 6;
+/** Pass N N5 — touch units in order, one every CULLED_TOUCH_FRAMES / length frames: [stop, slice]. */
+const TOUCH_UNITS = [[0], [3, 0], [1], [3, 1], [2], [3, 2], [3, 3], [3, 4], [3, 5]];
 /** Pass L — a floor drop needs this many unexplained >= FLOOR_DROP_MS frames… */
 const FLOOR_DROP_SUSTAIN = 3;
 /** …within this window (ms). Thresholds themselves are unchanged. */
@@ -439,6 +451,12 @@ export class StageExperience {
     this._inWorker = Boolean(options.worker || globalThis.__STAGE_WORKER);
     this._hostPost = typeof options.postMessage === "function" ? options.postMessage : null;
     this._search = options.search ?? "";
+    // Pass N N1 — before any program compiles (patches ShaderChunk).
+    {
+      const gt = new URLSearchParams(this._inWorker ? this._search : (typeof window !== "undefined" ? window.location.search : "")).get("gaptiers");
+      this._gapTierWarm = gt == null ? null : gt === "1";
+    }
+    this._lightSkip = applyLightSkip(this._inWorker ? this._search : (typeof window !== "undefined" ? window.location.search : ""));
     this._cssWidth = options.width || 0;
     this._cssHeight = options.height || 0;
     if (this._inWorker) {
@@ -1409,6 +1427,207 @@ export class StageExperience {
         }
         break;
       }
+      // Pass N N1 — apple-tree cost split (on = shipped state).
+      case "apple-leaves":
+      case "apple-trunk": {
+        const tree = this.vignettes?.[0]?.instance?.appleRoot;
+        if (tree) {
+          tree.traverse((o) => {
+            if (!o.isMesh || o.userData.abPrepass) return;
+            if (isAppleLeaf(o) === (name === "apple-leaves")) o.visible = on;
+          });
+          applied = true;
+        }
+        break;
+      }
+      case "apple-leaf-patch":
+      case "apple-leaf-cutout":
+      case "apple-leaf-cutout50": {
+        const tree = this.vignettes?.[0]?.instance?.appleRoot;
+        if (tree) {
+          tree.traverse((o) => {
+            if (!o.isMesh || o.userData.abPrepass || !isAppleLeaf(o)) return;
+            for (const m of [].concat(o.material)) {
+              if (!m) continue;
+              const ud = m.userData;
+              if (!ud._abSaved) ud._abSaved = { obc: m.onBeforeCompile, key: m.customProgramCacheKey, transparent: m.transparent, alphaTest: m.alphaTest };
+              const sv = ud._abSaved;
+              if (name === "apple-leaf-patch") {
+                if (on) {
+                  m.onBeforeCompile = sv.obc;
+                  m.customProgramCacheKey = sv.key;
+                } else {
+                  m.onBeforeCompile = THREE.Material.prototype.onBeforeCompile;
+                  m.customProgramCacheKey = THREE.Material.prototype.customProgramCacheKey;
+                }
+              } else {
+                m.transparent = on ? sv.transparent : false;
+                m.alphaTest = on || name === "apple-leaf-cutout" ? sv.alphaTest : 0.5;
+              }
+              m.needsUpdate = true;
+            }
+          });
+          applied = true;
+        }
+        break;
+      }
+      case "apple-prepass": {
+        const tree = this.vignettes?.[0]?.instance?.appleRoot;
+        if (tree) {
+          if (!on) {
+            const add = [];
+            tree.traverse((o) => {
+              if (!o.isMesh || o.userData.abPrepass || o.userData.abPrepassMesh) return;
+              const m0 = [].concat(o.material)[0];
+              const depth = new THREE.MeshBasicMaterial({
+                colorWrite: false,
+                side: m0?.side ?? THREE.FrontSide,
+                map: isAppleLeaf(o) ? (m0?.map ?? null) : null,
+                alphaMap: isAppleLeaf(o) ? (m0?.alphaMap ?? null) : null,
+                alphaTest: isAppleLeaf(o) ? (m0?.alphaTest || 0.08) : 0,
+                polygonOffset: Boolean(m0?.polygonOffset),
+                polygonOffsetFactor: m0?.polygonOffsetFactor ?? 0,
+                polygonOffsetUnits: m0?.polygonOffsetUnits ?? 0
+              });
+              const pre = new THREE.Mesh(o.geometry, depth);
+              pre.userData.abPrepass = true;
+              pre.renderOrder = -10;
+              pre.layers.mask = o.layers.mask;
+              pre.castShadow = false;
+              pre.receiveShadow = false;
+              pre.raycast = () => {};
+              add.push([o, pre]);
+            });
+            for (const [o, pre] of add) {
+              o.add(pre);
+              o.userData.abPrepassMesh = pre;
+            }
+          } else {
+            const rm = [];
+            tree.traverse((o) => o.userData.abPrepassMesh && rm.push(o));
+            for (const o of rm) {
+              o.userData.abPrepassMesh.material.dispose();
+              o.remove(o.userData.abPrepassMesh);
+              delete o.userData.abPrepassMesh;
+            }
+          }
+          applied = true;
+        }
+        break;
+      }
+      case "apple-backside-ds":
+      case "apple-frontside-ds": {
+        // Pass N — front faces only for the camera, shadow side kept DoubleSide
+        // (FrontSide alone flips three's default shadowSide to BackSide).
+        const tree = this.vignettes?.[0]?.instance?.appleRoot;
+        if (tree) {
+          tree.traverse((o) => {
+            if (!o.isMesh || o.userData.abPrepass) return;
+            for (const m of [].concat(o.material)) {
+              if (!m) continue;
+              if (m.userData._abSideDs == null) m.userData._abSideDs = [m.side, m.shadowSide];
+              const [side, shadowSide] = m.userData._abSideDs;
+              m.side = on ? side : name === "apple-backside-ds" ? THREE.BackSide : THREE.FrontSide;
+              m.shadowSide = on ? shadowSide : THREE.DoubleSide;
+              m.needsUpdate = true;
+            }
+          });
+          applied = true;
+        }
+        break;
+      }
+      case "apple-aniso":
+      case "apple-aniso4":
+      case "apple-mediump":
+      case "apple-nomrmap": {
+        const tree = this.vignettes?.[0]?.instance?.appleRoot;
+        if (tree) {
+          tree.traverse((o) => {
+            if (!o.isMesh || o.userData.abPrepass) return;
+            for (const m of [].concat(o.material)) {
+              if (!m) continue;
+              const ud = m.userData;
+              if (!ud._abShade) ud._abShade = { aniso: m.map?.anisotropy, precision: m.precision, rough: m.roughnessMap, metal: m.metalnessMap };
+              const sv = ud._abShade;
+              if (name === "apple-aniso" || name === "apple-aniso4") {
+                for (const t of [m.map, m.roughnessMap, m.metalnessMap]) {
+                  if (!t) continue;
+                  t.anisotropy = on ? sv.aniso : name === "apple-aniso" ? 1 : 4;
+                  t.needsUpdate = !t.userData?.__chunkClaimed;
+                }
+              } else if (name === "apple-mediump") {
+                m.precision = on ? sv.precision : "mediump";
+              } else {
+                m.roughnessMap = on ? sv.rough : null;
+                m.metalnessMap = on ? sv.metal : null;
+              }
+              m.needsUpdate = true;
+            }
+          });
+          applied = true;
+        }
+        break;
+      }
+      // Pass N — measurement only: lights at intensity 0 still run per pixel.
+      case "light-rect":
+      case "light-zero": {
+        this.scene.traverse((o) => {
+          if (!o.isLight) return;
+          const hit = name === "light-rect" ? o.isRectAreaLight : !o.isAmbientLight && (o.intensity ?? 0) === 0;
+          if (!hit && o.userData._abLightVis == null) return;
+          if (o.userData._abLightVis == null) o.userData._abLightVis = o.visible;
+          o.visible = on ? o.userData._abLightVis : false;
+          if (on) delete o.userData._abLightVis;
+        });
+        applied = true;
+        break;
+      }
+      case "globe-atmo": {
+        const arch = this.vignettes?.[3]?.group;
+        arch?.traverse((o) => {
+          if (o.name === "globe-atmosphere-halo" || o.name === "globe-atmosphere-inner") o.visible = on;
+        });
+        applied = Boolean(arch);
+        break;
+      }
+      // Pass N N3 — DEV preview only (not shipped): Sidekick's light raised
+      // above the floating phone with a longer reach, map re-baked.
+      case "sk-shadow-preview": {
+        const light = this.neon?.stopLights?.[2]?.light;
+        if (light) {
+          const ud = light.userData;
+          if (!ud._skPrev) ud._skPrev = { y: light.position.y, d: light.distance, far: light.shadow.camera.far };
+          const sv = ud._skPrev;
+          light.position.y = on ? sv.y : 3.2;
+          light.distance = on ? sv.d : 5.5;
+          light.shadow.camera.far = on ? sv.far : 5.5;
+          light.shadow.camera.updateProjectionMatrix();
+          light.updateMatrixWorld(true);
+          light.shadow.map?.dispose();
+          light.shadow.map = null;
+          light.shadow.needsUpdate = true;
+          this.renderer.shadowMap.needsUpdate = true;
+          applied = true;
+        }
+        break;
+      }
+      case "apple-cast": {
+        const tree = this.vignettes?.[0]?.instance?.appleRoot;
+        if (tree) {
+          tree.traverse((o) => {
+            if (!o.isMesh || o.userData.abPrepass) return;
+            if (o.userData._abCast == null) o.userData._abCast = o.castShadow;
+            o.castShadow = on ? o.userData._abCast : false;
+          });
+          this.renderer.shadowMap.needsUpdate = true;
+          applied = true;
+        }
+        break;
+      }
+      case "floor-freeze":
+        this._abFloorFrozen = !on;
+        applied = true;
+        break;
       case "apple-tree": {
         const tree = this.vignettes?.[0]?.instance?.appleRoot;
         if (tree) {
@@ -4498,6 +4717,7 @@ export class StageExperience {
   }
 
   _dropFloorNotch() {
+    if (this._abFloorFrozen) return;
     if (this._vignette0Warm && !this._vignette0Warm.done) return;
     if ((this.clock?.elapsedTime ?? 0) < (this._floorResizeAt ?? 0)) return;
     const current = this._effectiveBudgetMp();
@@ -4517,6 +4737,7 @@ export class StageExperience {
   }
 
   _raiseFloorNotch() {
+    if (this._abFloorFrozen) return;
     if (this._floorMp == null) return;
     let next = null;
     for (const notch of FLOOR_MP_NOTCHES) {
@@ -4529,6 +4750,7 @@ export class StageExperience {
     else this._floorMp = next;
     this._resizeSkipScene = true;
     this._floorResizeAt = (this.clock?.elapsedTime ?? 0) + 1;
+    noteFlight("floor-notch", { dir: "up", mp: this._floorMp ?? this._pixelBudgetMp });
   }
 
   _observeFloor(frameMs, dt) {
@@ -8161,29 +8383,93 @@ export class StageExperience {
    * hiding the PC removed it, hiding the glass or screen did not. CPU was
    * ~2 ms, so it is not a link or upload we can see. Touching each culled
    * stop with one tiny draw (4×4-class target, live pose, no shadow update)
-   * every CULLED_TOUCH_FRAMES keeps it from happening (probe: 98–163 → 18–22
-   * ms). Stops are staggered so one is touched per frame at most. It starts
-   * in the black gap, not at land: the first touch of a stop pays that same
-   * cost (Desktop's first post-land touch put a 110–123 ms frame two frames
-   * later into land→+10 s in 9 of 9 runs).
+   * keeps it from happening (probe: 98–163 → 18–22 ms). It starts in the
+   * black gap, not at land: the first touch of a stop pays that same cost.
+   *
+   * Pass N — the window is short (~1–2 s): touching only on settled frames
+   * left every stop untouched through a hop, and the first touch after
+   * arriving paid it (Archaeology settle frame 51–109 ms, 8 s-wait runs).
+   * So touches run on hop frames too, and Archaeology's 14 roots (~4 ms CPU
+   * in one touch) are split into slices (TOUCH_UNITS): one unit every 4
+   * frames, each stop / slice once per CULLED_TOUCH_FRAMES.
    */
   _touchCulledStops() {
     if (this._blackHoleActive || this._abCulledTouchOff || !this.vignettes?.length || !this.world) return;
-    // Never on a hop frame (an Archaeology touch measured 19 ms CPU mid-hop):
-    // the gap, the drop, and settled frames only.
-    if (this.introComplete && !this.cameraRig?.state?.isSettled) return;
-    const n = this.vignettes.length;
-    const step = Math.floor(CULLED_TOUCH_FRAMES / n);
+    const every = CULLED_TOUCH_FRAMES / TOUCH_UNITS.length;
     const phase = this._frameNo % CULLED_TOUCH_FRAMES;
-    if (phase % step !== 0) return;
-    const stop = phase / step;
-    if (stop >= n || !this.vignettes[stop]?.group?.userData?._stopCulled) return;
-    warmTouchStop(this, stop);
+    if (phase % every !== 0) return;
+    const [stop, slice] = TOUCH_UNITS[phase / every];
+    if (!this.vignettes[stop]?.group?.userData?._stopCulled) return;
+    if (slice == null) {
+      warmTouchStop(this, stop);
+    } else {
+      this._touchStopSlice(stop, slice);
+    }
     if (!this._stopTouched) this._stopTouched = new Set();
     if (!this._stopTouched.has(stop)) {
       this._stopTouched.add(stop);
       noteFlight("stop-touch", { stop, gap: Boolean(this._gapHold), introComplete: this.introComplete });
     }
+  }
+
+  /**
+   * Pass N N5 — touch one slice of a stop's meshes (the rest hidden for the
+   * draw). Slices hold an equal share of the stop's visible meshes — CPU is
+   * per draw call; by root, one root carried 3 of Archaeology's ~4 ms.
+   */
+  _touchStopSlice(stop, slice) {
+    const group = this.vignettes?.[stop]?.group;
+    if (!group) return;
+    const meshes = [];
+    group.traverse((o) => {
+      if (o.isMesh && o.visible) meshes.push(o);
+    });
+    const per = Math.ceil(meshes.length / ARCH_TOUCH_SLICES);
+    const hidden = [];
+    for (let i = 0; i < meshes.length; i += 1) {
+      if (Math.floor(i / per) === slice) continue;
+      meshes[i].visible = false;
+      hidden.push(meshes[i]);
+    }
+    try {
+      warmTouchStop(this, stop);
+    } finally {
+      for (const m of hidden) m.visible = true;
+    }
+  }
+
+  /** DEV/Pass N — wall ms of one touch per stop including GPU (gl.finish around it; dev only, stalls). */
+  debugTouchGpu(n = 3) {
+    const gl = this.renderer.getContext();
+    const out = {};
+    for (let i = 0; i < (this.vignettes?.length ?? 0); i += 1) {
+      const ms = [];
+      for (let k = 0; k < n; k += 1) {
+        gl.finish();
+        const t0 = performance.now();
+        warmTouchStop(this, i);
+        gl.finish();
+        ms.push(Math.round((performance.now() - t0) * 10) / 10);
+      }
+      out[i] = ms;
+    }
+    return out;
+  }
+
+  /** DEV/Pass N N5 — CPU ms of each Archaeology touch slice (median of `n`). */
+  debugArchTouchCost(n = 9) {
+    const out = { slices: [] };
+    for (let slice = 0; slice < ARCH_TOUCH_SLICES; slice += 1) {
+      const ms = [];
+      for (let k = 0; k < n; k += 1) {
+        const t0 = performance.now();
+        this._touchStopSlice(3, slice);
+        ms.push(performance.now() - t0);
+      }
+      ms.sort((a, b) => a - b);
+      out.slices.push(Math.round(ms[n >> 1] * 100) / 100);
+    }
+    return out;
   }
 
   /** DEV/Pass M — CPU ms of one culled-stop touch, per stop (median of `n`). */
@@ -8200,6 +8486,129 @@ export class StageExperience {
       out[i] = Math.round(ms[n >> 1] * 100) / 100;
     }
     return out;
+  }
+
+  /** DEV/Pass N — pin the rest floor at `mp` (null = release); pair with debugAbToggle("floor-freeze", false). */
+  debugPinFloor(mp = null) {
+    this._floorMp = mp == null ? null : Number(mp);
+    this._resizeSkipScene = true;
+    return this._effectiveBudgetMp();
+  }
+
+  /** DEV/Pass N N3 — a stop light's shadow setup and the stop's would-be casters. */
+  debugStopShadow(stop = 2) {
+    const light = this.neon?.stopLights?.[stop]?.light;
+    const group = this.vignettes?.[stop]?.group;
+    if (!light || !group) return null;
+    light.updateMatrixWorld(true);
+    const lp = new THREE.Vector3().setFromMatrixPosition(light.matrixWorld);
+    const cam = light.shadow.camera;
+    const meshes = [];
+    const box = new THREE.Box3();
+    group.traverse((o) => {
+      if (!o.isMesh) return;
+      let vis = o.visible;
+      for (let p = o.parent; p; p = p.parent) vis = vis && p.visible;
+      box.setFromObject(o);
+      const c = box.getCenter(new THREE.Vector3());
+      const m = [].concat(o.material)[0];
+      meshes.push({ name: o.name, cast: o.castShadow, receive: o.receiveShadow, vis, layers: o.layers.mask, saved: o.userData._stopCullMask ?? null, dist: +c.distanceTo(lp).toFixed(2), size: +box.getSize(new THREE.Vector3()).length().toFixed(2), mat: m?.type, side: m?.side, shadowSide: m?.shadowSide, opacity: m?.opacity, transparent: m?.transparent });
+    });
+    return {
+      light: light.name,
+      pos: lp.toArray().map((v) => +v.toFixed(2)),
+      intensity: light.intensity,
+      distance: light.distance,
+      castShadow: light.castShadow,
+      near: cam.near,
+      far: cam.far,
+      bias: light.shadow.bias,
+      mapSize: light.shadow.mapSize.x,
+      autoUpdate: light.shadow.autoUpdate,
+      hasMap: Boolean(light.shadow.map),
+      cameraLayers: this.camera.layers.mask,
+      groupPos: group.getWorldPosition(new THREE.Vector3()).toArray().map((v) => +v.toFixed(2)),
+      casters: meshes.filter((m) => m.cast).length,
+      phoneBox: (() => {
+        const root = this.vignettes?.[stop]?.instance?.sidekickRoot;
+        if (!root) return null;
+        const b = new THREE.Box3();
+        root.traverse((o) => {
+          if (!o.isMesh) return;
+          let v = o.visible;
+          for (let p = o.parent; p; p = p.parent) v = v && p.visible;
+          if (v) b.expandByObject(o);
+        });
+        return { min: b.min.toArray().map((v) => +v.toFixed(2)), max: b.max.toArray().map((v) => +v.toFixed(2)) };
+      })(),
+      meshes: meshes.sort((a, b) => b.size - a.size).slice(0, 25)
+    };
+  }
+
+  /** DEV/Pass N — every light in the scene: type, on, intensity, shadow. */
+  debugLightCensus() {
+    const rows = [{ lightSkip: this._lightSkip }];
+    this.scene.traverse((o) => {
+      if (!o.isLight) return;
+      let vis = o.visible;
+      for (let p = o.parent; p; p = p.parent) vis = vis && p.visible;
+      rows.push({ name: o.name || o.type, type: o.type, visible: vis, intensity: +(o.intensity ?? 0).toFixed(3), cast: Boolean(o.castShadow), shadowAuto: o.shadow ? o.shadow.autoUpdate : null, mapSize: o.shadow?.mapSize?.x ?? null, layers: o.layers.mask });
+    });
+    return rows;
+  }
+
+  /** DEV/Pass N N1 — apple mesh topology: components, closed/open, inverted. */
+  debugAppleTopology() {
+    const tree = this.vignettes?.[0]?.instance?.appleRoot;
+    let mesh = null;
+    tree?.traverse((o) => {
+      if (o.isMesh && !o.userData.abPrepass && !mesh) mesh = o;
+    });
+    if (!mesh) return null;
+    const t0 = performance.now();
+    const { triCount, comps } = analyzeOrientation(mesh.geometry);
+    const list = [...comps.values()].sort((a, b) => b.tris - a.tris);
+    const sum = (f) => list.filter(f).reduce((a, c) => a + c.tris, 0);
+    return {
+      ms: Math.round(performance.now() - t0),
+      triCount,
+      components: list.length,
+      indexed: Boolean(mesh.geometry.index),
+      closedTris: sum((c) => c.boundary === 0),
+      invertedTris: sum((c) => c.volume < 0),
+      invertedClosedTris: sum((c) => c.volume < 0 && c.boundary === 0),
+      top: list.slice(0, 12).map((c) => ({ tris: c.tris, boundary: c.boundary, vol: +c.volume.toFixed(4) }))
+    };
+  }
+
+  /** DEV/Pass N N1 — apple tree census: meshes, triangles, material state. */
+  debugAppleCensus() {
+    const tree = this.vignettes?.[0]?.instance?.appleRoot;
+    if (!tree) return null;
+    const rows = [];
+    tree.traverse((o) => {
+      if (!o.isMesh || o.userData.abPrepass) return;
+      const g = o.geometry;
+      const tris = (g.index ? g.index.count : g.attributes.position.count) / 3;
+      const m = [].concat(o.material)[0];
+      rows.push({
+        name: o.name,
+        leaf: isAppleLeaf(o),
+        tris,
+        verts: g.attributes.position.count,
+        mat: m?.type,
+        side: m?.side,
+        transparent: m?.transparent,
+        alphaTest: m?.alphaTest,
+        cast: o.castShadow,
+        receive: o.receiveShadow,
+        layers: o.layers.mask,
+        map: m?.map?.image ? [m.map.image.width, m.map.image.height] : null,
+        alphaMap: Boolean(m?.alphaMap)
+      });
+    });
+    const sum = (f) => rows.filter(f).reduce((a, r) => a + r.tris, 0);
+    return { meshes: rows.length, leafTris: sum((r) => r.leaf), trunkTris: sum((r) => !r.leaf), rows };
   }
 
   /** DEV/Pass M — the gap-hold log for this session. */

@@ -5,7 +5,7 @@ import { noteFlight } from "./flightRecorder.js";
 import { compileFadeVariants, withAuthoredVariant, withFadeVariant } from "./stageModelReveal.js";
 import { SHADOW_CUBE_FACES, withShadowFace } from "./faceShadowBake.js";
 
-/** Pass M — run the notch tiers in the black gap (see the tier skip below). */
+/** Pass M — run the notch tiers in the black gap (see the tier skip below). `?gaptiers=1|0` overrides (A/B). */
 const GAP_TIER_WARM = false;
 
 const TEXTURE_KEYS = [
@@ -367,7 +367,7 @@ export function stepVignette0Warm(stage, state) {
     // them the floor steps down live after land and a hop's first
     // motion-DPR step allocates (one 52–72 ms resize frame).
     const tierStep = step.kind === "tier" || step.kind === "restore";
-    if ((stage.introComplete || (stage._gapHold && !GAP_TIER_WARM)) && (tierStep || step.kind === "hole")) {
+    if ((stage.introComplete || (stage._gapHold && !(stage._gapTierWarm ?? GAP_TIER_WARM))) && (tierStep || step.kind === "hole")) {
       state._liveAt += 1;
       return state;
     }

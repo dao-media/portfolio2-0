@@ -204,7 +204,8 @@ const fail = (message) => {
 };
 
 try {
-  await page.goto(`${origin}/`, { waitUntil: "domcontentloaded" });
+  // SMOKE_QUERY=k=v adds a page query (A/B, e.g. lightskip=0).
+  await page.goto(`${origin}/${process.env.SMOKE_QUERY ? `?${process.env.SMOKE_QUERY}` : ""}`, { waitUntil: "domcontentloaded" });
   await page.bringToFront();
 
   // Real GPU, not SwiftShader: a software-rendered run can pass every check
