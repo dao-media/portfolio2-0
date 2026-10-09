@@ -248,6 +248,7 @@ export async function compileHeldRootVariants(renderer, scene, camera, root, opt
   // (KHR_parallel_shader_compile links off the main thread; three polls).
   for (const wrap of wraps) {
     await yieldFrame();
+    const shown = showAncestors(root);
     syncCompileCamera(camera);
     const lights = enableLightsOnHoldLayer(scene);
     const prevTarget = renderer.getRenderTarget();
@@ -261,12 +262,14 @@ export async function compileHeldRootVariants(renderer, scene, camera, root, opt
       renderer.setRenderTarget(prevTarget);
       renderer.autoClear = prevAutoClear;
       for (const light of lights) light.layers.disable(GPU_HOLD_LAYER);
+      shown();
     }
     await pending;
   }
   noteFlight("compileHeldRoot-done", { root: name, variants: wraps.length });
   for (const wrap of wraps) {
     await yieldFrame();
+    const shownDraw = showAncestors(root);
     syncCompileCamera(camera);
     const held = enableLightsOnHoldLayer(scene);
     const target = renderer.getRenderTarget();
@@ -282,8 +285,30 @@ export async function compileHeldRootVariants(renderer, scene, camera, root, opt
       renderer.autoClear = autoClear;
       renderer.shadowMap.needsUpdate = prevNeeds;
       for (const light of held) light.layers.disable(GPU_HOLD_LAYER);
+      shownDraw();
     }
   }
+}
+
+/**
+ * Pass M — three's compile / render skip hidden subtrees, and the world
+ * group is hidden through the hold and the black gap: make the held root's
+ * ancestors visible for the synchronous compile / draw, then restore.
+ * Live cameras cannot see the root (GPU_HOLD_LAYER only), so nothing shows.
+ * @param {THREE.Object3D | null | undefined} root
+ * @returns {() => void} restore
+ */
+function showAncestors(root) {
+  const flipped = [];
+  for (let p = root?.parent; p; p = p.parent) {
+    if (!p.visible) {
+      p.visible = true;
+      flipped.push(p);
+    }
+  }
+  return () => {
+    for (const p of flipped) p.visible = false;
+  };
 }
 
 function syncCompileCamera(camera) {

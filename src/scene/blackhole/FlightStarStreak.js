@@ -167,7 +167,7 @@ const _up = new THREE.Vector3();
  * @param {number} layerFadeTarget 0..1 — 0 fades the whole layer out (e.g. before arrival)
  * @param {number} dt
  */
-export function updateFlightStarStreak(streak, camera, pixelRatio, layerFadeTarget, dt) {
+export function updateFlightStarStreak(streak, camera, pixelRatio, layerFadeTarget, dt, driftMeters = 0) {
   if (!streak || !camera) return;
   const rate = Math.min(1, Math.max(0, dt || 0) * 3);
   streak.userData.layerFadeCurrent += (layerFadeTarget - streak.userData.layerFadeCurrent) * rate;
@@ -186,6 +186,16 @@ export function updateFlightStarStreak(streak, camera, pixelRatio, layerFadeTarg
 
   const pos = streak.geometry.attributes.position;
   for (let i = 0; i < pos.count; i += 1) {
+    // Pass M — with the camera parked (the black gap), stream the stars past
+    // it instead: same picture as flying forward driftMeters this frame.
+    if (driftMeters > 0) {
+      pos.setXYZ(
+        i,
+        pos.getX(i) - _forward.x * driftMeters,
+        pos.getY(i) - _forward.y * driftMeters,
+        pos.getZ(i) - _forward.z * driftMeters
+      );
+    }
     _localPos.fromBufferAttribute(pos, i).sub(_camPos);
     const alongCam = _localPos.dot(_forward);
     if (alongCam < -STREAK_RECYCLE_BEHIND) {

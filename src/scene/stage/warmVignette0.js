@@ -3,6 +3,10 @@ import { pointOnRing } from "../camera/ringLayout.js";
 import { FLOOR_MP_NOTCHES, INACTIVE_VIGNETTE_LAYER, VIGNETTE0_WARM_TEXTURES_PER_FRAME, VIGNETTE0_WARM_MOUNT_WAIT_MS } from "./constants.js";
 import { noteFlight } from "./flightRecorder.js";
 import { compileFadeVariants, withAuthoredVariant, withFadeVariant } from "./stageModelReveal.js";
+import { SHADOW_CUBE_FACES, withShadowFace } from "./faceShadowBake.js";
+
+/** Pass M — run the notch tiers in the black gap (see the tier skip below). */
+const GAP_TIER_WARM = false;
 
 const TEXTURE_KEYS = [
   "map",
@@ -181,7 +185,11 @@ export function stepVignette0Warm(stage, state) {
     // Hold `bustReady` — not the step progression itself, just the drop
     // trigger that reads it — until the chunk queue is actually empty, or
     // 8s, so a stalled queue can't hang the drop forever.
-    if (state._liveAt === (state._bustStepCount ?? 0) && !state.bustReady) {
+    // Pass M: `>=`, not `===` — the step after Bust's (edge 0) no longer
+    // waits on anything, so with `===` this check got one tick and, if the
+    // chunk queue wasn't drained on that tick, never ran again (Enter then
+    // waited for the whole warm: 197 s).
+    if (state._liveAt >= (state._bustStepCount ?? 0) && !state.bustReady) {
       if (!state._bustTexWait) state._bustTexWait = performance.now();
       const chunksDrained = (stage.chunkedTextures?.pending ?? 0) === 0;
       // Pass I item 5 — also wait for 2 consecutive ticks of a stable draw
@@ -209,17 +217,22 @@ export function stepVignette0Warm(stage, state) {
     // liveModelsReady needs the other three stops mounted — real dependencies
     // for their own steps below, but not for Bust's own step above, which
     // runs (and can finish) without waiting on them at all.
-    if (pastBust) {
-      if (!state._modelsWait) state._modelsWait = performance.now();
-      if (!liveModelsReady(stage) && performance.now() - state._modelsWait < 25000) {
-        return state;
-      }
-    }
     if (state._liveAt >= steps.length) {
       state.phase = "extra-textures";
       return state;
     }
     const step = steps[state._liveAt];
+    if (pastBust) {
+      // Pass M — each stop's steps wait only for that stop (Desktop and
+      // Archaeology can be ready while Sidekick is still integrating).
+      if (state._modelsWaitAt !== state._liveAt) {
+        state._modelsWaitAt = state._liveAt;
+        state._modelsWait = performance.now();
+      }
+      if (!liveModelsReady(stage, step) && performance.now() - state._modelsWait < 25000) {
+        return state;
+      }
+    }
     // DEV — settle-window black-frame investigation: a precise log of which
     // step ran when, independent of external poll timing (`debugLiveStepLog`).
     if (!stage._liveStepLog) stage._liveStepLog = [];
@@ -316,12 +329,28 @@ export function stepVignette0Warm(stage, state) {
       if (!state._liveCompiled) return state;
       if (tiny) {
         stage._frameCause = "warm-draw";
+        // Pass M M3 — post-land, the stop's static cube shadow bakes one
+        // face per tick (6 ticks) instead of six faces in one draw.
+        if (state._liveDrawAt === 0 && ((state._liveFace ?? 0) > 0 || faceBakeDue(stage, step))) {
+          // Only while the stop is off camera; if it un-culls mid-bake the
+          // remaining faces finish in this frame (never a half-baked map on screen).
+          const culled = stage.vignettes?.[step.stop]?.group?.userData?._stopCulled !== false;
+          do {
+            drawLiveSceneTiny(stage, step, 0, state._liveFace ?? 0);
+            state._liveFace = (state._liveFace ?? 0) + 1;
+          } while (!culled && state._liveFace < SHADOW_CUBE_FACES);
+          if (state._liveFace < SHADOW_CUBE_FACES) return state;
+          state._liveFace = 0;
+          state._liveDrawAt = 1;
+          return state;
+        }
         drawLiveSceneTiny(stage, step, state._liveDrawAt);
         state._liveDrawAt += 1;
         if (state._liveDrawAt < (step.hop ? 1 : 3)) return state;
       } else {
         drawLiveScene(stage, step);
       }
+      if (!step.hop && step.stop > 0) noteFlight("stop-ready", { stop: step.stop, t: Math.round(performance.now()) });
       state._liveReady = false;
       state._liveAt += 1;
       return state;
@@ -331,7 +360,14 @@ export function stepVignette0Warm(stage, state) {
     // composer resize plus a full-size draw: one post-land frame measured
     // 48 ms CPU + a 281 ms gap). After land a notch change simply allocates
     // its targets the first time it happens.
-    if (stage.introComplete && (step.kind === "hole" || step.kind === "tier" || step.kind === "restore")) {
+    // Pass M — the black gap skips them too (GAP_TIER_WARM, open trade-off):
+    // tiers in the gap give a clean land (0/0 in 9 of 9 instant clicks) but
+    // the governor then idles at full width and every instant-click hop
+    // starts GPU-bound there (2–14 frames > 50 ms per hop window); without
+    // them the floor steps down live after land and a hop's first
+    // motion-DPR step allocates (one 52–72 ms resize frame).
+    const tierStep = step.kind === "tier" || step.kind === "restore";
+    if ((stage.introComplete || (stage._gapHold && !GAP_TIER_WARM)) && (tierStep || step.kind === "hole")) {
       state._liveAt += 1;
       return state;
     }
@@ -424,17 +460,20 @@ function finish(state) {
  */
 function liveSteps() {
   const bust = [{ kind: "scene", stop: 0, hop: false, from: 0 }];
-  const deferred = [{ kind: "env" }];
-  for (let stop = 1; stop < 4; stop += 1) {
-    deferred.push({ kind: "scene", stop, hop: false, from: stop });
+  // Pass M — ordered by when it is needed:
+  //  1. what the land frame itself uses (Bust's edge-glitch SDF, the Duo
+  //     entrance, rest SMAA) — when the warm stalled, the land frame linked
+  //     10 edge-SDF depth programs live (1.8 s);
+  //  2. the CRT env (Desktop only);
+  //  3. stops nearest first: Desktop and Archaeology are one hop from Bust,
+  //     Sidekick two — each stop's scene then its edge step;
+  //  4. the rest (lens, hole, notch tiers — hold-only, see below).
+  // The 12 from→to hop combos stay gone (Pass K item 3).
+  const deferred = [{ kind: "edge", stop: 0 }, { kind: "duo" }, { kind: "smaa" }, { kind: "env" }];
+  for (const stop of [1, 3, 2]) {
+    deferred.push({ kind: "scene", stop, hop: false, from: stop }, { kind: "edge", stop });
   }
-  // Pass K item 3 — the 12 from→to hop combos are gone: each was a full
-  // composer draw of two stops at once, and the per-stop live/authored/fade
-  // draws above already build every program and pipeline a hop uses (a hop
-  // shows the same two stops' materials in those same states).
-  deferred.push({ kind: "hole" }, { kind: "smaa" });
-  for (let stop = 0; stop < 4; stop += 1) deferred.push({ kind: "edge", stop });
-  deferred.push({ kind: "duo" }, { kind: "lens" });
+  deferred.push({ kind: "lens" }, { kind: "hole" });
   for (let i = 0; i < FLOOR_MP_NOTCHES.length; i += 1) {
     deferred.push({ kind: "tier", notch: FLOOR_MP_NOTCHES[i] });
   }
@@ -550,7 +589,22 @@ function compileLiveScene(stage, step) {
   return pending;
 }
 
-function liveModelsReady(stage) {
+/**
+ * Pass M — is the live step only waiting on its stop's integration? Post-land
+ * a waiting step must not take the frame's background token: the held
+ * compile it waits for needs that same token (a cap run deadlocked on it
+ * until the 25 s fallback — Sidekick ready +24 s after land). The first
+ * call for a step returns false so the step starts its own wait timer.
+ */
+export function warmStepBlocked(stage, state) {
+  if (!state || state.phase !== "live" || state._liveReady) return false;
+  const steps = state._liveSteps || [];
+  if (state._liveAt < (state._bustStepCount ?? 0) || state._liveAt >= steps.length) return false;
+  if (state._modelsWaitAt !== state._liveAt) return false;
+  return !liveModelsReady(stage, steps[state._liveAt]) && performance.now() - state._modelsWait < 25000;
+}
+
+function liveModelsReady(stage, step = null) {
   const desktop = stage.vignettes?.[1]?.instance;
   const sidekick = stage.vignettes?.[2]?.instance;
   const arch = stage.vignettes?.[3]?.instance;
@@ -562,6 +616,15 @@ function liveModelsReady(stage) {
   // Pass K item 2 — integration (mount + held compile + release) now runs in
   // the hold; wait for it so each stop's static shadow bake includes its
   // own props (25 s fallback as before if it never settles).
+  // Pass M — each step waits only for what it touches.
+  const stop = step && (step.kind === "scene" || step.kind === "edge") ? step.stop : step?.kind === "env" ? 1 : null;
+  if (step && stop == null) return warmMaterialsReady(stage);
+  if (stop === 0) return warmMaterialsReady(stage);
+  if (stop != null) {
+    const integrated = Boolean(stage._stopIntegrated?.has(stop) || stage._introIntegrationSettled);
+    const own = stop === 1 ? deskOk && spill : stop === 2 ? sideOk && led : archOk;
+    return own && integrated && warmMaterialsReady(stage);
+  }
   const integrated = Boolean(stage._introIntegrationSettled);
   return deskOk && sideOk && archOk && spill && led && integrated && warmMaterialsReady(stage);
 }
@@ -666,17 +729,25 @@ function tinyTarget(stage) {
  * One tiny beauty-only draw of `step.stop` at its live pose: variant 0 =
  * live state (+ its static shadow bake), 1 = authored opaque, 2 = hop fade.
  */
-function drawLiveSceneTiny(stage, step, variant) {
+function drawLiveSceneTiny(stage, step, variant, face = null) {
   const renderer = stage.renderer;
   const target = tinyTarget(stage);
   if (!renderer || !stage.scene || !stage.camera || !target) return;
   withLivePose(stage, step, () => {
     const prevTarget = renderer.getRenderTarget();
     const prevNeeds = renderer.shadowMap.needsUpdate;
+    let faceLight = null;
     if (variant === 0 && !step.hop) {
       renderer.shadowMap.needsUpdate = true;
       const light = stage.neon?.stopLights?.[step.stop]?.light;
-      if (light?.castShadow && light.shadow && !light.shadow.map) {
+      if (face != null && light?.castShadow && light.shadow?.isPointLightShadow) {
+        faceLight = light;
+        if (face === 0) {
+          light.userData.shadowBakes = (light.userData.shadowBakes ?? 0) + 1;
+          light.userData.shadowPrebaked = true;
+          noteFlight("shadow-bake", { light: light.name, reason: "warm-face" });
+        }
+      } else if (light?.castShadow && light.shadow && !light.shadow.map) {
         light.shadow.needsUpdate = true;
         light.userData.shadowBakes = (light.userData.shadowBakes ?? 0) + 1;
         light.userData.shadowPrebaked = true;
@@ -684,7 +755,8 @@ function drawLiveSceneTiny(stage, step, variant) {
       }
     }
     const group = stage.vignettes?.[step.stop]?.group;
-    const draw = () => renderer.render(stage.scene, stage.camera);
+    const render = () => renderer.render(stage.scene, stage.camera);
+    const draw = faceLight ? () => withShadowFace(faceLight, face, render) : render;
     renderer.setRenderTarget(target);
     try {
       if (variant === 1) withAuthoredVariant(group, draw);
@@ -697,6 +769,123 @@ function drawLiveSceneTiny(stage, step, variant) {
       renderer.shadowMap.needsUpdate = prevNeeds;
     }
   });
+}
+
+/**
+ * Pass M — one tiny draw of a culled stop at its live pose: no shadow
+ * update, no material variant (see StageExperience._touchCulledStops).
+ */
+export function warmTouchStop(stage, stop) {
+  const renderer = stage.renderer;
+  const target = tinyTarget(stage);
+  if (!renderer || !stage.scene || !stage.camera || !target) return;
+  withLivePose(stage, { kind: "scene", stop, hop: false, from: stop }, () => {
+    const prev = renderer.getRenderTarget();
+    const needs = renderer.shadowMap.needsUpdate;
+    renderer.shadowMap.needsUpdate = false;
+    renderer.setRenderTarget(target);
+    try {
+      renderer.render(stage.scene, stage.camera);
+    } finally {
+      renderer.setRenderTarget(prev);
+      renderer.shadowMap.needsUpdate = needs;
+    }
+  });
+}
+
+/** Pass M M3 — a stop's static shadow still unbaked after land (or forced, for the compare). */
+function faceBakeDue(stage, step) {
+  if (step.hop || !(step.stop > 0)) return false;
+  if (!stage._forceFaceBake && !(stage.introComplete && !stage._gapHold)) return false;
+  const light = stage.neon?.stopLights?.[step.stop]?.light;
+  if (!light?.castShadow || !light.shadow?.isPointLightShadow || light.shadow.map) return false;
+  // On camera already: one-shot, as before (the face path is for culled stops).
+  return stage._forceFaceBake || stage.vignettes?.[step.stop]?.group?.userData?._stopCulled !== false;
+}
+
+/**
+ * DEV/Pass M M3 — bake `stop`'s cube shadow three ways at its live pose and
+ * compare: one-shot (reference), six faces into a fresh map, and six faces
+ * over a map pre-filled with 0 (proves each face's scissored clear + draw
+ * covers its whole face). The light's real map is restored afterwards.
+ */
+export function debugFaceBakeCompare(stage, stop) {
+  const renderer = stage.renderer;
+  const light = stage.neon?.stopLights?.[stop]?.light;
+  if (!renderer || !light?.shadow?.isPointLightShadow) return { error: "no point-light shadow", stop };
+  const step = { kind: "scene", stop, hop: false, from: stop };
+  const shadow = light.shadow;
+  const saved = shadow.map;
+  const read = () => {
+    const m = shadow.map;
+    const buf = new Uint8Array(m.width * m.height * 4);
+    renderer.readRenderTargetPixels(m, 0, 0, m.width, m.height, buf);
+    return buf;
+  };
+  const drop = () => {
+    shadow.map?.dispose();
+    shadow.map = null;
+  };
+  const faces = () => {
+    for (let f = 0; f < SHADOW_CUBE_FACES; f += 1) drawLiveSceneTiny(stage, step, 0, f);
+  };
+  const diff = (a, b) => {
+    let n = 0;
+    for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) n += 1;
+    return n;
+  };
+  shadow.map = null;
+  try {
+    drawLiveSceneTiny(stage, step, 0);
+    const oneShot = read();
+    const size = [shadow.map.width, shadow.map.height];
+    drop();
+    faces();
+    const fresh = read();
+    // Pre-fill with 0 (never a valid packed distance at the far plane).
+    const prev = renderer.getRenderTarget();
+    const clear = renderer.getClearColor(new THREE.Color());
+    const alpha = renderer.getClearAlpha();
+    renderer.setRenderTarget(shadow.map);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear();
+    renderer.setRenderTarget(prev);
+    renderer.setClearColor(clear, alpha);
+    faces();
+    const over = read();
+    let written = 0;
+    for (let i = 0; i < oneShot.length; i += 4) if (oneShot[i] !== 255 || oneShot[i + 1] !== 255 || oneShot[i + 2] !== 255) written += 1;
+    // The 4x2 atlas has two cells no face uses (never written, never
+    // sampled): split the pre-filled diff into face texels vs those cells.
+    const w = shadow.mapSize.x;
+    const h = shadow.mapSize.y;
+    const inFace = new Uint8Array(size[0] * size[1]);
+    for (let f = 0; f < SHADOW_CUBE_FACES; f += 1) {
+      const v = shadow._viewports[f];
+      for (let y = h * v.y; y < h * (v.y + v.w); y += 1) inFace.fill(1, y * size[0] + w * v.x, y * size[0] + w * (v.x + v.z));
+    }
+    let overFace = 0;
+    let overUnused = 0;
+    for (let i = 0; i < over.length; i += 1) {
+      if (over[i] === oneShot[i]) continue;
+      if (inFace[i >> 2]) overFace += 1;
+      else overUnused += 1;
+    }
+    return {
+      stop,
+      light: light.name,
+      size,
+      texels: oneShot.length / 4,
+      casterTexels: written,
+      diffFresh: diff(oneShot, fresh),
+      diffOverZeroFaces: overFace,
+      diffOverZeroUnusedCells: overUnused
+    };
+  } finally {
+    drop();
+    shadow.map = saved;
+    shadow.needsUpdate = false;
+  }
 }
 
 function drawHoleFrame(stage) {

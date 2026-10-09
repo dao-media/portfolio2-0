@@ -284,8 +284,11 @@ try {
     console.log("… drop-gap timing skipped (black-hole flight not observed — reducedMotion or ?blackhole=0)");
   } else {
     const gapMs = dropStartAt - spiralEndAt;
-    if (gapMs > 2000) {
-      fail(`spiral end -> drop start took ${gapMs}ms (budget: 2000ms)`);
+    // Pass M: the black gap may hold the drop up to GAP_HOLD_MAX_MS (3000)
+    // on top of the old 2000 ms budget; past that it is a hang.
+    const budget = 2000 + 3000;
+    if (gapMs > budget) {
+      fail(`spiral end -> drop start took ${gapMs}ms (budget: ${budget}ms)`);
     } else {
       console.log(`✓ spiral end -> drop start ${gapMs}ms`);
     }

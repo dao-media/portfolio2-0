@@ -123,7 +123,7 @@ import {
   MOTION_DPR
 } from "./stage/stagePerfGovernor.js";
 import { restFidelityForIndex, restResource } from "./stage/restFidelity.js";
-import { createVignette0WarmState, stepVignette0Warm } from "./stage/warmVignette0.js";
+import { createVignette0WarmState, debugFaceBakeCompare, stepVignette0Warm, warmStepBlocked, warmTouchStop } from "./stage/warmVignette0.js";
 import { ChunkedTextureQueue } from "./stage/chunkedTextureUpload.js";
 import { SidekickGroundFog } from "./vignettes/SidekickGroundFog.js";
 import { captureStopDarkEnv } from "./stage/stopDarkEnv.js";
@@ -397,6 +397,24 @@ const INACTIVE_MASK = 1 << INACTIVE_VIGNETTE_LAYER;
  * frames first (a failed probe costs one slow frame; back-off 20 → 160 s).
  */
 const PACE_PROBE_STILL_MS = 20000;
+/**
+ * Pass M — after the spiral, the screen stays in the black gap (world
+ * hidden, stars coasting) until the hold's remaining work (integration,
+ * warm, chunk uploads, stop envs) is done, but never more than this extra.
+ * Dane's knob.
+ */
+export const GAP_HOLD_MAX_MS = 3000;
+/** Pass M — streak coast in the gap: m/s at gap start (decays) and the floor it eases to. */
+const GAP_STREAK_SPEED = 26;
+const GAP_STREAK_MIN_SPEED = 5;
+const GAP_STREAK_EASE_SEC = 1.1;
+/** Pass M — warm steps per gap frame (experiment knob). */
+const GAP_WARM_STEPS_PER_FRAME = 64;
+/** Pass M — warm-step CPU budget per gap frame (the gap is never seen). */
+const GAP_WORK_MS = 30;
+const GAP_BG_SLOTS = 6;
+/** Pass M — each culled stop gets one tiny draw this often (frames); see _touchCulledStops. */
+const CULLED_TOUCH_FRAMES = 32;
 /** Pass L — a floor drop needs this many unexplained >= FLOOR_DROP_MS frames… */
 const FLOOR_DROP_SUSTAIN = 3;
 /** …within this window (ms). Thresholds themselves are unchanged. */
@@ -1436,6 +1454,22 @@ export class StageExperience {
           this.blackHole.group.visible = on;
           applied = true;
         }
+        break;
+      // Pass M — Desktop entry-spike probe (scripts/pass-m-desk-probe.mjs).
+      case "desk-pc":
+      case "desk-glass":
+      case "desk-screen": {
+        const d = this.vignettes?.[1]?.instance;
+        const obj = name === "desk-pc" ? d?.pcRoot : name === "desk-glass" ? d?.glassMesh : (d?.phosphorMesh ?? d?.screenMesh);
+        if (obj) {
+          obj.visible = on;
+          applied = true;
+        }
+        break;
+      }
+      case "culled-touch":
+        this._abCulledTouchOff = !on;
+        applied = true;
         break;
       case "warm-work":
         this._abWarmPaused = !on;
@@ -3966,6 +4000,7 @@ export class StageExperience {
    * @param {number} now
    */
   _frameExplained(now) {
+    if (this._gapHold) return true;
     const cause = this._lastCause || "render";
     if (/^(compile|texture|shadow-bake|wet-bake|reveal-render|warm|resize)/.test(cause)) {
       this._bgWorkAt = now;
@@ -5715,7 +5750,13 @@ export class StageExperience {
       // never run and _vignette0Warm.done would never become true. Keep
       // draining it in the background, same per-step skipBeauty/frameCause
       // care as before, until it actually finishes.
-      if (this._vignette0Warm && !this._vignette0Warm.done && !this._blackHoleActive && this._takeBgToken("warm")) {
+      if (
+        this._vignette0Warm &&
+        !this._vignette0Warm.done &&
+        !this._blackHoleActive &&
+        !warmStepBlocked(this, this._vignette0Warm) &&
+        this._takeBgToken("warm")
+      ) {
         this.warmVignette0();
       }
       return;
@@ -5723,8 +5764,34 @@ export class StageExperience {
     if (this._blackHoleActive) return;
 
     if (this._descentPendingWarm) {
-      this.warmVignette0();
+      if (this._gapHold) {
+        // Pass M — several warm steps per gap frame (stops when a step is
+        // waiting on something async, or the budget is spent).
+        const t0 = performance.now();
+        this._gapFrameAt = t0;
+        this._gapSlots = 0;
+        const w = this._vignette0Warm;
+        for (let k = 0; k < GAP_WARM_STEPS_PER_FRAME && w && !w.done && performance.now() - t0 < GAP_WORK_MS; k += 1) {
+          const sig = `${w.phase}:${w._liveAt}:${w._liveDrawAt}:${w._liveReady}:${w._liveCompiled}:${w.textureAt}:${w._extraTextureAt}`;
+          this.warmVignette0();
+          const sig2 = `${w.phase}:${w._liveAt}:${w._liveDrawAt}:${w._liveReady}:${w._liveCompiled}:${w.textureAt}:${w._extraTextureAt}`;
+          if (sig === sig2) break;
+        }
+        this._frameCause = "gap";
+      } else {
+        this.warmVignette0();
+      }
       if (!this._bustWarmReady()) return;
+      if (this._gapHold) {
+        const now = performance.now();
+        const rem = this._holdWorkRemaining();
+        if (!rem.done && now < this._gapHold.until) return;
+        const entry = { reason: rem.done ? "done" : "cap", ms: Math.round(now - this._gapHold.start), remaining: rem };
+        noteFlight("gap-end", entry);
+        if (!this._gapLog) this._gapLog = [];
+        this._gapLog.push(entry);
+        this._gapHold = null;
+      }
       this._descentPendingWarm = false;
       this.world.visible = true;
       // Pass G item 3: `prelightStop` existed ("Bust lantern is already at
@@ -5861,6 +5928,13 @@ export class StageExperience {
    * Item 4 tightens this to idle-only post-land slicing.
    */
   async _bgSlot(kind = "held") {
+    // Pass M — in the black gap nothing is on screen: up to GAP_BG_SLOTS
+    // units share one frame (within its GAP_WORK_MS), instead of one each.
+    // A held root is six slots; Archaeology's 14 took ~1.7 s of the gap.
+    if (this._gapHold && this._gapSlots < GAP_BG_SLOTS && performance.now() - (this._gapFrameAt ?? 0) < GAP_WORK_MS) {
+      this._gapSlots += 1;
+      return;
+    }
     for (;;) {
       await this._yieldFrame();
       if (this._takeBgToken(kind)) return;
@@ -5874,6 +5948,8 @@ export class StageExperience {
    * there has been no input for BG_INPUT_QUIET_MS.
    */
   _bgIdle(now = performance.now(), { ignoreInput = false } = {}) {
+    // Pass M — the black gap is never seen: background work runs freely.
+    if (this._gapHold) return true;
     if (this._blackHoleActive) return this.blackHoleSeq?.phase === BLACK_HOLE_PHASE.APPROACH;
     if (!this._introMotionComplete) return false;
     if (!this.cameraRig?.state?.isSettled) return false;
@@ -5902,7 +5978,7 @@ export class StageExperience {
     // step / mip) per frame — separate allowances, so a long held-compile
     // queue can never starve the texture queue (smoke caught 8 jobs stuck).
     const slot = kind === "chunk" ? "_bgChunkFrame" : "_bgTokenFrame";
-    if (this[slot] === this._frameNo) return false;
+    if (this[slot] === this._frameNo && !this._gapHold) return false;
     this[slot] = this._frameNo;
     this._bgTokenKind = kind;
     this._bgTokenAt = performance.now();
@@ -6153,17 +6229,7 @@ export class StageExperience {
       }
       phase("pc-held");
       await this._compileThenShow(desktop?.pcRoot);
-
-      phase("sidekick");
-      await spanFrame("sidekick-integrate", () =>
-        sidekick?.integrateAfterIntro?.({
-          yieldFrame,
-          revealHidden: true,
-          deferScreenTextureMs: INTRO_SIDEKICK_BAKE_DELAY_MS
-        })
-      );
-      phase("sidekick-held");
-      await this._compileThenShow(sidekick?.sidekickRoot);
+      if (desktop?.pcRoot) this._markStopIntegrated(1);
 
       phase("archaeology");
       await spanFrame("archaeology-integrate", () =>
@@ -6177,6 +6243,19 @@ export class StageExperience {
       for (const root of archaeologyRoots) {
         await this._compileThenShow(root);
       }
+      if (archaeology?._modelLoadSettled && archaeologyRoots.length) this._markStopIntegrated(3);
+      phase("sidekick");
+      await spanFrame("sidekick-integrate", () =>
+        sidekick?.integrateAfterIntro?.({
+          yieldFrame,
+          revealHidden: true,
+          deferScreenTextureMs: INTRO_SIDEKICK_BAKE_DELAY_MS
+        })
+      );
+      phase("sidekick-held");
+      await this._compileThenShow(sidekick?.sidekickRoot);
+
+      if (sidekick?.sidekickRoot) this._markStopIntegrated(2);
 
       stillHolding = Boolean(
         desktop?._holdForIntro ||
@@ -6203,9 +6282,10 @@ export class StageExperience {
       return;
     }
 
-    // Pass L L5 — stops 1-3's dark environments, now that their emitters
-    // (CRT screen, LCD) exist. One per background slot.
-    for (let i = 1; i < (this.vignettes?.length ?? 0); i += 1) {
+    // Pass L L5 — any stop env not built yet (each is normally built as its
+    // stop finishes integrating, see _markStopIntegrated).
+    for (const i of [1, 3, 2]) {
+      if (this._stopEnvs?.[i]) continue;
       await this._bgSlot();
       this._ensureStopEnv(i);
     }
@@ -8011,12 +8091,120 @@ export class StageExperience {
     s.isSettled = false;
     rig._introActive = true;
     rig.poseSuspended = false;
-    if (bustReady) {
+    const remaining = this._holdWorkRemaining();
+    if (bustReady && !remaining.done && GAP_HOLD_MAX_MS > 0) {
+      // Pass M — finish the hold's work behind the black gap.
+      const now = performance.now();
+      this._gapHold = { start: now, until: now + GAP_HOLD_MAX_MS };
+      this.world.visible = false;
+      this._descentPendingWarm = true;
+      noteFlight("gap-start", { t: Math.round(now), remaining });
+    } else if (bustReady) {
+      noteFlight("gap-skip", { remaining });
       this._introSpringArmed = true;
       rig.armIntroDescent();
     } else {
       this._descentPendingWarm = true;
     }
+  }
+
+  /**
+   * Pass M — what of the hold's opportunistic work is still outstanding:
+   * PC / Archaeology / Sidekick integration, the warm sequence, chunked
+   * texture uploads, and the per-stop dark environments.
+   */
+  _holdWorkRemaining() {
+    const warm = this._vignette0Warm;
+    const envs = (this.vignettes || []).filter((_, i) => !this._stopEnvs?.[i]).length;
+    const r = {
+      integration: !this._introIntegrationSettled,
+      warm: Boolean(warm && !warm.done),
+      warmPhase: warm?.phase ?? null,
+      warmAt: warm?._liveAt ?? null,
+      chunks: this.chunkedTextures?.pending ?? 0,
+      mipmaps: this.chunkedTextures?.mipmapPending ?? 0,
+      envs,
+      stopsIntegrated: [...(this._stopIntegrated ?? [])]
+    };
+    r.done = !r.integration && !r.warm && r.chunks === 0 && r.envs === 0;
+    return r;
+  }
+
+  /**
+   * Pass M — stop i's props are mounted, compiled and released: its warm
+   * step may run, and its dark environment (emitters now exist) is built.
+   * @param {number} i
+   */
+  _markStopIntegrated(i) {
+    if (!this._stopIntegrated) this._stopIntegrated = new Set();
+    if (this._stopIntegrated.has(i)) return;
+    this._stopIntegrated.add(i);
+    this._ensureStopEnv(i);
+    noteFlight("stop-integrated", { stop: i, t: Math.round(performance.now()) });
+  }
+
+  /** DEV/Pass M M3 — one-shot vs face-by-face cube shadow bake, pixel diff (expect 0). */
+  debugFaceBakeCompare(stop = 1) {
+    return debugFaceBakeCompare(this, stop);
+  }
+
+  /** DEV/Pass M M3 — force the face-by-face path for the warm's stop bakes. */
+  debugForceFaceBake(on = true) {
+    this._forceFaceBake = Boolean(on);
+    return this._forceFaceBake;
+  }
+
+  /**
+   * Pass M — the first draw of a stop after it has been off camera for a
+   * while cost 60–160 ms of GPU (Desktop's PC; ~50 ms Bust, ~35 ms
+   * Archaeology), two frames after its un-cull, every entry, pre-M too:
+   * hiding the PC removed it, hiding the glass or screen did not. CPU was
+   * ~2 ms, so it is not a link or upload we can see. Touching each culled
+   * stop with one tiny draw (4×4-class target, live pose, no shadow update)
+   * every CULLED_TOUCH_FRAMES keeps it from happening (probe: 98–163 → 18–22
+   * ms). Stops are staggered so one is touched per frame at most. It starts
+   * in the black gap, not at land: the first touch of a stop pays that same
+   * cost (Desktop's first post-land touch put a 110–123 ms frame two frames
+   * later into land→+10 s in 9 of 9 runs).
+   */
+  _touchCulledStops() {
+    if (this._blackHoleActive || this._abCulledTouchOff || !this.vignettes?.length || !this.world) return;
+    // Never on a hop frame (an Archaeology touch measured 19 ms CPU mid-hop):
+    // the gap, the drop, and settled frames only.
+    if (this.introComplete && !this.cameraRig?.state?.isSettled) return;
+    const n = this.vignettes.length;
+    const step = Math.floor(CULLED_TOUCH_FRAMES / n);
+    const phase = this._frameNo % CULLED_TOUCH_FRAMES;
+    if (phase % step !== 0) return;
+    const stop = phase / step;
+    if (stop >= n || !this.vignettes[stop]?.group?.userData?._stopCulled) return;
+    warmTouchStop(this, stop);
+    if (!this._stopTouched) this._stopTouched = new Set();
+    if (!this._stopTouched.has(stop)) {
+      this._stopTouched.add(stop);
+      noteFlight("stop-touch", { stop, gap: Boolean(this._gapHold), introComplete: this.introComplete });
+    }
+  }
+
+  /** DEV/Pass M — CPU ms of one culled-stop touch, per stop (median of `n`). */
+  debugTouchCost(n = 9) {
+    const out = {};
+    for (let i = 0; i < (this.vignettes?.length ?? 0); i += 1) {
+      const ms = [];
+      for (let k = 0; k < n; k += 1) {
+        const t0 = performance.now();
+        warmTouchStop(this, i);
+        ms.push(performance.now() - t0);
+      }
+      ms.sort((a, b) => a - b);
+      out[i] = Math.round(ms[n >> 1] * 100) / 100;
+    }
+    return out;
+  }
+
+  /** DEV/Pass M — the gap-hold log for this session. */
+  debugGap() {
+    return (this._gapLog || []).slice();
   }
 
   _tickBlackHole(dt) {
@@ -8378,7 +8566,15 @@ export class StageExperience {
         lensActive: this._blackHoleActive
       });
     }
-    if (this.flightStarStreak) {
+    if (this.flightStarStreak && this._gapHold) {
+      // Pass M — the gap must never look frozen: the near stars keep
+      // streaming past, coasting down from the spiral's speed. Reduced
+      // motion: a still, dim field.
+      const pixelRatio = this.renderer?.getPixelRatio?.() ?? this.pixelRatio ?? 1;
+      const tGap = (performance.now() - this._gapHold.start) / 1000;
+      const speed = this.reducedMotion ? 0 : GAP_STREAK_MIN_SPEED + GAP_STREAK_SPEED * Math.exp(-tGap / GAP_STREAK_EASE_SEC);
+      updateFlightStarStreak(this.flightStarStreak, this.camera, pixelRatio, this.reducedMotion ? 0.35 : 0.8, dt, speed * dt);
+    } else if (this.flightStarStreak) {
       if (!this._blackHoleActive) {
         // Hard cut, not a fade: this layer is a flight-only "streaming past"
         // effect. A multi-second fade tail was still visibly recycling
@@ -8435,6 +8631,8 @@ export class StageExperience {
     preT = this._markPre("fog", preT);
     this._tickIntroBloomReturn(dt);
     this._syncInactiveVignetteLayers();
+    this._touchCulledStops();
+    preT = this._markPre("touch", preT);
 
     // Motion DPR + adaptive governor (EMA frame ms → step-down ladder).
     this._lastFrameMs = frameMs;
