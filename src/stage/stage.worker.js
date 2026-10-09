@@ -67,6 +67,7 @@ self.onmessage = (event) => {
   else if (msg.type === "duo") stage.handleHostDuo(msg);
   else if (msg.type === "pixelBudget") stage.setPixelBudget(msg.megapixels);
   else if (msg.type === "groundFog") stage.setGroundFogParams(msg.params);
+  else if (msg.type === "sidekickDrop") stage.setSidekickDropShadow(msg.params);
   else if (msg.type === "floorReset") stage.resetFloorStats();
   else if (msg.type === "debugCall") {
     Promise.resolve()

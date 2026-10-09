@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { applyLightSkip } from "./stage/lightSkip.js";
+import { installVramTracker } from "./stage/vramTracker.js";
+import { setPoolDiscardOutgoing, setPoolLegacy } from "./stage/composerSizePool.js";
 import gsap from "gsap";
 import { HUDController } from "../ui/HUDController.js";
 import { DesktopVignette, desktopVignetteMeta } from "./vignettes/DesktopVignette.js";
@@ -23,6 +25,7 @@ import { AccentLightSystem } from "./accent/AccentLightSystem.js";
 import { createFogParams } from "../fog/fogConfig.js";
 import { configureSpotShadow } from "./stage/configureSpotShadow.js";
 import { VignetteContactShadows } from "./stage/VignetteContactShadows.js";
+import { SidekickDropShadow } from "./vignettes/SidekickDropShadow.js";
 import { LiveStageEnvironment } from "./stage/LiveStageEnvironment.js";
 import { buildStageStudioRoom } from "./stage/StageStudioRoom.js";
 import { buildStageFloor } from "./stage/StageFloor.js";
@@ -423,6 +426,8 @@ const GAP_WORK_MS = 30;
 const GAP_BG_SLOTS = 6;
 /** Pass M — each culled stop gets one tiny draw this often (frames); see _touchCulledStops. */
 const CULLED_TOUCH_FRAMES = 36;
+/** Pass O — motion-DPR draw widths snap to this grid (px) so they can be pooled. */
+const MOTION_SNAP_PX = 32;
 /** Pass N N5 — Archaeology's meshes are touched in this many slices (~0.8 ms CPU each). */
 const ARCH_TOUCH_SLICES = 6;
 /** Pass N N5 — touch units in order, one every CULLED_TOUCH_FRAMES / length frames: [stop, slice]. */
@@ -550,6 +555,11 @@ export class StageExperience {
       ...(this._inWorker ? { alpha: false } : {}),
       powerPreference: "high-performance"
     });
+    // Pass O O2 — DEV VRAM census (`?vram=1`, debugVram()).
+    if (/[?&]vram=1\b/.test(this._inWorker ? this._search : (typeof window !== "undefined" ? window.location.search : ""))) {
+      installVramTracker(this.renderer.getContext());
+    }
+    if (/[?&]poolall=1\b/.test(this._inWorker ? this._search : (typeof window !== "undefined" ? window.location.search : ""))) setPoolLegacy(true);
     this.renderer.setPixelRatio(this.pixelRatio);
     {
       const { w, h } = this._viewportCssSize();
@@ -1611,6 +1621,10 @@ export class StageExperience {
         }
         break;
       }
+      case "sk-drop":
+        this._abSkDropOff = !on;
+        applied = true;
+        break;
       case "apple-cast": {
         const tree = this.vignettes?.[0]?.instance?.appleRoot;
         if (tree) {
@@ -2686,6 +2700,53 @@ export class StageExperience {
         neonLevel: level
       });
     }
+    this._tickSidekickDropShadow();
+  }
+
+  /** Pass O O1 — soft radial drop shadow under the floating phone (SidekickDropShadow.js). */
+  _tickSidekickDropShadow() {
+    const rig = this.contactShadows?.[2];
+    const sidekick = this.vignettes?.[2]?.instance;
+    if (!rig || !sidekick) return;
+    if (!this._sidekickDrop) {
+      this._sidekickDrop = new SidekickDropShadow(rig.neonPad);
+      rig.neonPadOwned = true;
+      if (this._sidekickDropPending) this._sidekickDrop.setParams(this._sidekickDropPending);
+    }
+    const fade = this.neon?.getStopFade?.(2) ?? 0;
+    const culled = this.vignettes[2]?.group?.userData?._stopCulled === true;
+    this._sidekickDrop.update({
+      phone: sidekick.phoneRoot ?? null,
+      group: rig.group,
+      floorY: rig.floorLocalY(),
+      fade: culled || this._abSkDropOff ? 0 : fade,
+      neonColor: this.neon?.entries?.[2]?.dominant ?? null,
+      resting: !this.cameraRig?.state?.isZoomed
+    });
+  }
+
+  /** Pass O O1 — live drop-shadow params (Shift+K "Drop shadow"); returns the full set. */
+  setSidekickDropShadow(patch = {}) {
+    if (!this._sidekickDrop) {
+      this._sidekickDropPending = { ...(this._sidekickDropPending ?? {}), ...patch };
+      return this._sidekickDropPending;
+    }
+    return this._sidekickDrop.setParams(patch);
+  }
+
+  /** DEV/Pass O — drop shadow state: params + last computed shape. */
+  debugSidekickDrop() {
+    const pad = this.contactShadows?.[2]?.neonPad;
+    let ndc = null;
+    let layers = null;
+    if (pad && this.camera) {
+      const p = pad.getWorldPosition(new THREE.Vector3());
+      const world = p.toArray().map((v) => +v.toFixed(2));
+      p.project(this.camera);
+      ndc = { x: +p.x.toFixed(3), y: +p.y.toFixed(3), world };
+      layers = { pad: pad.layers.mask, camera: this.camera.layers.mask };
+    }
+    return { params: this._sidekickDrop?.params ?? null, last: this._sidekickDrop?.last ?? null, visible: pad?.visible ?? null, ndc, layers, opacity: pad?.material?.uniforms?.uOpacity?.value ?? null };
   }
 
   /** Shared LoadingManager → XP fader. Min duration before input. */
@@ -3368,8 +3429,16 @@ export class StageExperience {
     const canvasRatio = sequenceFull;
     const canvasChanged =
       Math.abs(canvasRatio - (this.renderer.getPixelRatio?.() || 0)) > 0.002;
-    const dw = Math.max(1, Math.round(w * this.pixelRatio));
-    const dh = Math.max(1, Math.round(h * this.pixelRatio));
+    let dw = Math.max(1, Math.round(w * this.pixelRatio));
+    let dh = Math.max(1, Math.round(h * this.pixelRatio));
+    // Pass O — motion DPR walked one-pixel sizes (1304, 1303 … 1286 per hop):
+    // each a fresh post-target set. Snapped to a MOTION_SNAP_PX grid there
+    // are one or two per hop, so they can be pooled like tier sizes.
+    const motionSize = !sequence && this.pixelRatio !== budgetRatio;
+    if (motionSize) {
+      dw = Math.max(MOTION_SNAP_PX, Math.round(dw / MOTION_SNAP_PX) * MOTION_SNAP_PX);
+      dh = Math.max(1, Math.round((dw * h) / Math.max(1, w)));
+    }
     const drawChanged = Boolean(
       this.post && (this.post.drawWidth !== dw || this.post.drawHeight !== dh)
     );
@@ -3397,7 +3466,20 @@ export class StageExperience {
         this.post.setSize(w, h);
       }
     }
-    const allocated = this.post?.setDrawSize(dw, dh) === true;
+    // Pass O — pool tier sizes only (composerSizePool.js): a motion-DPR size
+    // being left is freed, not kept.
+    // The black-hole sequence size is used once: not pooled (left at land, it
+    // kept a second full-size MSAA set alive, ~1 GB, 1 px off the rest size).
+    // Snapped motion sizes are pooled (bounded by POOL_MAX per target).
+    const tier = !sequence;
+    setPoolDiscardOutgoing(this._drawSizeTier === false);
+    let allocated = false;
+    try {
+      allocated = this.post?.setDrawSize(dw, dh) === true;
+    } finally {
+      setPoolDiscardOutgoing(false);
+    }
+    this._drawSizeTier = tier;
     if (visible && allocated) {
       this._floorIgnoreNext = true;
       this._frameCause = "resize";
@@ -8493,6 +8575,124 @@ export class StageExperience {
     this._floorMp = mp == null ? null : Number(mp);
     this._resizeSkipScene = true;
     return this._effectiveBudgetMp();
+  }
+
+  /**
+   * DEV/Pass O O2 — VRAM census (needs `?vram=1`): every live GL allocation,
+   * labelled where it maps back to a three texture / render target, top N by
+   * bytes plus totals by category.
+   */
+  debugVram(top = 15) {
+    const gl = this.renderer.getContext();
+    const live = gl.__vram?.live;
+    if (!live) return { error: "load with ?vram=1" };
+    const props = this.renderer.properties;
+    const labels = new Map();
+    const label = (obj, name, cat) => {
+      if (obj && !labels.has(obj)) labels.set(obj, { name, cat });
+    };
+    const texLabel = (tex, name, cat) => {
+      if (!tex?.isTexture) return;
+      const p = props.get(tex);
+      label(p.__webglTexture, name || tex.name || "(texture)", cat);
+    };
+    const rtLabel = (rt, name, cat) => {
+      if (!rt?.isRenderTarget) return;
+      const p = props.get(rt);
+      for (const t of rt.textures ?? [rt.texture]) texLabel(t, `${name}.color`, cat);
+      if (rt.depthTexture) texLabel(rt.depthTexture, `${name}.depthTex`, cat);
+      const rbs = [p.__webglDepthbuffer, p.__webglDepthRenderbuffer, ...(p.__webglColorRenderbuffer ?? [])].flat().filter(Boolean);
+      for (const rb of rbs) label(rb, `${name}.rb`, cat);
+    };
+    // materials (scene + duo etc.)
+    const KEYS = ["map", "normalMap", "roughnessMap", "metalnessMap", "aoMap", "emissiveMap", "alphaMap", "bumpMap", "envMap", "lightMap", "clearcoatNormalMap", "specularIntensityMap"];
+    const seenMat = new Set();
+    const walk = (root, prefix) =>
+      root?.traverse?.((o) => {
+        for (const m of [].concat(o.material ?? [])) {
+          if (!m || seenMat.has(m)) continue;
+          seenMat.add(m);
+          for (const k of KEYS) if (m[k]?.isTexture) texLabel(m[k], `${prefix}:${o.name || "?"}.${k} ${m[k].name || ""}`.trim(), "material texture");
+          for (const [k, u] of Object.entries(m.uniforms ?? {})) {
+            if (u?.value?.isTexture) texLabel(u.value, `${prefix}:${o.name || "?"}.${k}`, "material texture");
+          }
+        }
+        if (o.isLight && o.shadow?.map) rtLabel(o.shadow.map, `shadow:${o.name}`, "shadow map");
+      });
+    walk(this.scene, "scene");
+    walk(this.duoFab?.root, "duo");
+    (this._stopEnvs || []).forEach((t, i) => texLabel(t, `stop-env:${i}`, "PMREM"));
+    if (this.scene.environment) texLabel(this.scene.environment, "scene.environment", "PMREM");
+    // any render target / texture reachable from these owners (depth-limited)
+    const seen = new Set();
+    const scan = (obj, path, depth, cat) => {
+      if (!obj || typeof obj !== "object" || seen.has(obj) || depth > 5) return;
+      seen.add(obj);
+      if (obj.isRenderTarget) return rtLabel(obj, path, cat);
+      if (obj.isTexture) return texLabel(obj, path, cat);
+      if (obj.isObject3D || obj.isMaterial || ArrayBuffer.isView(obj)) return;
+      for (const k of Object.keys(obj)) {
+        if (k === "parent" || k === "renderer" || k === "scene" || k === "camera") continue;
+        let v;
+        try {
+          v = obj[k];
+        } catch {
+          continue;
+        }
+        if (v && typeof v === "object") scan(v, `${path}.${k}`, depth + 1, cat);
+      }
+    };
+    scan(this.post, "post", 0, "post RT");
+    scan(this.liveEnv, "liveEnv", 0, "PMREM");
+    scan(this.wetFloor, "wetFloor", 0, "wet floor");
+    scan(this.chunkedTextures, "chunks", 0, "material texture");
+    for (let i = 0; i < (this.vignettes?.length ?? 0); i += 1) scan(this.vignettes[i]?.instance, `vig${i}`, 0, `stop ${i}`);
+    const rows = [];
+    const byCat = {};
+    let total = 0;
+    for (const [obj, e] of live) {
+      const l = labels.get(obj);
+      const cat = l?.cat ?? (e.kind === "buffer" || e.kind === "index" ? "geometry buffers" : e.kind === "ubo" ? "UBO" : `unlabelled ${e.kind}`);
+      total += e.bytes;
+      byCat[cat] = (byCat[cat] ?? 0) + e.bytes;
+      rows.push({ mb: +(e.bytes / 1048576).toFixed(2), name: l?.name ?? `(${e.kind} ${e.w}x${e.h} 0x${e.fmt.toString(16)})`, cat, w: e.w, h: e.h, fmt: `0x${e.fmt.toString(16)}`, samples: e.samples ?? null, kind: e.kind });
+    }
+    rows.sort((a, b) => b.mb - a.mb);
+    const geometry = rows.filter((r) => r.cat === "geometry buffers");
+    return {
+      totalMb: +(total / 1048576).toFixed(1),
+      objects: live.size,
+      byCategoryMb: Object.fromEntries(Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, +(v / 1048576).toFixed(1)])),
+      geometryBuffers: geometry.length,
+      unlabelledGroups: Object.entries(
+        rows
+          .filter((r) => r.cat.startsWith("unlabelled"))
+          .reduce((a, r) => {
+            const k = `${r.kind} ${r.w}x${r.h} ${r.fmt}${r.samples ? ` x${r.samples}` : ""}`;
+            a[k] = a[k] ?? { n: 0, mb: 0 };
+            a[k].n += 1;
+            a[k].mb += r.mb;
+            return a;
+          }, {})
+      )
+        .map(([k, v]) => ({ k, n: v.n, mb: +v.mb.toFixed(1) }))
+        .sort((a, b) => b.mb - a.mb)
+        .slice(0, 20),
+      top: rows.filter((r) => r.cat !== "geometry buffers").slice(0, top),
+      topGeometry: geometry.slice(0, 5)
+    };
+  }
+
+  /** DEV/Pass O — synchronous GL calls since the last reset (`?vram=1`). */
+  debugSyncCalls(reset = false) {
+    const sync = this.renderer.getContext().__vram?.sync;
+    if (!sync) return { error: "load with ?vram=1" };
+    const out = { counts: { ...sync.counts }, stacks: { ...sync.stacks }, frame: this._frameNo };
+    if (reset) {
+      sync.counts = {};
+      sync.stacks = {};
+    }
+    return out;
   }
 
   /** DEV/Pass N N3 — a stop light's shadow setup and the stop's would-be casters. */

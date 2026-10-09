@@ -107,7 +107,14 @@ export class VignetteContactShadows {
     this._footprint = 2.4;
     this._cx = 0;
     this._cz = 0;
+    /** Pass O — set when another system drives the neon pad (Sidekick drop shadow). */
+    this.neonPadOwned = false;
     this.refreshBounds();
+  }
+
+  /** Floor height in the vignette group's local space (where the pads sit). */
+  floorLocalY() {
+    return STAGE_FLOOR_Y + CONTACT_SHADOW_Y - this.group.position.y;
   }
 
   /** Re-measure prop footprint (call after GLB mount / floor snap). */
@@ -179,6 +186,7 @@ export class VignetteContactShadows {
     this.spotPad.material.opacity = this.spotPad.userData.maxOpacity;
     this.spotPad.material.color.setHex(0x000000);
     this.spotPad.visible = this.spotPad.material.opacity > 1e-4;
+    if (this.neonPadOwned) return;
 
     const neonU = Math.max(0, Math.min(1, neonLevel));
     if (!neonWorld || neonU < 1e-3) {

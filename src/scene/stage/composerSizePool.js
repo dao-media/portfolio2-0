@@ -1,6 +1,8 @@
 import * as THREE from "three";
 
 const MIN_EDGE = 64;
+/** Pass O — sizes kept per target (6 floor notches + rest + snapped motion sizes); LRU beyond, freed. */
+const POOL_MAX = 12;
 
 const GL_KEYS = [
   "__webglFramebuffer",
@@ -25,6 +27,27 @@ const GL_KEYS = [
   "__hasExternalTextures",
   "__useDefaultFramebuffer"
 ];
+
+/**
+ * Pass O — the pool kept every size a target ever had. Motion DPR walks
+ * ~20 one-pixel-apart sizes per hop, so each hop left a full set of post
+ * targets behind: 8.7 GB live after one hop cycle (4x MSAA half-float at
+ * full canvas size is 210 MB a buffer), and rare 0.5 s GPU stalls. The
+ * owner now says whether the size being LEFT is a tier size (floor notch /
+ * rest budget / sequence — pooled, the swap stays free) or a motion size
+ * (its GL objects are deleted instead).
+ */
+let discardOutgoing = false;
+/** DEV A/B (`?poolall=1`): the pre-Pass-O pool — every size kept forever. */
+let legacy = false;
+export function setPoolLegacy(on) {
+  legacy = Boolean(on);
+}
+
+/** @param {boolean} on  true while resizing away from a non-tier (motion) size */
+export function setPoolDiscardOutgoing(on) {
+  discardOutgoing = Boolean(on);
+}
 
 /**
  * Keep composer (and pass) render targets alive across megapixel tiers.
@@ -98,11 +121,32 @@ function bags(renderer, rt) {
 function stash(renderer, rt, samples) {
   const { rt: rtBag, tex, depth } = bags(renderer, rt);
   if (!rtBag?.__webglFramebuffer && !rtBag?.__webglMultisampledFramebuffer) return;
-  poolFor(rt).set(sizeKey(rt, rt.width, rt.height, samples), {
+  const pool = poolFor(rt);
+  const key = sizeKey(rt, rt.width, rt.height, samples);
+  pool.delete(key); // re-insert = most recently used
+  pool.set(key, {
     rt: snapshot(rtBag),
     tex: snapshot(tex),
     depth: snapshot(depth)
   });
+  while (!legacy && pool.size > POOL_MAX) {
+    const [oldKey, old] = pool.entries().next().value;
+    pool.delete(oldKey);
+    deleteSnapshot(renderer, old);
+  }
+}
+
+function deleteSnapshot(renderer, entry) {
+  const gl = renderer.getContext();
+  for (const snap of [entry.rt, entry.tex, entry.depth]) {
+    for (const v of Object.values(snap ?? {})) {
+      for (const o of [v].flat()) {
+        if (o instanceof globalThis.WebGLFramebuffer) gl.deleteFramebuffer(o);
+        else if (o instanceof globalThis.WebGLRenderbuffer) gl.deleteRenderbuffer(o);
+        else if (o instanceof globalThis.WebGLTexture) gl.deleteTexture(o);
+      }
+    }
+  }
 }
 
 function applyHit(renderer, rt, hit) {
@@ -138,10 +182,12 @@ function swapTargetSize(rt, width, height, depth, renderer) {
     return;
   }
   const samples = rt.samples | 0;
-  stash(renderer, rt, samples);
+  if (discardOutgoing && !legacy) dropCurrent(renderer, rt);
+  else stash(renderer, rt, samples);
   const hit = poolFor(rt).get(sizeKey(rt, width, height, samples));
   writeSize(rt, width, height, depth);
   if (hit) {
+    if (!legacy) poolFor(rt).delete(sizeKey(rt, width, height, samples));
     applyHit(renderer, rt, hit);
     markMiss(rt, false);
     return;
@@ -195,6 +241,28 @@ function patchSampleSwap(composer) {
       clearPool(this.outputBuffer);
     }
   });
+}
+
+/** Delete the target's current GL objects (what three's dispose would free). */
+function dropCurrent(renderer, rt) {
+  const gl = renderer.getContext();
+  const { rt: rtBag, tex, depth } = bags(renderer, rt);
+  const pooled = new Set();
+  for (const entry of rt.userData?._sizePool?.values() ?? []) {
+    for (const snap of [entry.rt, entry.tex, entry.depth]) for (const v of Object.values(snap ?? {})) [v].flat().forEach((o) => o && pooled.add(o));
+  }
+  for (const bag of [rtBag, tex, depth]) {
+    if (!bag) continue;
+    for (const key of GL_KEYS) {
+      for (const o of [bag[key]].flat()) {
+        if (!o || typeof o !== "object" || pooled.has(o)) continue;
+        // is*() throws on the wrong type; instanceof does not.
+        if (o instanceof globalThis.WebGLFramebuffer) gl.deleteFramebuffer(o);
+        else if (o instanceof globalThis.WebGLRenderbuffer) gl.deleteRenderbuffer(o);
+        else if (o instanceof globalThis.WebGLTexture) gl.deleteTexture(o);
+      }
+    }
+  }
 }
 
 function clearPool(rt) {

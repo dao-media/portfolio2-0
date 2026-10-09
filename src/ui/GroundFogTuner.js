@@ -1,4 +1,5 @@
 import { GROUND_FOG_DEFAULTS } from "../scene/vignettes/SidekickGroundFog.js";
+import { DROP_SHADOW_DEFAULTS } from "../scene/vignettes/SidekickDropShadow.js";
 
 /**
  * Pass J item 7 / Pass K K3 — live Sidekick ground-fog panel. Shift+K. The worker owns
@@ -17,11 +18,24 @@ const SLIDERS = [
   ["steps", 4, 12, 1]
 ];
 
+/** Pass O O1 — Sidekick drop shadow (SidekickDropShadow.js). */
+const DROP_SLIDERS = [
+  ["peak", 0, 1, 0.01],
+  ["size", 0.4, 3, 0.05],
+  ["tight", 0.6, 6, 0.1],
+  ["sizePerM", 0, 12, 0.1],
+  ["fadePerM", 0, 30, 0.5],
+  ["tightPerM", -40, 10, 0.5],
+  ["tint", 0, 0.4, 0.01]
+];
+
 export class GroundFogTuner {
-  /** @param {{ onChange?: (params: Record<string, number>) => void }} [options] */
+  /** @param {{ onChange?: (params: Record<string, number>) => void, onDropChange?: (params: Record<string, number>) => void }} [options] */
   constructor(options = {}) {
     this._onChange = options.onChange ?? null;
+    this._onDropChange = options.onDropChange ?? null;
     this._params = { ...GROUND_FOG_DEFAULTS };
+    this._drop = { ...DROP_SHADOW_DEFAULTS };
 
     const root = document.createElement("div");
     root.hidden = true;
@@ -43,28 +57,36 @@ export class GroundFogTuner {
     title.style.marginBottom = "8px";
     root.append(title);
 
-    for (const [key, min, max, step] of SLIDERS) {
-      const row = document.createElement("label");
-      row.style.cssText = "display:grid;grid-template-columns:86px 1fr 40px;gap:6px;align-items:center;margin:3px 0";
-      const name = document.createElement("span");
-      name.textContent = key;
-      const slider = document.createElement("input");
-      slider.type = "range";
-      slider.min = String(min);
-      slider.max = String(max);
-      slider.step = String(step);
-      slider.value = String(this._params[key]);
-      const value = document.createElement("span");
-      value.textContent = String(this._params[key]);
-      slider.addEventListener("input", () => {
-        this._params[key] = Number(slider.value);
-        value.textContent = slider.value;
-        this._onChange?.({ [key]: this._params[key] });
-        console.log("[GroundFogTuner]", JSON.stringify(this._params));
-      });
-      row.append(name, slider, value);
-      root.append(row);
-    }
+    const group = (sliders, params, onChange, tag) => {
+      for (const [key, min, max, step] of sliders) {
+        const row = document.createElement("label");
+        row.style.cssText = "display:grid;grid-template-columns:86px 1fr 40px;gap:6px;align-items:center;margin:3px 0";
+        const name = document.createElement("span");
+        name.textContent = key;
+        const slider = document.createElement("input");
+        slider.type = "range";
+        slider.min = String(min);
+        slider.max = String(max);
+        slider.step = String(step);
+        slider.value = String(params[key]);
+        const value = document.createElement("span");
+        value.textContent = String(params[key]);
+        slider.addEventListener("input", () => {
+          params[key] = Number(slider.value);
+          value.textContent = slider.value;
+          onChange?.({ [key]: params[key] });
+          console.log(tag, JSON.stringify(params));
+        });
+        row.append(name, slider, value);
+        root.append(row);
+      }
+    };
+    group(SLIDERS, this._params, (p) => this._onChange?.(p), "[GroundFogTuner]");
+    const dropTitle = document.createElement("div");
+    dropTitle.textContent = "Drop shadow";
+    dropTitle.style.margin = "10px 0 4px";
+    root.append(dropTitle);
+    group(DROP_SLIDERS, this._drop, (p) => this._onDropChange?.(p), "[SidekickDropShadow]");
     document.body.append(root);
     this._root = root;
 

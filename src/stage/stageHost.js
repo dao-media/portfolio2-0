@@ -933,7 +933,8 @@ export function startStageHost(canvas, options = {}) {
   const fader = document.getElementById("fader");
   // Pass J item 7 — Shift+K.
   new GroundFogTuner({
-    onChange: (params) => worker.postMessage({ type: "groundFog", params })
+    onChange: (params) => worker.postMessage({ type: "groundFog", params }),
+    onDropChange: (params) => worker.postMessage({ type: "sidekickDrop", params })
   });
   const pixelTuner = new PixelBudgetTuner({
     initial: REST_PIXEL_BUDGET_MP,
