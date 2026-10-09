@@ -20,7 +20,9 @@ const win = (a) => {
   const rows = log.filter((r) => r.t >= land.t + a * 1000 && r.t < land.t + (a + 10) * 1000 && r.frameMs != null);
   return { from: a, frames: rows.length, over50: rows.filter((r) => r.frameMs > 50).length, over33: rows.filter((r) => r.frameMs > 33).length };
 };
-const out = { label, windows: [0, 10, 20, 30, 40, 50].map(win) };
+const ev = f.milestones.filter((m) => m.t >= land.t && ["floor-notch", "governor", "pace"].includes(m.kind)).map((m) => `${((m.t - land.t) / 1000).toFixed(1)}s ${m.kind}:${JSON.stringify(m.data).slice(0, 80)}`);
+const out = { label, windows: [0, 10, 20, 30, 40, 50].map(win), events: ev };
 mkdirSync(`tmp/pass-m/${label}`, { recursive: true });
 writeFileSync(`tmp/pass-m/${label}/idle.json`, JSON.stringify(out, null, 1));
 console.log(label, out.windows.map((w) => `+${w.from}s:${w.over50}/${w.over33}`).join("  "));
+for (const e of ev) console.log("   ", e);

@@ -6,7 +6,7 @@
  *   stop's integrated / ready time relative to land.
  * --rush: double-hop to Sidekick the moment it lands (worst case for
  * "ready before a two-hop arrival").
- * Usage: node scripts/pass-m.mjs <label> [--port 5179] [--cold] [--wait 8000] [--rush] [--warmup] [--forceface]
+ * Usage: node scripts/pass-m.mjs <label> [--port 5179] [--cold] [--wait 8000] [--rush] [--warmup] [--forceface] [--query k=v]
  */
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
@@ -20,6 +20,8 @@ const cold = args.includes("--cold");
 const rush = args.includes("--rush");
 // --forceface: every stop's static shadow uses the M3 face-by-face path.
 const forceFace = args.includes("--forceface");
+// --query k=v: extra page query (e.g. gaptiers=1)
+const query = args.includes("--query") ? `flight=1&${args[args.indexOf("--query") + 1]}` : "flight=1";
 const OUT = resolve("tmp/pass-m", label);
 mkdirSync(OUT, { recursive: true });
 const profileDir = resolve(cold ? "tmp/pass-k/chrome-profile-cold" : "tmp/pass-k/chrome-profile");
@@ -31,6 +33,7 @@ if (args.includes("--warmup")) {
 }
 const { browser, page, dbg, sleep, waitSettled, enterMs } = await bootStage({
   port,
+  query,
   holdMs: wait,
   profileDir,
   beforeClick: forceFace ? (d) => d("debugForceFaceBake", true) : null
