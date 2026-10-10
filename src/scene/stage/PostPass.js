@@ -13,6 +13,7 @@ import { BLACK_HOLE_MSAA, CURSOR_DOF, NEON_BLOOM } from "./constants.js";
 import { installComposerSizePool } from "./composerSizePool.js";
 import { DisplayGrainEffect, ExposureEffect, HalationEffect, StillAccumulatePass, makeHalationBloom, makeToneMap } from "./filmLookStudy.js";
 import { FilmGrainEffect } from "./FilmGrainEffect.js";
+import { TsrAccumulatePass, TsrComposeEffect } from "./tsr.js";
 import { PortalAwareRenderPass } from "../vignettes/PortalAwareRenderPass.js";
 
 /**
@@ -133,6 +134,16 @@ export class PostPass {
     // fog → EdgeGlitch → SMAA → depth of field → bloom → grain
     // (AO, when enabled, sits right after the render pass so bloom reads
     // occluded color, not the other way around.)
+    // Pass T — still-camera temporal super-resolution: accumulates the
+    // pre-post scene frame at display resolution (tsr.js, §20 11v). Off
+    // (no work) unless the stage marks it active.
+    this.tsrPass = new TsrAccumulatePass();
+    this.tsrCompose = new TsrComposeEffect();
+    this.tsrPass.onOutput = (hist, pre) => {
+      this.tsrCompose.uniforms.get("tHist").value = hist;
+      this.tsrCompose.uniforms.get("tPre").value = pre;
+    };
+    this.composer.addPass(this.tsrPass);
     if (this.edgeGlitchPass) {
       this.composer.addPass(this.edgeGlitchPass);
     }
@@ -187,6 +198,9 @@ export class PostPass {
       effects.push(this.studyExposure, this._toneMaps[this._studyTone]);
     }
     this.halation.uniforms.get("tHalation").value = this.halBloom.texture;
+    // Pass T: the TSR compose runs first in the display-res last pass, so
+    // halation and grain still apply per display pixel on top of it.
+    effects.push(this.tsrCompose);
     if (this._filmLook) {
       this.displayGrain.uniforms.get("uAmount").value = this._filmLook.grain;
       this.halation.uniforms.get("uIntensity").value = this._filmLook.halation;
@@ -306,6 +320,9 @@ export class PostPass {
     }
 
     this.volumetricPass?.setSize?.(dw, dh);
+    // Pass T: display-res TSR targets follow the canvas only (boot / window
+    // resize), never the draw size.
+    if (this.tsrPass?.allocate(dw, dh)) this.tsrPass.onOutput?.(this.tsrPass.histA.texture, this.tsrPass.pre.texture);
   }
 
   /**

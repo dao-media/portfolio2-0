@@ -71,6 +71,10 @@ export function installComposerSizePool(renderer, composer) {
       const w = width | 0;
       const h = height | 0;
       if (w < MIN_EDGE || h < MIN_EDGE) return orig.call(this, width, height, depth);
+      // Pass T: targets that are sized once (TSR history) opt out — the pool
+      // swaps / deletes GL objects per size, and two such targets ended up
+      // sharing one texture (a read-while-write feedback loop).
+      if (this.userData?.noSizePool) return orig.call(this, width, height, depth);
       swapTargetSize(this, w, h, depth | 0 || 1, renderer);
     };
     proto.__floorSizePool = true;

@@ -3,6 +3,10 @@ import { applyLightSkip } from "./stage/lightSkip.js";
 import { installVramTracker } from "./stage/vramTracker.js";
 import { setPoolDiscardOutgoing, setPoolDisabled, setPoolLegacy } from "./stage/composerSizePool.js";
 import { dumpStopMaterials } from "./stage/materialDump.js";
+import { tsrJitter, installTsrLodBias, TSR_LOD_BIAS } from "./stage/tsr.js";
+
+// Pass T — before any material compiles (tsr.js); only when a stop uses TSR.
+if (TSR_ANY) installTsrLodBias();
 import gsap from "gsap";
 import { HUDController } from "../ui/HUDController.js";
 import { DesktopVignette, desktopVignetteMeta } from "./vignettes/DesktopVignette.js";
@@ -82,6 +86,13 @@ import {
   REST_NATIVE_STOPS,
   REST_NATIVE_DPR_CAP,
   STOP_FILM_LOOK,
+  TSR_STOPS,
+  TSR_ANY,
+  TSR_DISPLAY_DPR_CAP,
+  TSR_PHASES,
+  TSR_SETTLE_FRAMES,
+  TSR_BLEND_FRAMES,
+  TSR_FADE_MS,
   FLOOR_DROP_MS,
   FLOOR_FRAME_MS,
   FLOOR_MIN_MP,
@@ -3584,6 +3595,187 @@ export class StageExperience {
     return Math.min(Math.min(this._deviceDpr || 1, REST_NATIVE_DPR_CAP) * (this._renderScale || 1), canvas);
   }
 
+  /** Pass T — presentation ratio: the device's real DSF (cap TSR_DISPLAY_DPR_CAP), never below the draw cap. */
+  _displayRatio() {
+    const seq = this._fullPixelRatio * (this._renderScale || 1) * BLACK_HOLE_DPR;
+    this._tsrOff ??= /[?&]tsr=0\b/.test(this._inWorker ? this._search || "" : typeof window !== "undefined" ? window.location.search : "");
+    if (this._tsrOff || !TSR_ANY) return seq;
+    return Math.max(seq, Math.min(this._deviceDpr || 1, TSR_DISPLAY_DPR_CAP) * (this._renderScale || 1));
+  }
+
+  /**
+   * Pass T — still-camera temporal super-resolution, per frame before the
+   * composer renders. Accumulates only at a TSR_STOPS rest stop once the
+   * camera pose / projection, the draw size and the cursor have been
+   * unchanged for TSR_SETTLE_FRAMES; any change resets (history frozen, its
+   * detail fades out over TSR_FADE_MS). SMAA is off while accumulating (the
+   * jitter is the AA). Returns true when the projection was jittered (the
+   * caller clears the view offset after rendering).
+   */
+  _tickTsr() {
+    // DEV A/B: `?tsr=0` turns the TSR (and the display-ratio canvas) off.
+    this._tsrOff ??= /[?&]tsr=0\b/.test(this._inWorker ? this._search || "" : typeof window !== "undefined" ? window.location.search : "");
+    const post = this.post;
+    const pass = post?.tsrPass;
+    if (!pass) return false;
+    const st = (this._tsr ??= { still: 0, sig: null, blend: 0, fadeFrom: 0, fadeAt: 0, smaa: null, accumulating: false, converged: null });
+    const cam = this.camera;
+    const w = post.drawWidth;
+    const h = post.drawHeight;
+    const v = this.waterCursor?._velocity;
+    const cursorStill = !v || Math.hypot(v.x || 0, v.y || 0) < 1;
+    const sig = cam.matrixWorld.elements.concat(cam.projectionMatrix.elements, [w, h, pass.width, pass.height]);
+    let same = Boolean(st.sig);
+    let why = null;
+    // Tolerances in screen terms: camera elements 1e-5 (~0.02 display px of
+    // rotation at this focal length; springs settle asymptotically, so an
+    // exact match never comes), projection 1e-7, sizes exact.
+    if (same) for (let i = 0; i < sig.length; i += 1) if (Math.abs(sig[i] - st.sig[i]) > (i < 16 ? 1e-5 : i < 32 ? 1e-7 : 0)) { same = false; why = i < 16 ? "camera" : i < 32 ? "projection" : i < 34 ? "draw-size" : "history-size"; break; }
+    st.sig = sig;
+    const index = this.cameraRig?.state?.index ?? this.current ?? 0;
+    const allowed =
+      !this._tsrOff &&
+      !this._blackHoleActive &&
+      this.introComplete &&
+      Boolean(this.cameraRig?.state?.isSettled) &&
+      TSR_STOPS[index] === true &&
+      !this._study?.accum &&
+      (this.neon?.getStopFadeRaw?.(index) ?? 1) >= 1;
+    if (st.accumulating && !(allowed && same && cursorStill)) st.resetWhy = !allowed ? "not-allowed" : !cursorStill ? "cursor" : why;
+    st.still = allowed && same && cursorStill ? st.still + 1 : 0;
+    const compose = post.tsrCompose.uniforms.get("uBlend");
+    if (st.still >= TSR_SETTLE_FRAMES) {
+      if (!st.accumulating) {
+        st.accumulating = true;
+        pass.reset = true;
+        pass.frames = 0;
+        if (post.smaaPass && st.smaa == null) {
+          st.smaa = post.smaaPass.enabled;
+          post.smaaPass.enabled = false;
+        }
+      }
+      pass.active = true;
+      // Sample textures at the display pixel's mip level while accumulating.
+      TSR_LOD_BIAS.value = this._tsrForceBias ?? Math.log2(Math.max(1, w) / Math.max(1, pass.width));
+      const k = pass.frames + 1;
+      pass.jitter = this._tsrForceJitter ?? tsrJitter(k, TSR_PHASES);
+      cam.setViewOffset(w, h, pass.jitter[0], -pass.jitter[1], w, h);
+      st.lastProj = [+cam.projectionMatrix.elements[8].toFixed(6), +cam.projectionMatrix.elements[9].toFixed(6), pass.jitter[0], pass.jitter[1]];
+      st.blend = Math.min(1, Math.max(0, (pass.frames - 1) / TSR_BLEND_FRAMES));
+      compose.value = st.blend;
+      if (st.blend >= 1 && st.converged == null) st.converged = pass.frames;
+      return true;
+    }
+    // Not accumulating: freeze the history and fade its detail out.
+    if (st.accumulating) {
+      st.accumulating = false;
+      st.fadeFrom = st.blend;
+      st.fadeAt = performance.now();
+      st.converged = null;
+      if (post.smaaPass && st.smaa != null) post.smaaPass.enabled = st.smaa;
+      st.smaa = null;
+    }
+    pass.active = false;
+    TSR_LOD_BIAS.value = this._tsrForceBias ?? 0;
+    const t = (performance.now() - st.fadeAt) / TSR_FADE_MS;
+    st.blend = st.fadeFrom * Math.max(0, 1 - t);
+    compose.value = st.blend;
+    return false;
+  }
+
+  /** DEV — Pass T: hold the texture LOD bias at `b` (null = automatic); reports a few programs' tsrLodBias binding. */
+  debugTsrForceBias(b = null) {
+    this._tsrForceBias = b == null ? null : Number(b);
+    TSR_LOD_BIAS.value = this._tsrForceBias ?? 0;
+    let bound = 0;
+    let standard = 0;
+    this.scene.traverse((o) => {
+      for (const m of [].concat(o.material ?? [])) {
+        if (!m?.isMeshStandardMaterial) continue;
+        standard += 1;
+        const u = this.renderer.properties.get(m)?.uniforms;
+        if (u?.tsrLodBias === TSR_LOD_BIAS) bound += 1;
+      }
+    });
+    return { bias: TSR_LOD_BIAS.value, standardMaterials: standard, bound };
+  }
+
+  /** DEV — Pass T: hold the jitter at [jx, jy] draw px (null = Halton). */
+  debugTsrForceJitter(j = null) {
+    this._tsrForceJitter = j;
+    if (this.post?.tsrPass) this.post.tsrPass.reset = true;
+    return j;
+  }
+
+  /** DEV — Pass T: the TSR programs' diagnostics and the accumulate material's live uniform values. */
+  debugTsrProgram() {
+    const progs = (this.renderer?.info?.programs ?? []).filter((p) => /Tsr|ShaderMaterial/.test(p.name ?? ""));
+    const u = this.post?.tsrPass?.accum?.uniforms;
+    return {
+      programs: progs.map((p) => ({ name: p.name, usedTimes: p.usedTimes, diagnostics: p.diagnostics ?? null })).slice(0, 12),
+      uniforms: u ? { uRatio: u.uRatio.value, uJitter: u.uJitter.value.toArray(), uDrawSize: u.uDrawSize.value.toArray(), uReset: u.uReset.value, uSynth: u.uSynth.value } : null
+    };
+  }
+
+  /** DEV — Pass T: raw RGBA floats of the TSR history (histA) at display px (x, y), n×1 pixels. */
+  debugTsrRead(x = 1000, y = 1000, n = 8, which = "histA") {
+    const p = this.post?.tsrPass;
+    if (which === "all") {
+      const out = {};
+      for (const k of ["histA", "histB", "pre"]) out[k] = this.debugTsrRead(x, y, n, k)?.px?.filter((_, i) => i % 4 === 0);
+      out.same = { AB: this.post.tsrPass.histA.texture === this.post.tsrPass.histB.texture, Apre: this.post.tsrPass.histA.texture === this.post.tsrPass.pre.texture };
+      const glOf = (rt) => this.renderer.properties.get(rt.texture)?.__webglTexture;
+      out.glSame = { AB: glOf(p.histA) === glOf(p.histB), Apre: glOf(p.histA) === glOf(p.pre), Bpre: glOf(p.histB) === glOf(p.pre) };
+      return out;
+    }
+    const rt = p?.[which];
+    if (!rt) return null;
+    // Half-float targets read back as raw halves (Uint16Array).
+    const buf = new Uint16Array(n * 4);
+    try {
+      this.renderer.readRenderTargetPixels(rt, x, y, n, 1, buf);
+    } catch (e) {
+      return { error: String(e) };
+    }
+    return { size: [rt.width, rt.height], type: rt.texture.type, px: Array.from(buf, (v) => +THREE.DataUtils.fromHalfFloat(v).toFixed(3)) };
+  }
+
+  /** DEV — Pass T: raw synth mode value (2 = echo uniforms into the history). */
+  debugTsrSynthMode(v = 0) {
+    const u = this.post?.tsrPass?.accum?.uniforms?.uSynth;
+    if (u) u.value = Number(v) || 0;
+    return u?.value ?? null;
+  }
+
+  /** DEV — Pass T: synthetic 1-display-px checker input (1) / the real frame (0). */
+  debugTsrSynth(on = 1) {
+    const u = this.post?.tsrPass?.accum?.uniforms?.uSynth;
+    if (u) u.value = on ? 1 : 0;
+    if (this.post?.tsrPass) this.post.tsrPass.reset = true;
+    return u?.value ?? null;
+  }
+
+  /** DEV — Pass T: history clamp on (1) / off (0). */
+  debugTsrClamp(on = 1) {
+    const u = this.post?.tsrPass?.accum?.uniforms?.uClamp;
+    if (u) u.value = on ? 1 : 0;
+    if (this.post?.tsrPass) this.post.tsrPass.reset = true;
+    return u?.value ?? null;
+  }
+
+  /** DEV — Pass T: show the TSR history (1), the pre-post copy (2) or the normal output (0). */
+  debugTsrView(mode = 0) {
+    const u = this.post?.tsrCompose?.uniforms?.get("uView");
+    if (u) u.value = Number(mode) || 0;
+    return u?.value ?? null;
+  }
+
+  /** DEV — Pass T: TSR state (accumulating, frames, blend, history size, draw size). */
+  debugTsr() {
+    const p = this.post?.tsrPass;
+    return { accumulating: Boolean(this._tsr?.accumulating), frames: p?.frames ?? 0, blend: +(this._tsr?.blend ?? 0).toFixed(3), still: this._tsr?.still ?? 0, history: [p?.width ?? 0, p?.height ?? 0], draw: [this.post?.drawWidth, this.post?.drawHeight], smaa: this.post?.smaaPass?.enabled ?? null, canvasRatio: this.renderer?.getPixelRatio?.(), lastProj: this._tsr?.lastProj ?? null, lodBias: +TSR_LOD_BIAS.value.toFixed(3), resetWhy: this._tsr?.resetWhy ?? null };
+  }
+
   /** DEV — Pass S S2: the film look applied this frame (post uniforms). */
   debugStopFilm() {
     const p = this.post;
@@ -3661,10 +3853,11 @@ export class StageExperience {
     // Canvas stays at the sequence cap. The floor walks composer buffer
     // sizes that were allocated during warm; a swap does not call setSize
     // on a live frame.
-    // Pass S S3 (Dane): the native rest never raises the canvas — a back-
-    // buffer reallocation on every Desktop arrival / departure cost > 50 ms
-    // frames; the draw goes up to the canvas instead (§20 11t).
-    const canvasRatio = sequenceFull;
+    // Pass S S3: per-stop changes never resize the canvas (§20 11t). Pass T:
+    // the canvas is the display ratio (true DSF, capped) from boot, so the
+    // still-camera TSR can present display-resolution detail; draws are
+    // unchanged and upscale into it.
+    const canvasRatio = this._displayRatio();
     const canvasChanged =
       Math.abs(canvasRatio - (this.renderer.getPixelRatio?.() || 0)) > 0.002;
     let dw = Math.max(1, Math.round(w * this.pixelRatio));
@@ -3710,6 +3903,7 @@ export class StageExperience {
     // kept a second full-size MSAA set alive, ~1 GB, 1 px off the rest size).
     // Snapped motion sizes are pooled (bounded by POOL_MAX per target).
     const tier = !sequence;
+    this._drawTarget = [dw, dh];
     setPoolDiscardOutgoing(this._drawSizeTier === false);
     let allocated = false;
     try {
@@ -8572,7 +8766,8 @@ export class StageExperience {
     if (Number.isFinite(dpr) && dpr > 0) {
       this._fullPixelRatio = Math.min(dpr, this.isCoarse ? 1.5 : 1.75);
       this.pixelRatio = this._fullPixelRatio * (this._renderScale || 1);
-      this.renderer?.setPixelRatio(this.pixelRatio);
+      // Pass T: the canvas is the display ratio, not the draw ratio.
+      this.renderer?.setPixelRatio(this._displayRatio());
     }
     this._onResize();
   }
@@ -10906,12 +11101,20 @@ export class StageExperience {
         if (cssW > 0 && drawW > 0) starU.value = drawW / cssW;
       }
       this._flight?.beginGpuTimer();
+      // Pass T: any path that resets the composer to the canvas size (window
+      // / host resize, canvas ratio) must not leave it drawing at display
+      // resolution — re-apply the last draw target.
+      if (this._drawTarget && this.post && (this.post.drawWidth !== this._drawTarget[0] || this.post.drawHeight !== this._drawTarget[1])) {
+        noteFlight("mark", { label: "draw-size-restore", from: [this.post.drawWidth, this.post.drawHeight], to: this._drawTarget });
+        this._applyRenderScale();
+      }
       const jittered = this._study ? this._studyPreRender() : false;
       this.post.setStopFilm(this._stopFilmFrame());
+      const tsrJittered = this._tickTsr();
       this.post.render(this.scene, this.camera, t, {
         grainStrength: this._postGrainStrength
       });
-      if (jittered) this.camera.clearViewOffset();
+      if (jittered || tsrJittered) this.camera.clearViewOffset();
       this._flight?.endGpuTimer();
       // Pass F — latches once, on the first real beauty frame this session
       // ever presents (effectively frame 1), and never goes false again. See

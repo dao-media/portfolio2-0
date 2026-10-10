@@ -31,8 +31,28 @@ export const REST_PIXEL_BUDGET_MP = 2.3;
  * (Dane's pick: Desktop, P1 "native"), capped at REST_NATIVE_DPR_CAP. Motion,
  * the governor floor and every other stop's rest budget are unchanged.
  */
-export const REST_NATIVE_STOPS = Object.freeze([1]);
+// Pass T T0 (Dane): reverted — the governor floor dropped at Desktop idle so
+// "native" drew less than the 2.3 MP budget. Kept for A/B; empty = off.
+export const REST_NATIVE_STOPS = Object.freeze([]);
 export const REST_NATIVE_DPR_CAP = 2;
+/**
+ * Pass T — still-camera temporal super-resolution (tsr.js). Per-stop gate
+ * (a stop that ghosts ships off), display ratio cap (the canvas is set to
+ * min(devicePixelRatio, cap) once at boot), Halton phases, frames the
+ * camera / cursor / draw size must be unchanged before accumulating, the
+ * blend-in ramp (frames) and the fade-out on reset (ms).
+ */
+// Shipped OFF at every stop (Pass T acceptance): converged TSR measured no
+// detail gain over the 2.3 MP upscale at any stop at Dane's window (README
+// Pass T row). While all are off the canvas stays at the draw cap and the
+// LOD-bias shader patch is not installed — zero runtime cost.
+export const TSR_STOPS = Object.freeze({ 0: false, 1: false, 2: false, 3: false });
+export const TSR_ANY = Object.values(TSR_STOPS).some(Boolean);
+export const TSR_DISPLAY_DPR_CAP = 2;
+export const TSR_PHASES = 16;
+export const TSR_SETTLE_FRAMES = 2;
+export const TSR_BLEND_FRAMES = 6;
+export const TSR_FADE_MS = 150;
 /**
  * Pass S S2 — per-stop film look (Dane's pick: Bust = Pass P P4 "medium",
  * clip frame f0018): display-resolution grain amount and halation intensity,
