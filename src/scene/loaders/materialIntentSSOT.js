@@ -45,9 +45,12 @@ const PROP_GLBS = [
 /** @type {Record<string, MaterialIntentEntry>} */
 export const METAL_ALLOWLIST = {
   // Bust — pending the bronze-vs-stone call (see debugMaterialAudit / the
-  // chrome-state investigation). Held at its current value (stone, 0) so
-  // this refactor does not itself retune the bust.
-  Mesh_0_material: { metalness: 0, roughness: 1 },
+  // chrome-state investigation). Held at the value the replaced
+  // `_hardenBustMaterials` produced (metalness min(raw, 0.12) = 0.12 for this
+  // GLB, roughness max(raw, 0.55) = 1) so this rule does not itself retune
+  // the bust. Pass R: it had pinned 0 here, which was a silent retune
+  // (23 Sep ran at 0.12); `pass-q-check` fails on 0.
+  Mesh_0_material: { metalness: 0.12, roughness: 1 },
   // Sidekick chassis — genuinely metal parts (mesh/material names name the
   // metal). Roughened from the raw 0.553 so they read as worn, not mirrors.
   silver: { metalness: 1, roughness: 0.65 },

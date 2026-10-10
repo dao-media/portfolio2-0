@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { applyLightSkip } from "./stage/lightSkip.js";
 import { installVramTracker } from "./stage/vramTracker.js";
 import { setPoolDiscardOutgoing, setPoolDisabled, setPoolLegacy } from "./stage/composerSizePool.js";
+import { dumpStopMaterials } from "./stage/materialDump.js";
 import gsap from "gsap";
 import { HUDController } from "../ui/HUDController.js";
 import { DesktopVignette, desktopVignetteMeta } from "./vignettes/DesktopVignette.js";
@@ -5108,6 +5109,11 @@ export class StageExperience {
    */
   _syncStopEnvironment() {
     if (this._blackHoleActive || !this._stopEnvs) return;
+    // Pass R DEV A/B (`debugApplyLook({ env })`) pins the environment.
+    if (this._lookEnv) {
+      if (this.scene.environment !== this._lookEnv) this.scene.environment = this._lookEnv;
+      return;
+    }
     const fades = this.neon?._stopFade;
     if (!fades) return;
     let best = -1;
@@ -5121,6 +5127,102 @@ export class StageExperience {
     if (best < 0) return;
     const env = this._stopEnvs[best] ?? this.liveEnv?.getStudioEnvironment?.() ?? null;
     if (env && this.scene.environment !== env) this.scene.environment = env;
+  }
+
+  /**
+   * DEV — Pass R R2: per-mesh material + lighting dump of one stop
+   * (`materialDump.js`, the same module an old checkout imports).
+   * `window.__stageDebug("debugMaterialDump", 1)`.
+   */
+  debugMaterialDump(stop = 1) {
+    return dumpStopMaterials(this, stop);
+  }
+
+  /**
+   * DEV — Pass R R2c: one-at-a-time look A/B. Each key is optional; a call
+   * with `{ restore: true }` puts everything this probe changed back.
+   *   env: "studio" | "stop" | null — pin scene.environment (null = normal)
+   *   envLight: setEnvLightParams patch (ambientIntensity, hemiIntensity, …)
+   *   envIntensity, exposure: scene.environmentIntensity / toneMappingExposure
+   *   lights: [{ type, name, parent, intensity?, color?, groundColor?, visible? }]
+   *     matched by type + name + parent name
+   *   materials: [{ stop, path, i, fields: { color, emissive, roughness, … } }]
+   *     path as materialDump reports it; colors as "#rrggbb"
+   */
+  debugApplyLook(patch = {}) {
+    const saved = (this._lookSaved ??= { lights: new Map(), mats: new Map(), scene: null });
+    if (patch.restore) {
+      for (const [l, v] of saved.lights) Object.assign(l, { intensity: v.intensity, visible: v.visible }), l.color?.copy(v.color), l.groundColor?.copy?.(v.groundColor);
+      for (const [m, v] of saved.mats) {
+        for (const [k, x] of Object.entries(v)) {
+          if (m[k]?.isColor) m[k].copy(x);
+          else m[k] = x;
+        }
+        m.needsUpdate = true;
+      }
+      if (saved.scene) {
+        this.scene.environmentIntensity = saved.scene.envIntensity;
+        this.renderer.toneMappingExposure = saved.scene.exposure;
+      }
+      if (saved.envLight) this.setEnvLightParams(saved.envLight);
+      this._lookEnv = null;
+      this._lookSaved = null;
+      return { restored: true };
+    }
+    saved.scene ??= { envIntensity: this.scene.environmentIntensity, exposure: this.renderer.toneMappingExposure };
+    if ("env" in patch) {
+      this._lookEnv = patch.env === "studio" ? this.liveEnv?.getStudioEnvironment?.() ?? null : patch.env === "stop" ? this._ensureStopEnv(1) : null;
+      if (this._lookEnv) this.scene.environment = this._lookEnv;
+    }
+    // The shipped restore path for Dane: the Shift+E schema (setEnvLightParams).
+    if (patch.envLight) {
+      saved.envLight ??= this.getEnvLightParams();
+      this.setEnvLightParams(patch.envLight);
+    }
+    if (Number.isFinite(patch.envIntensity)) this.scene.environmentIntensity = patch.envIntensity;
+    if (Number.isFinite(patch.exposure)) this.renderer.toneMappingExposure = patch.exposure;
+    const applied = { lights: 0, materials: 0, missing: [] };
+    for (const want of patch.lights ?? []) {
+      let hit = null;
+      this.scene.traverse((o) => {
+        if (!hit && o.isLight && o.type === want.type && (o.name || null) === (want.name ?? null) && (o.parent?.name || o.parent?.type || null) === (want.parent ?? null)) hit = o;
+      });
+      if (!hit) {
+        applied.missing.push(`${want.type}:${want.name}`);
+        continue;
+      }
+      if (!saved.lights.has(hit)) saved.lights.set(hit, { intensity: hit.intensity, visible: hit.visible, color: hit.color.clone(), groundColor: hit.groundColor?.clone?.() });
+      if (Number.isFinite(want.intensity)) hit.intensity = want.intensity;
+      if (want.color) hit.color.set(want.color);
+      if (want.groundColor && hit.groundColor) hit.groundColor.set(want.groundColor);
+      if (typeof want.visible === "boolean") hit.visible = want.visible;
+      applied.lights += 1;
+    }
+    for (const want of patch.materials ?? []) {
+      const root = this.vignettes?.[want.stop ?? 1]?.group;
+      let hit = null;
+      root?.traverse((o) => {
+        if (hit || !(o.isMesh || o.isPoints || o.isLine)) return;
+        const parts = [];
+        for (let p = o; p && p !== root; p = p.parent) parts.push(p.name || p.type);
+        if (parts.reverse().join("/") === want.path) hit = o;
+      });
+      const mat = hit ? (Array.isArray(hit.material) ? hit.material[want.i ?? 0] : hit.material) : null;
+      if (!mat) {
+        applied.missing.push(want.path);
+        continue;
+      }
+      const prev = saved.mats.get(mat) ?? {};
+      for (const [k, v] of Object.entries(want.fields ?? {})) {
+        if (!(k in prev)) prev[k] = mat[k]?.isColor ? mat[k].clone() : mat[k];
+        if (mat[k]?.isColor) mat[k].set(v);
+        else mat[k] = v;
+      }
+      saved.mats.set(mat, prev);
+      mat.needsUpdate = true;
+      applied.materials += 1;
+    }
+    return applied;
   }
 
   /** DEV/Pass L — which environment each stop uses. */

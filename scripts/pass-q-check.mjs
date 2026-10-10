@@ -92,6 +92,38 @@ const st = await dbg("debugStarsOverMesh", "tripo_node*", 2);
 if (!(st?.starPx > 0)) fail(`star test drew no stars at all (${JSON.stringify(st)})`);
 else if (st.underMesh > 0) fail(`stars draw over the tree: ${st.underMesh} star pixels inside its mask (${st.starPx} star px total)`);
 else ok(`no stars over the tree (${st.starPx} star px, 0 inside ${st.maskPx} mask px)`);
+// (e) Pass R — material intent. Bust metalness is the pre-SSOT value; PC
+// colour maps decode as sRGB (chunked storage SRGB8_ALPHA8), data maps stay
+// linear; §20 18/18b: no toneMapped:false on pc_1/pc_2, pc_1 roughness floor
+// 0.62, normalScale 0.28, specularIntensity 0.18, point-light mul patch.
+const mats0 = await dbg("debugMaterialDump", 0);
+const bustMat = mats0?.meshes?.find((m) => m.path.endsWith("bust/Mesh_0"))?.materials?.[0];
+if (!bustMat || Math.abs(bustMat.metalness - 0.12) > 1e-3) fail(`Bust Mesh_0_material metalness ${bustMat?.metalness} ≠ 0.12 (23 Sep value)`);
+else ok("Bust metalness 0.12 (pre-SSOT value)");
+const mats1 = await dbg("debugMaterialDump", 1);
+const pcBad = [];
+for (const m of mats1?.meshes ?? []) {
+  for (const x of m.materials ?? []) {
+    if (!/^pc_|^cable/.test(x.name ?? "")) continue;
+    for (const slot of ["map", "emissiveMap"]) {
+      const t = x[slot];
+      if (t && (t.colorSpace !== "srgb" || (t.chunkFormat && t.chunkFormat !== "SRGB8_ALPHA8"))) pcBad.push(`${x.name}.${slot} ${t.colorSpace}/${t.chunkFormat}`);
+    }
+    for (const slot of ["normalMap", "roughnessMap", "metalnessMap", "aoMap"]) {
+      const t = x[slot];
+      if (t && (t.colorSpace === "srgb" || (t.chunkFormat && t.chunkFormat !== "RGBA8"))) pcBad.push(`${x.name}.${slot} ${t.colorSpace}/${t.chunkFormat}`);
+    }
+    if ((x.name === "pc_1" || x.name === "pc_2") && x.toneMapped === false) pcBad.push(`${x.name} toneMapped:false`);
+    if (x.name === "pc_1") {
+      if (!(x.roughness >= 0.62)) pcBad.push(`pc_1 roughness ${x.roughness} < 0.62`);
+      if (Math.abs((x.normalScale?.[0] ?? 0) - 0.28) > 1e-3) pcBad.push(`pc_1 normalScale ${x.normalScale}`);
+      if (Math.abs((x.specularIntensity ?? 0) - 0.18) > 1e-3) pcBad.push(`pc_1 specularIntensity ${x.specularIntensity}`);
+      if (!x.onBeforeCompile) pcBad.push("pc_1 point-light mul patch missing");
+    }
+  }
+}
+if (pcBad.length) fail(`PC materials: ${pcBad.join("; ")}`);
+else ok("PC materials: colour maps sRGB, data maps linear, §20 18/18b rules hold");
 // Desktop
 await hopTo(1);
 await page.mouse.move(W * 0.06, H * 0.08);
