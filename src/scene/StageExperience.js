@@ -83,8 +83,7 @@ import {
   SKY_BG,
   REST_DPR,
   REST_PIXEL_BUDGET_MP,
-  REST_NATIVE_STOPS,
-  REST_NATIVE_DPR_CAP,
+  REST_BUDGET_MP_BY_STOP,
   STOP_FILM_LOOK,
   TSR_STOPS,
   TSR_ANY,
@@ -3486,6 +3485,8 @@ export class StageExperience {
     return new Promise((resolve) => {
       const iv = [];
       const samples = [];
+      let floorDrops = 0;
+      let lastFloor;
       let last = performance.now();
       let nextSample = last;
       const deadline = last + seconds * 1000;
@@ -3495,7 +3496,9 @@ export class StageExperience {
         last = now;
         if (now >= nextSample) {
           nextSample = now + 1000;
-          samples.push([this.post?.drawWidth ?? 0, this.post?.drawHeight ?? 0, this._floorMp ?? null, this._restStop ?? null, this._restNativeRatio() ?? null]);
+          if (lastFloor !== undefined && (this._floorMp ?? 99) < (lastFloor ?? 99)) floorDrops += 1;
+          lastFloor = this._floorMp ?? null;
+          samples.push([this.post?.drawWidth ?? 0, this.post?.drawHeight ?? 0, this._floorMp ?? null, this._restStop ?? null, this._restStopBudget() ?? null]);
         }
         if (now < deadline) {
           requestAnimationFrame(tick);
@@ -3505,7 +3508,8 @@ export class StageExperience {
         const q = (p) => +s[Math.min(s.length - 1, Math.floor(p * s.length))].toFixed(2);
         const sizes = {};
         for (const r of samples) sizes[`${r[0]}x${r[1]} floor=${r[2]} rest=${r[3]} native=${r[4]}`] = (sizes[`${r[0]}x${r[1]} floor=${r[2]} rest=${r[3]} native=${r[4]}`] ?? 0) + 1;
-        resolve({ frames: iv.length, p50: q(0.5), p95: q(0.95), over33: iv.filter((x) => x > 33).length, over50: iv.filter((x) => x > 50).length, max: +s[s.length - 1].toFixed(1), states: sizes });
+        const endDraw = [this.post?.drawWidth ?? 0, this.post?.drawHeight ?? 0];
+        resolve({ frames: iv.length, p50: q(0.5), p95: q(0.95), over33: iv.filter((x) => x > 33).length, over50: iv.filter((x) => x > 50).length, max: +s[s.length - 1].toFixed(1), floorDrops, settledMp: +((endDraw[0] * endDraw[1]) / 1e6).toFixed(2), endDraw, states: sizes });
       };
       requestAnimationFrame(tick);
     });
@@ -3569,37 +3573,39 @@ export class StageExperience {
    */
   _pixelRatioForBudget(cssW, cssH) {
     const area = Math.max(1, cssW * cssH);
-    const native = this._restNativeRatio();
-    // Pass S S3: a native rest stop has no megapixel budget — only the
-    // governor's floor notch (when set) still caps it.
-    const budgetMp = native ? (this._floorMp ?? Infinity) : this._effectiveBudgetMp();
+    const rest = this._restStopBudget();
+    // Pass U: a settled stop's own budget ("native" = no MP cap); the
+    // governor floor notch still caps it. Motion uses the global budget.
+    const budgetMp = rest == null ? this._effectiveBudgetMp() : Math.min(rest === "native" ? Infinity : rest, this._floorMp ?? Infinity);
     const fromBudget = Math.sqrt((budgetMp * 1e6) / area);
-    const deviceCap = native ?? this._fullPixelRatio * (this._renderScale || 1);
+    const deviceCap = rest == null ? this._fullPixelRatio * (this._renderScale || 1) : this._displayRatio();
     return Math.max(0.2, Math.min(deviceCap, fromBudget));
   }
 
   /**
-   * Pass S S3 — the device-native ratio (≤ REST_NATIVE_DPR_CAP) while a
-   * REST_NATIVE_STOPS stop is settled in rest mode; null otherwise. Set only
-   * by `_tickRestDpr`, so it switches on after settle + fade-in and off at
-   * the same point the rest budget does.
+   * Pass U — the settled rest budget of the resting stop (MP or "native"),
+   * or null outside rest mode. `?restmp=<v>` (DEV A/B) sets every stop; the
+   * Shift+B tuner (setPixelBudget) overrides the table when moved.
    */
-  _restNativeRatio() {
-    if (!this._restDprActive || this._blackHoleActive || this.isCoarse) return null;
-    // DEV A/B: `?restnative=0` turns the per-stop native rest off.
-    this._restNativeOff ??= /[?&]restnative=0\b/.test(this._inWorker ? this._search || "" : typeof window !== "undefined" ? window.location.search : "");
-    if (this._restNativeOff) return null;
-    if (!REST_NATIVE_STOPS.includes(this._restStop)) return null;
-    // Capped at the canvas ratio (the canvas is not raised for it).
-    const canvas = this._fullPixelRatio * (this._renderScale || 1) * BLACK_HOLE_DPR;
-    return Math.min(Math.min(this._deviceDpr || 1, REST_NATIVE_DPR_CAP) * (this._renderScale || 1), canvas);
+  _restStopBudget() {
+    if (!this._restDprActive || this._blackHoleActive || this._restStop == null) return null;
+    if (this._restMpOverride === undefined) {
+      const m = /[?&]restmp=([\w.]+)/.exec(this._inWorker ? this._search || "" : typeof window !== "undefined" ? window.location.search : "");
+      this._restMpOverride = m ? (m[1] === "native" ? "native" : Number(m[1])) : null;
+    }
+    if (this._restMpOverride != null) return this._restMpOverride;
+    if (this._pixelBudgetMp !== REST_PIXEL_BUDGET_MP) return this._pixelBudgetMp;
+    return REST_BUDGET_MP_BY_STOP[this._restStop] ?? this._pixelBudgetMp;
   }
 
   /** Pass T — presentation ratio: the device's real DSF (cap TSR_DISPLAY_DPR_CAP), never below the draw cap. */
   _displayRatio() {
     const seq = this._fullPixelRatio * (this._renderScale || 1) * BLACK_HOLE_DPR;
     this._tsrOff ??= /[?&]tsr=0\b/.test(this._inWorker ? this._search || "" : typeof window !== "undefined" ? window.location.search : "");
-    if (this._tsrOff || !TSR_ANY) return seq;
+    // Pass U: the canvas is the display ratio from boot (allocated once);
+    // `?canvascap=1` (DEV A/B) keeps the old draw-cap canvas.
+    this._canvasCap ??= /[?&]canvascap=1\b/.test(this._inWorker ? this._search || "" : typeof window !== "undefined" ? window.location.search : "");
+    if (this._canvasCap) return seq;
     return Math.max(seq, Math.min(this._deviceDpr || 1, TSR_DISPLAY_DPR_CAP) * (this._renderScale || 1));
   }
 
@@ -6798,6 +6804,7 @@ export class StageExperience {
     if (this._restDprActive) return;
     this._restDprActive = true;
     this._restDprWait = false;
+    this._restStop = this.cameraRig?.state?.index ?? this.current ?? 0;
     this._applyRenderScale();
   }
 

@@ -27,14 +27,20 @@ export const REST_DPR = 0.85;
  */
 export const REST_PIXEL_BUDGET_MP = 2.3;
 /**
- * Pass S S3 — stops whose settled rest draws at the device's native ratio
- * (Dane's pick: Desktop, P1 "native"), capped at REST_NATIVE_DPR_CAP. Motion,
- * the governor floor and every other stop's rest budget are unchanged.
+ * Pass U — settled rest budget per stop (MP, or "native" = the display ratio).
+ * This is the TARGET: the governor's floor notch still caps it on a machine
+ * that cannot hold it (per-machine adaptation is the governor's job). Switches
+ * only where the rest budget already does (`_tickRestDpr`: after settle and
+ * the stop's fade-in; off at hop start). Motion budget unchanged.
+ * Values from the Pass U re-test (README).
  */
-// Pass T T0 (Dane): reverted — the governor floor dropped at Desktop idle so
-// "native" drew less than the 2.3 MP budget. Kept for A/B; empty = off.
-export const REST_NATIVE_STOPS = Object.freeze([]);
-export const REST_NATIVE_DPR_CAP = 2;
+// Pass U (load < 4, interleaved 2.3 / 3.2 / 4.5 / native, then a 3-session
+// hold test with the floor released once per stop): highest budget per stop
+// with 0 idle floor drops and hop windows no worse than 2.3. Bust: nothing
+// above 2.3 held. Desktop: native held 1/5, 4.5 held but cost one extra
+// > 50 ms hop frame in 48 → 3.2 (held 3/3). Sidekick: 4.5 held 1/5 → 3.2
+// (held 3/3). Archaeology: 4.5 held 2/2, hops clean.
+export const REST_BUDGET_MP_BY_STOP = Object.freeze({ 0: 2.3, 1: 3.2, 2: 3.2, 3: 4.5 });
 /**
  * Pass T — still-camera temporal super-resolution (tsr.js). Per-stop gate
  * (a stop that ghosts ships off), display ratio cap (the canvas is set to
