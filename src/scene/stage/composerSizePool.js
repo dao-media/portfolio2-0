@@ -56,7 +56,14 @@ export function setPoolDiscardOutgoing(on) {
  * @param {THREE.WebGLRenderer} renderer
  * @param {import("postprocessing").EffectComposer} composer
  */
+/** DEV A/B (`?nopool=1`): do not install the pool at all. */
+let disabled = false;
+export function setPoolDisabled(on) {
+  disabled = Boolean(on);
+}
+
 export function installComposerSizePool(renderer, composer) {
+  if (disabled) return;
   const proto = THREE.WebGLRenderTarget.prototype;
   if (!proto.__floorSizePool) {
     const orig = proto.setSize;
@@ -119,7 +126,7 @@ function bags(renderer, rt) {
 }
 
 function stash(renderer, rt, samples) {
-  const { rt: rtBag, tex, depth } = bags(renderer, rt);
+  const { rt: rtBag, tex } = bags(renderer, rt);
   if (!rtBag?.__webglFramebuffer && !rtBag?.__webglMultisampledFramebuffer) return;
   const pool = poolFor(rt);
   const key = sizeKey(rt, rt.width, rt.height, samples);
@@ -127,7 +134,7 @@ function stash(renderer, rt, samples) {
   pool.set(key, {
     rt: snapshot(rtBag),
     tex: snapshot(tex),
-    depth: snapshot(depth)
+    depth: null
   });
   while (!legacy && pool.size > POOL_MAX) {
     const [oldKey, old] = pool.entries().next().value;
@@ -150,12 +157,10 @@ function deleteSnapshot(renderer, entry) {
 }
 
 function applyHit(renderer, rt, hit) {
-  const { rt: rtBag, tex, depth } = bags(renderer, rt);
+  const { rt: rtBag, tex } = bags(renderer, rt);
   restore(rtBag, hit.rt);
   restore(tex, hit.tex);
-  restore(depth, hit.depth);
   if (tex && rt.texture) tex.__version = rt.texture.version;
-  if (depth && rt.depthTexture) depth.__version = rt.depthTexture.version;
 }
 
 function writeSize(rt, width, height, depth) {
@@ -174,6 +179,24 @@ function writeSize(rt, width, height, depth) {
   rt.scissor.set(0, 0, width, height);
 }
 
+/**
+ * Pass Q — depth textures are three's, never the pool's. A target has ONE
+ * DepthTexture object and three keeps one GL texture for it; the pool kept a
+ * framebuffer per size. Restoring a framebuffer (or the depth bag) from
+ * another size left the composer's main targets with a deleted depth texture
+ * that three still believed attached (its `__boundDepthTexture` check is by
+ * object identity, and the image size had been rewritten to match): both
+ * composer buffers rendered with NO depth attachment since 35a30f2 — draw
+ * order decided everything (floor over grass, the tree's buried pad over the
+ * lawn, stars over the tree, inner faces over outer ones).
+ * After every swap the depth texture is disposed; three's dispose listener
+ * clears the bound marker and the next setRenderTarget allocates a fresh one
+ * at the new size and attaches it to whichever framebuffer is current.
+ */
+function resetDepthTexture(rt) {
+  rt.depthTexture?.dispose();
+}
+
 function swapTargetSize(rt, width, height, depth, renderer) {
   if (rt.width === width && rt.height === height && (rt.depth || 1) === depth) {
     rt.viewport.set(0, 0, width, height);
@@ -189,13 +212,14 @@ function swapTargetSize(rt, width, height, depth, renderer) {
   if (hit) {
     if (!legacy) poolFor(rt).delete(sizeKey(rt, width, height, samples));
     applyHit(renderer, rt, hit);
+    resetDepthTexture(rt);
     markMiss(rt, false);
     return;
   }
-  const { rt: rtBag, tex, depth: depthBag } = bags(renderer, rt);
+  const { rt: rtBag, tex } = bags(renderer, rt);
   clearGl(rtBag);
   clearGl(tex);
-  clearGl(depthBag);
+  resetDepthTexture(rt);
   markMiss(rt, true);
 }
 
@@ -246,12 +270,13 @@ function patchSampleSwap(composer) {
 /** Delete the target's current GL objects (what three's dispose would free). */
 function dropCurrent(renderer, rt) {
   const gl = renderer.getContext();
-  const { rt: rtBag, tex, depth } = bags(renderer, rt);
+  // The depth texture is three's (resetDepthTexture disposes it properly).
+  const { rt: rtBag, tex } = bags(renderer, rt);
   const pooled = new Set();
   for (const entry of rt.userData?._sizePool?.values() ?? []) {
     for (const snap of [entry.rt, entry.tex, entry.depth]) for (const v of Object.values(snap ?? {})) [v].flat().forEach((o) => o && pooled.add(o));
   }
-  for (const bag of [rtBag, tex, depth]) {
+  for (const bag of [rtBag, tex]) {
     if (!bag) continue;
     for (const key of GL_KEYS) {
       for (const o of [bag[key]].flat()) {

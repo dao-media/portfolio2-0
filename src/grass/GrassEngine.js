@@ -445,7 +445,8 @@ export class GrassEngine {
    * Settled view: drop instances outside the camera, or shorter than one pixel.
    * The placement count is unchanged — motion restores every blade.
    * @param {THREE.Camera} camera
-   * @param {{ subpixelPx?: number, ndcMargin?: number }} [opts]
+   * @param {{ subpixelPx?: number, ndcMargin?: number, drawW?: number, drawH?: number }} [opts]
+   *   drawW/drawH: the drawing-buffer size the blades are measured in (px).
    */
   applyRestCull(camera, opts = {}) {
     if (!this.mesh || !camera || this._restActive) return this._restStats;
@@ -457,8 +458,13 @@ export class GrassEngine {
     this.mesh.updateMatrixWorld(true);
     _restView.copy(camera.matrixWorldInverse);
     const ve = _restView.elements;
-    const drawW = typeof window !== "undefined" ? window.innerWidth : 1;
-    const drawH = typeof window !== "undefined" ? window.innerHeight : 1;
+    // Pass Q: the stage runs in a worker — `window` is undefined there, and
+    // the old fallback of 1 px made every blade "sub-pixel": the settled
+    // cull dropped the whole meadow (bare Grass_ground disc since the
+    // worker move). The caller passes the real draw size; without it, skip.
+    const drawW = opts.drawW;
+    const drawH = opts.drawH;
+    if (!(drawW > 1 && drawH > 1)) return this._restStats;
     /** @type {number[]} */
     const keep = [];
     let offscreen = 0;

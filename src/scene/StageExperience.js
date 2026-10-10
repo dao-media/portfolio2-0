@@ -4709,7 +4709,9 @@ export class StageExperience {
     if (engine && cull) {
       engine.applyRestCull(this.camera, {
         subpixelPx: cull.subpixelPx,
-        ndcMargin: cull.ndcMargin
+        ndcMargin: cull.ndcMargin,
+        drawW: this.post?.drawWidth ?? 0,
+        drawH: this.post?.drawHeight ?? 0
       });
     }
     if (engine && restResource(index, "grass-rest-wind")) {
