@@ -13,7 +13,16 @@
  * the warm-compile program-key leaks (adding/removing a map changes the
  * program's shader defines, which changing a scalar does not).
  *
- * @typedef {{ metalness: number, roughness?: number }} MaterialIntentEntry
+ * @typedef {{
+ *   metalness: number,
+ *   roughness?: number,
+ *   color?: string,
+ *   dropMaps?: string[],
+ *   envRequest?: { name: string, intensity: number }
+ * }} MaterialIntentEntry
+ * `color` / `dropMaps` apply at load, before any compile, so the program key
+ * is fixed from the start (Pass S). `envRequest` is recorded on `userData`
+ * for the stage to fulfil (it needs the renderer) before the first compile.
  */
 
 /**
@@ -44,13 +53,21 @@ const PROP_GLBS = [
 
 /** @type {Record<string, MaterialIntentEntry>} */
 export const METAL_ALLOWLIST = {
-  // Bust — pending the bronze-vs-stone call (see debugMaterialAudit / the
-  // chrome-state investigation). Held at the value the replaced
-  // `_hardenBustMaterials` produced (metalness min(raw, 0.12) = 0.12 for this
-  // GLB, roughness max(raw, 0.55) = 1) so this rule does not itself retune
-  // the bust. Pass R: it had pinned 0 here, which was a silent retune
-  // (23 Sep ran at 0.12); `pass-q-check` fails on 0.
-  Mesh_0_material: { metalness: 0.12, roughness: 1 },
+  // Bust — Dane's pick, Pass S S1 variant D: bronze metal. The GLB is
+  // authored metal (ORM metalness ≈ 0.88) over a near-black base map, so
+  // metalness alone reflected the dark stop env and read as clay. Base map
+  // and metalness map dropped (a uniform bronze F0, no grey multiply); the
+  // GLB roughness map kept and scaled so its mean (0.715) lands at 0.38;
+  // a bust-only warm reflection source (`envRequest`, fulfilled by the
+  // stage before the first compile — README §20 11u). `pass-q-check` guards
+  // these values (fails on 0 and on Pass R's 0.12).
+  Mesh_0_material: {
+    metalness: 0.85,
+    roughness: 0.38 / 0.715,
+    color: "#b9814f",
+    dropMaps: ["map", "metalnessMap"],
+    envRequest: { name: "bust-warm", intensity: 1 }
+  },
   // Sidekick chassis — genuinely metal parts (mesh/material names name the
   // metal). Roughened from the raw 0.553 so they read as worn, not mirrors.
   silver: { metalness: 1, roughness: 0.65 },
@@ -112,6 +129,9 @@ export function applyMaterialIntentSSOT(gltf, url) {
       if (allow) {
         mat.metalness = allow.metalness;
         if (typeof allow.roughness === "number") mat.roughness = allow.roughness;
+        if (allow.color) mat.color?.set(allow.color);
+        for (const slot of allow.dropMaps ?? []) mat[slot] = null;
+        if (allow.envRequest) mat.userData = { ...mat.userData, envRequest: { ...allow.envRequest } };
         mat.needsUpdate = true;
         continue;
       }

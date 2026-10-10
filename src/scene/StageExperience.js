@@ -3579,7 +3579,9 @@ export class StageExperience {
     this._restNativeOff ??= /[?&]restnative=0\b/.test(this._inWorker ? this._search || "" : typeof window !== "undefined" ? window.location.search : "");
     if (this._restNativeOff) return null;
     if (!REST_NATIVE_STOPS.includes(this._restStop)) return null;
-    return Math.min(this._deviceDpr || 1, REST_NATIVE_DPR_CAP) * (this._renderScale || 1);
+    // Capped at the canvas ratio (the canvas is not raised for it).
+    const canvas = this._fullPixelRatio * (this._renderScale || 1) * BLACK_HOLE_DPR;
+    return Math.min(Math.min(this._deviceDpr || 1, REST_NATIVE_DPR_CAP) * (this._renderScale || 1), canvas);
   }
 
   /** DEV — Pass S S2: the film look applied this frame (post uniforms). */
@@ -3600,6 +3602,26 @@ export class StageExperience {
         else resolve(rows);
       };
       requestAnimationFrame(tick);
+    });
+  }
+
+  /**
+   * Pass S — fulfil `materialIntentSSOT` env requests on a freshly mounted
+   * root (called before its first compile, so `USE_ENVMAP` is in the program
+   * from the start). Known requests: "bust-warm" (`_bustWarmEnv`).
+   * @param {THREE.Object3D} root
+   */
+  _applyEnvRequests(root) {
+    this._bustGroup ??= root?.parent ?? null;
+    root?.traverse((obj) => {
+      if (!obj.isMesh || !obj.material) return;
+      for (const mat of Array.isArray(obj.material) ? obj.material : [obj.material]) {
+        const req = mat?.userData?.envRequest;
+        if (!req || mat.envMap) continue;
+        if (req.name === "bust-warm") mat.envMap = this._bustWarmEnv();
+        mat.envMapIntensity = req.intensity ?? 1;
+        mat.needsUpdate = true;
+      }
     });
   }
 
@@ -3639,8 +3661,10 @@ export class StageExperience {
     // Canvas stays at the sequence cap. The floor walks composer buffer
     // sizes that were allocated during warm; a swap does not call setSize
     // on a live frame.
-    const native = this._restNativeRatio();
-    const canvasRatio = native ? Math.max(sequenceFull, native) : sequenceFull;
+    // Pass S S3 (Dane): the native rest never raises the canvas — a back-
+    // buffer reallocation on every Desktop arrival / departure cost > 50 ms
+    // frames; the draw goes up to the canvas instead (§20 11t).
+    const canvasRatio = sequenceFull;
     const canvasChanged =
       Math.abs(canvasRatio - (this.renderer.getPixelRatio?.() || 0)) > 0.002;
     let dw = Math.max(1, Math.round(w * this.pixelRatio));
@@ -5387,7 +5411,7 @@ export class StageExperience {
    */
   _bustWarmEnv() {
     if (this._bustEnv) return this._bustEnv;
-    const bust = this.vignettes?.[0]?.group;
+    const bust = this.vignettes?.[0]?.group ?? this._bustGroup;
     const lantern = this.neon?.entries?.[0]?.tube;
     const a = new THREE.Vector3();
     const b = new THREE.Vector3();
@@ -7972,6 +7996,7 @@ export class StageExperience {
           reducedMotion: this.reducedMotion,
           // Gate with Desktop — arrival stop must be ready when the fader lifts.
           deferModelLoad: true,
+          onBustMounted: (root) => this._applyEnvRequests(root),
           onAligned: () => {
             this._snapAllVignettesToFloor();
             this._attachEdgeGlitchBust();

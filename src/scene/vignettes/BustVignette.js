@@ -469,6 +469,8 @@ export class BustVignette {
     this.renderer = deps.renderer ?? null;
     this.reducedMotion = Boolean(deps.reducedMotion);
     this.onAligned = deps.onAligned ?? null;
+    /** Pass S — called with the bust root right after mount, before any compile. */
+    this.onBustMounted = deps.onBustMounted ?? null;
     this.bustRoot = null;
     this.appleRoot = null;
     this.grassRoot = null;
@@ -593,6 +595,8 @@ export class BustVignette {
 
     this.group.add(root);
     this.bustRoot = root;
+    // Pass S — the stage fulfils SSOT env requests before the first compile.
+    this.onBustMounted?.(root);
   }
 
   /**

@@ -92,14 +92,28 @@ const st = await dbg("debugStarsOverMesh", "tripo_node*", 2);
 if (!(st?.starPx > 0)) fail(`star test drew no stars at all (${JSON.stringify(st)})`);
 else if (st.underMesh > 0) fail(`stars draw over the tree: ${st.underMesh} star pixels inside its mask (${st.starPx} star px total)`);
 else ok(`no stars over the tree (${st.starPx} star px, 0 inside ${st.maskPx} mask px)`);
-// (e) Pass R — material intent. Bust metalness is the pre-SSOT value; PC
+// (e) Pass R/S — material intent. Bust = Pass S pick D (below); PC
 // colour maps decode as sRGB (chunked storage SRGB8_ALPHA8), data maps stay
 // linear; §20 18/18b: no toneMapped:false on pc_1/pc_2, pc_1 roughness floor
 // 0.62, normalScale 0.28, specularIntensity 0.18, point-light mul patch.
 const mats0 = await dbg("debugMaterialDump", 0);
 const bustMat = mats0?.meshes?.find((m) => m.path.endsWith("bust/Mesh_0"))?.materials?.[0];
-if (!bustMat || Math.abs(bustMat.metalness - 0.12) > 1e-3) fail(`Bust Mesh_0_material metalness ${bustMat?.metalness} ≠ 0.12 (23 Sep value)`);
-else ok("Bust metalness 0.12 (pre-SSOT value)");
+// Pass S S1 — Dane's pick D: bronze metal, base + metalness maps dropped,
+// GLB roughness map at mean 0.38, bust-only warm envMap at intensity 1.
+const bustBad = [];
+if (!bustMat) bustBad.push("material missing");
+else {
+  if (Math.abs(bustMat.metalness - 0.85) > 1e-3) bustBad.push(`metalness ${bustMat.metalness} ≠ 0.85`);
+  if (Math.abs(bustMat.roughness - 0.38 / 0.715) > 1e-3) bustBad.push(`roughness ${bustMat.roughness} ≠ ${(0.38 / 0.715).toFixed(4)}`);
+  if (bustMat.color !== "#b9814f") bustBad.push(`color ${bustMat.color} ≠ #b9814f`);
+  if (bustMat.map) bustBad.push("base map still set");
+  if (bustMat.metalnessMap) bustBad.push("metalness map still set");
+  if (!bustMat.roughnessMap) bustBad.push("roughness map missing");
+  if (bustMat.envMap?.name !== "bust-warm-env") bustBad.push(`envMap ${bustMat.envMap?.name ?? null} ≠ bust-warm-env`);
+  if (Math.abs((bustMat.envMapIntensity ?? 0) - 1) > 1e-3) bustBad.push(`envMapIntensity ${bustMat.envMapIntensity} ≠ 1`);
+}
+if (bustBad.length) fail(`Bust material: ${bustBad.join("; ")}`);
+else ok("Bust material = Dane's pick D (bronze metal 0.85, warm env 1)");
 const mats1 = await dbg("debugMaterialDump", 1);
 const pcBad = [];
 for (const m of mats1?.meshes ?? []) {
