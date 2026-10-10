@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { applyLightSkip } from "./stage/lightSkip.js";
 import { installVramTracker } from "./stage/vramTracker.js";
-import { setPoolDiscardOutgoing, setPoolLegacy } from "./stage/composerSizePool.js";
+import { setPoolDiscardOutgoing, setPoolDisabled, setPoolLegacy } from "./stage/composerSizePool.js";
 import gsap from "gsap";
 import { HUDController } from "../ui/HUDController.js";
 import { DesktopVignette, desktopVignetteMeta } from "./vignettes/DesktopVignette.js";
@@ -561,6 +561,7 @@ export class StageExperience {
       installVramTracker(this.renderer.getContext());
     }
     if (/[?&]poolall=1\b/.test(this._inWorker ? this._search : (typeof window !== "undefined" ? window.location.search : ""))) setPoolLegacy(true);
+    if (/[?&]nopool=1\b/.test(this._inWorker ? this._search : (typeof window !== "undefined" ? window.location.search : ""))) setPoolDisabled(true);
     this.renderer.setPixelRatio(this.pixelRatio);
     {
       const { w, h } = this._viewportCssSize();
@@ -4161,6 +4162,495 @@ export class StageExperience {
   debugPcTextureReport() {
     const root = this.vignettes?.[1]?.instance?.pcRoot;
     if (!root) return { error: "no pcRoot" };
+    return this._textureReport(root);
+  }
+
+  /**
+   * DEV/Pass Q Q1 — debugPcTextureReport for any stop's whole group, plus a
+   * summary: textures, how many read back uniform / black / unreadable.
+   * @param {number} index
+   */
+  debugStopTextureReport(index = 0) {
+    const root = this.vignettes?.[index]?.group;
+    if (!root) return { error: `no stop ${index}` };
+    const rep = this._textureReport(root);
+    const tex = new Map();
+    for (const r of rep.rows) for (const [slot, t] of Object.entries(r.slots)) if (!tex.has(t.uuid)) tex.set(t.uuid, { ...t, slot, mesh: r.mesh });
+    const all = [...tex.values()];
+    const black = (t) => t.gpu?.samples?.length && t.gpu.samples.every((s) => s[0] + s[1] + s[2] < 6);
+    return {
+      stop: index,
+      textures: all.length,
+      uniform: all.filter((t) => t.gpu?.uniform).map((t) => `${t.mesh}.${t.slot} ${t.name ?? ""} ${t.size} chunk=${t.chunkClaimed ? (t.chunkDone ? "done" : "pending") : "-"} own=${t.glIsChunkOwn} s=${JSON.stringify(t.gpu?.samples?.[0])}`),
+      black: all.filter(black).length,
+      unreadable: all.filter((t) => t.gpu?.error || t.gpu?.fbComplete === false).map((t) => `${t.mesh}.${t.slot} ${t.gpu?.error ?? "fb incomplete"}`),
+      notResident: all.filter((t) => !t.glResident).map((t) => `${t.mesh}.${t.slot} ${t.name ?? ""}`),
+      queuePending: rep.queuePending,
+      untexturedMeshes: rep.rows.filter((r) => !Object.keys(r.slots).length && r.visible).length,
+      rows: rep.rows
+    };
+  }
+
+  /**
+   * DEV/Pass Q — find objects by name (exact, or all containing `name` when it
+   * ends with "*") and optionally patch them: { visible, renderOrder,
+   * material: { depthTest, depthWrite, depthFunc, transparent, opacity,
+   * colorWrite, side } }. Returns each object's state (after the patch).
+   */
+  debugObj(name, patch = null) {
+    const prefix = name.endsWith("*") ? name.slice(0, -1) : null;
+    const out = [];
+    this.scene.traverse((o) => {
+      if (prefix != null ? !o.name.includes(prefix) : o.name !== name) return;
+      if (patch) {
+        if (patch.magenta && o.isMesh) {
+          o.userData._qMat ??= o.material;
+          o.material = this._qMagenta ??= new THREE.MeshBasicMaterial({ color: 0xff00ff });
+        } else if (patch.magenta === false && o.userData._qMat) {
+          o.material = o.userData._qMat;
+          delete o.userData._qMat;
+        }
+        if ("visible" in patch) o.visible = patch.visible;
+        if ("renderOrder" in patch) o.renderOrder = patch.renderOrder;
+        if ("frustumCulled" in patch) o.frustumCulled = patch.frustumCulled;
+        if ("castShadow" in patch) o.castShadow = patch.castShadow;
+        for (const m of [].concat(o.material ?? [])) {
+          if (!m || !patch.material) continue;
+          for (const [k, v] of Object.entries(patch.material)) m[k] = v;
+          m.needsUpdate = true;
+        }
+      }
+      const m = [].concat(o.material ?? [])[0];
+      out.push({
+        name: o.name,
+        type: o.type,
+        frustumCulled: o.frustumCulled,
+        castShadow: o.castShadow,
+        sphere: o.boundingSphere ? { c: o.boundingSphere.center.toArray().map((v) => +v.toFixed(2)), r: +o.boundingSphere.radius.toFixed(2) } : o.geometry?.boundingSphere ? { geo: true, c: o.geometry.boundingSphere.center.toArray().map((v) => +v.toFixed(2)), r: +o.geometry.boundingSphere.radius.toFixed(2) } : null,
+        visible: o.visible,
+        renderOrder: o.renderOrder,
+        layers: o.layers.mask,
+        material: m ? { type: m.type, name: m.name, transparent: m.transparent, opacity: m.opacity, depthTest: m.depthTest, depthWrite: m.depthWrite, depthFunc: m.depthFunc, colorWrite: m.colorWrite, side: m.side, blending: m.blending, alphaTest: m.alphaTest, toneMapped: m.toneMapped, onBeforeCompile: m.onBeforeCompile !== THREE.Material.prototype.onBeforeCompile } : null
+      });
+    });
+    return out;
+  }
+
+  /**
+   * DEV/Pass Q — render only the named objects (their own layer 31, camera
+   * on that layer, magenta MeshBasic override) into a draw-size target and
+   * count covered pixels: separates "not drawn at all" from "drawn, hidden".
+   */
+  debugRenderOnly(name) {
+    const w = this.post?.drawWidth || 512;
+    const h = this.post?.drawHeight || 512;
+    const rt = new THREE.WebGLRenderTarget(w, h, { depthBuffer: true });
+    const objs = [];
+    this.scene.traverse((o) => {
+      if (o.name === name) objs.push([o, o.layers.mask, o.material]);
+    });
+    const magenta = new THREE.MeshBasicMaterial({ color: 0xff00ff });
+    for (const [o] of objs) {
+      o.layers.set(31);
+      o.material = magenta;
+    }
+    const camMask = this.camera.layers.mask;
+    this.camera.layers.set(31);
+    const prevTarget = this.renderer.getRenderTarget();
+    const bg = this.scene.background;
+    this.scene.background = null;
+    this.renderer.setRenderTarget(rt);
+    this.renderer.setClearColor(0x000000, 0);
+    this.renderer.clear();
+    this.renderer.render(this.scene, this.camera);
+    const px = new Uint8Array(w * h * 4);
+    this.renderer.readRenderTargetPixels(rt, 0, 0, w, h, px);
+    this.renderer.setRenderTarget(prevTarget);
+    this.scene.background = bg;
+    this.camera.layers.mask = camMask;
+    for (const [o, mask, mat] of objs) {
+      o.layers.mask = mask;
+      o.material = mat;
+    }
+    let covered = 0;
+    for (let i = 0; i < px.length; i += 4) if (px[i] > 200 && px[i + 2] > 200 && px[i + 1] < 60) covered += 1;
+    rt.dispose();
+    magenta.dispose();
+    return { name, objects: objs.length, covered, of: w * h };
+  }
+
+  /** DEV/Pass Q — drop a stop light's baked cube shadow and re-bake it next frame. */
+  debugRebakeStopShadow(stop = 0) {
+    const light = this.neon?.stopLights?.[stop]?.light;
+    if (!light?.shadow) return null;
+    light.shadow.map?.dispose();
+    light.shadow.map = null;
+    light.shadow.needsUpdate = true;
+    this.renderer.shadowMap.needsUpdate = true;
+    return { light: light.name, intensity: light.intensity, distance: light.distance, decay: light.decay, pos: light.position.toArray(), shadowIntensity: light.shadow.intensity };
+  }
+
+  /**
+   * DEV/Pass Q — draw sequence of every mesh three renders into the main
+   * composer target in one frame (name, renderOrder, depth state, target).
+   */
+  debugDrawSequence() {
+    const seq = [];
+    const hooked = [];
+    const startFrame = this._frameNo + 1;
+    this.scene.traverse((o) => {
+      if (!o.isMesh && !o.isPoints) return;
+      const prev = o.onBeforeRender;
+      hooked.push([o, prev]);
+      o.onBeforeRender = (renderer, scene, camera, geometry, material) => {
+        if (this._frameNo === startFrame && camera === this.camera) {
+          const rt = renderer.getRenderTarget();
+          seq.push({ name: o.name || o.type, ro: o.renderOrder, mat: material?.type, dT: material?.depthTest, dW: material?.depthWrite, fn: material?.depthFunc, tr: material?.transparent, target: rt ? `${rt.width}x${rt.height}` : "canvas" });
+        }
+        prev?.call(o, renderer, scene, camera, geometry, material);
+      };
+    });
+    return new Promise((r) => setTimeout(() => {
+      for (const [o, prev] of hooked) o.onBeforeRender = prev;
+      r(seq);
+    }, 600));
+  }
+
+  /** DEV/Pass Q — the real GL depth/blend state right after the named objects draw (main camera). */
+  debugGlStateAfter(names = []) {
+    const gl = this.renderer.getContext();
+    const log = [];
+    const hooked = [];
+    const want = new Set(names);
+    this.scene.traverse((o) => {
+      if (!want.has(o.name)) return;
+      const prev = o.onAfterRender;
+      hooked.push([o, prev]);
+      o.onAfterRender = (renderer, scene, camera, geometry, material) => {
+        if (camera === this.camera && log.length < 12) {
+          log.push({ name: o.name, depthTest: gl.isEnabled(gl.DEPTH_TEST), depthMask: gl.getParameter(gl.DEPTH_WRITEMASK), depthFunc: gl.getParameter(gl.DEPTH_FUNC), colorMask: gl.getParameter(gl.COLOR_WRITEMASK), sampleA2C: gl.isEnabled(gl.SAMPLE_ALPHA_TO_COVERAGE), polyOffset: gl.isEnabled(gl.POLYGON_OFFSET_FILL), stencil: gl.isEnabled(gl.STENCIL_TEST), fbo: Boolean(gl.getParameter(gl.FRAMEBUFFER_BINDING)), matA2C: material?.alphaToCoverage, matDither: material?.dithering });
+        }
+        prev?.call(o, renderer, scene, camera, geometry, material);
+      };
+    });
+    return new Promise((r) => setTimeout(() => {
+      for (const [o, prev] of hooked) o.onAfterRender = prev;
+      r(log);
+    }, 400));
+  }
+
+  /** DEV/Pass Q — record what three actually draws for the named objects over the next frames. */
+  debugRenderHook(name, frames = 3) {
+    const log = [];
+    this.scene.traverse((o) => {
+      if (o.name !== name) return;
+      const prev = o.onBeforeRender;
+      let n = 0;
+      o.onBeforeRender = (renderer, scene, camera, geometry, material) => {
+        if (n < frames * 4) {
+          const rt = renderer.getRenderTarget();
+          log.push({ frame: this._frameNo, mat: material?.type, matName: material?.name, uuid: material?.uuid?.slice(0, 6), colorWrite: material?.colorWrite, depthTest: material?.depthTest, depthWrite: material?.depthWrite, depthFunc: material?.depthFunc, opacity: material?.opacity, transparent: material?.transparent, visible: material?.visible, count: o.count, camLayers: camera.layers.mask, isMainCam: camera === this.camera, target: rt ? `${rt.width}x${rt.height}` : "canvas" });
+        }
+        n += 1;
+        prev?.call(o, renderer, scene, camera, geometry, material);
+      };
+      setTimeout(() => {
+        o.onBeforeRender = prev;
+      }, 1500);
+    });
+    return new Promise((r) => setTimeout(() => r(log), 1600));
+  }
+
+  /** DEV/Pass Q — visible meshes whose world box overlaps a box (default: the Bust lawn disc footprint). */
+  debugMeshesIn(min = [-2, -0.5, 13], max = [5.2, 0.5, 20.8]) {
+    const box = new THREE.Box3(new THREE.Vector3(...min), new THREE.Vector3(...max));
+    const b = new THREE.Box3();
+    const out = [];
+    const camMask = this.camera.layers.mask;
+    this.scene.traverseVisible((o) => {
+      if (!(o.isMesh || o.isPoints || o.isSprite) || !(o.layers.mask & camMask)) return;
+      b.setFromObject(o);
+      if (b.isEmpty() || !b.intersectsBox(box)) return;
+      const s = b.getSize(new THREE.Vector3());
+      const m = [].concat(o.material ?? [])[0];
+      out.push({ name: o.name, parent: o.parent?.name, type: o.type, size: s.toArray().map((v) => +v.toFixed(2)), minY: +b.min.y.toFixed(3), maxY: +b.max.y.toFixed(3), ro: o.renderOrder, layers: o.layers.mask, mat: m?.type, matName: m?.name, transparent: m?.transparent, depthWrite: m?.depthWrite, depthTest: m?.depthTest });
+    });
+    return out.filter((r) => r.size[0] > 2 || r.size[2] > 2);
+  }
+
+  /** DEV/Pass Q — apple tree low-vertex world heights: where its base pad really sits. */
+  debugTreeBase() {
+    const tree = this.vignettes?.[0]?.instance?.appleRoot;
+    if (!tree) return null;
+    tree.updateMatrixWorld(true);
+    const v = new THREE.Vector3();
+    const hist = {};
+    let minY = Infinity;
+    let n = 0;
+    let wide = { y: null, r: 0 };
+    tree.traverse((o) => {
+      if (!o.isMesh) return;
+      const pos = o.geometry.attributes.position;
+      const c = new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3());
+      for (let i = 0; i < pos.count; i += 1) {
+        v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
+        n += 1;
+        minY = Math.min(minY, v.y);
+        if (v.y < 0.6) {
+          const k = (Math.floor(v.y / 0.02) * 0.02).toFixed(2);
+          hist[k] = (hist[k] ?? 0) + 1;
+          const r = Math.hypot(v.x - c.x, v.z - c.z);
+          if (r > wide.r) wide = { y: +v.y.toFixed(3), r: +r.toFixed(2) };
+        }
+      }
+    });
+    return { verts: n, minY: +minY.toFixed(3), widestLowVertex: wide, histBelow60cm: Object.fromEntries(Object.entries(hist).sort((a, b) => Number(a[0]) - Number(b[0]))) };
+  }
+
+  /**
+   * DEV/Pass Q — render the scene with only `names` visible (real materials)
+   * into a fresh plain target (no pool, `samples` MSAA) and count greenish
+   * pixels: is the composer's own target what loses the blades?
+   */
+  debugOffscreenSet(names = [], samples = 0) {
+    const w = this.post?.drawWidth || 512;
+    const h = this.post?.drawHeight || 512;
+    const rt = new THREE.WebGLRenderTarget(w, h, { depthBuffer: true, samples, type: THREE.HalfFloatType });
+    const keep = new Set(names);
+    const hidden = [];
+    this.scene.traverse((o) => {
+      if ((o.isMesh || o.isPoints || o.isSprite) && o.visible && !keep.has(o.name)) {
+        o.visible = false;
+        hidden.push(o);
+      }
+    });
+    const prev = this.renderer.getRenderTarget();
+    const bg = this.scene.background;
+    this.scene.background = null;
+    this.renderer.setRenderTarget(rt);
+    this.renderer.setClearColor(0x000000, 0);
+    this.renderer.clear();
+    this.renderer.render(this.scene, this.camera);
+    const px = new Uint16Array(w * h * 4);
+    let green = 0;
+    try {
+      this.renderer.readRenderTargetPixels(rt, 0, 0, w, h, px);
+      const f = THREE.DataUtils.fromHalfFloat;
+      for (let i = 0; i < px.length; i += 4) {
+        const r = f(px[i]), g = f(px[i + 1]), b = f(px[i + 2]);
+        if (g > 0.02 && g > r * 1.15 && g > b * 1.3) green += 1;
+      }
+    } catch (e) {
+      green = `read failed: ${e.message}`;
+    }
+    this.renderer.setRenderTarget(prev);
+    this.scene.background = bg;
+    for (const o of hidden) o.visible = true;
+    rt.dispose();
+    return { names, samples, green, of: w * h };
+  }
+
+  /** DEV/Pass Q — the composer input target's real GL attachments (MSAA + resolve framebuffers). */
+  debugComposerFbo() {
+    const gl = this.renderer.getContext();
+    const rt = this.post?.composer?.inputBuffer;
+    if (!rt) return null;
+    const p = this.renderer.properties.get(rt);
+    const prevFb = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    const prevRb = gl.getParameter(gl.RENDERBUFFER_BINDING);
+    const att = (fb) => {
+      if (!fb) return null;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      const one = (a) => {
+        const type = gl.getFramebufferAttachmentParameter(gl.FRAMEBUFFER, a, gl.FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE);
+        if (type === gl.NONE) return "none";
+        const obj = gl.getFramebufferAttachmentParameter(gl.FRAMEBUFFER, a, gl.FRAMEBUFFER_ATTACHMENT_OBJECT_NAME);
+        if (type === gl.RENDERBUFFER) {
+          gl.bindRenderbuffer(gl.RENDERBUFFER, obj);
+          return { rb: true, w: gl.getRenderbufferParameter(gl.RENDERBUFFER, gl.RENDERBUFFER_WIDTH), h: gl.getRenderbufferParameter(gl.RENDERBUFFER, gl.RENDERBUFFER_HEIGHT), samples: gl.getRenderbufferParameter(gl.RENDERBUFFER, gl.RENDERBUFFER_SAMPLES), fmt: `0x${gl.getRenderbufferParameter(gl.RENDERBUFFER, gl.RENDERBUFFER_INTERNAL_FORMAT).toString(16)}`, depthBits: gl.getFramebufferAttachmentParameter(gl.FRAMEBUFFER, a, gl.FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE) };
+        }
+        return { tex: true, depthBits: a === gl.DEPTH_STENCIL_ATTACHMENT || a === gl.DEPTH_ATTACHMENT ? gl.getFramebufferAttachmentParameter(gl.FRAMEBUFFER, a, gl.FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE) : null };
+      };
+      return { status: `0x${gl.checkFramebufferStatus(gl.FRAMEBUFFER).toString(16)}`, color: one(gl.COLOR_ATTACHMENT0), depth: one(gl.DEPTH_ATTACHMENT), depthStencil: one(gl.DEPTH_STENCIL_ATTACHMENT) };
+    };
+    const dBag = rt.depthTexture ? this.renderer.properties.get(rt.depthTexture) : null;
+    const out = { size: [rt.width, rt.height], samples: rt.samples, depthTexture: Boolean(rt.depthTexture), depthGl: dBag?.__webglTexture ? gl.isTexture(dBag.__webglTexture) : "unset", depthImage: rt.depthTexture ? [rt.depthTexture.image.width, rt.depthTexture.image.height] : null, boundMarker: p.__boundDepthTexture === rt.depthTexture, isComposerInput: rt === this.post.composer.inputBuffer, outputHasDepth: null, stencil: rt.stencilBuffer, msaa: att(p.__webglMultisampledFramebuffer), resolve: att(p.__webglFramebuffer), poolKeys: [...(rt.userData?._sizePool?.keys() ?? [])] };
+    const o = this.post.composer.outputBuffer;
+    out.output = att(this.renderer.properties.get(o).__webglFramebuffer);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, prevFb);
+    gl.bindRenderbuffer(gl.RENDERBUFFER, prevRb);
+    return out;
+  }
+
+  /**
+   * DEV/Pass Q — coverage mask of the named mesh(es) from the live camera,
+   * downsampled by `scale`, as a base64 bitset (row-major, top row first).
+   */
+  debugMeshMask(name, scale = 4) {
+    const w = Math.max(1, Math.floor((this.post?.drawWidth || 512) / scale));
+    const h = Math.max(1, Math.floor((this.post?.drawHeight || 512) / scale));
+    const rt = new THREE.WebGLRenderTarget(w, h, { depthBuffer: true });
+    const objs = [];
+    const prefix = name.endsWith("*") ? name.slice(0, -1) : null;
+    this.scene.traverse((o) => {
+      if (o.isMesh && (prefix != null ? o.name.startsWith(prefix) : o.name === name)) objs.push([o, o.layers.mask, o.material]);
+    });
+    const white = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+    for (const [o] of objs) {
+      o.layers.set(31);
+      o.material = white;
+    }
+    const camMask = this.camera.layers.mask;
+    this.camera.layers.set(31);
+    const prevTarget = this.renderer.getRenderTarget();
+    const bg = this.scene.background;
+    this.scene.background = null;
+    this.renderer.setRenderTarget(rt);
+    this.renderer.setClearColor(0x000000, 0);
+    this.renderer.clear();
+    this.renderer.render(this.scene, this.camera);
+    const px = new Uint8Array(w * h * 4);
+    this.renderer.readRenderTargetPixels(rt, 0, 0, w, h, px);
+    this.renderer.setRenderTarget(prevTarget);
+    this.scene.background = bg;
+    this.camera.layers.mask = camMask;
+    for (const [o, mask, mat] of objs) {
+      o.layers.mask = mask;
+      o.material = mat;
+    }
+    rt.dispose();
+    white.dispose();
+    const bits = new Uint8Array(Math.ceil((w * h) / 8));
+    let covered = 0;
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        const i = ((h - 1 - y) * w + x) * 4; // GL rows are bottom-up
+        if (px[i] > 128) {
+          const k = y * w + x;
+          bits[k >> 3] |= 1 << (k & 7);
+          covered += 1;
+        }
+      }
+    }
+    let bin = "";
+    for (let i = 0; i < bits.length; i += 1) bin += String.fromCharCode(bits[i]);
+    return { w, h, covered, drawW: this.post?.drawWidth, drawH: this.post?.drawHeight, bits: btoa(bin) };
+  }
+
+  /**
+   * DEV/Pass Q — deterministic "stars over geometry" test: render the scene
+   * without the star field into an offscreen target (keeps its depth), then
+   * the star field alone on top (no clear, its real material / depth state),
+   * and count pixels the stars brightened inside `name`'s coverage mask.
+   */
+  debugStarsOverMesh(name = "tripo_node*", scale = 2) {
+    const mask = this.debugMeshMask(name, scale);
+    const { w, h } = mask;
+    const bits = Uint8Array.from(atob(mask.bits), (c) => c.charCodeAt(0));
+    const stars = [this.starField?.points ?? this.starField, this.cursorStarTrail?.points ?? this.cursorStarTrail].filter((o) => o?.isObject3D);
+    const rt = new THREE.WebGLRenderTarget(w, h, { depthBuffer: true, type: THREE.UnsignedByteType });
+    const prevTarget = this.renderer.getRenderTarget();
+    const prevAuto = this.renderer.autoClear;
+    const camMask = this.camera.layers.mask;
+    const bg = this.scene.background;
+    this.scene.background = null;
+    const vis = stars.map((o) => o.visible);
+    for (const o of stars) o.visible = false;
+    this.renderer.setRenderTarget(rt);
+    this.renderer.setClearColor(0x000000, 1);
+    this.renderer.clear();
+    this.renderer.render(this.scene, this.camera);
+    const before = new Uint8Array(w * h * 4);
+    this.renderer.readRenderTargetPixels(rt, 0, 0, w, h, before);
+    // stars only, same target, keep depth
+    stars.forEach((o, i) => {
+      o.visible = vis[i];
+    });
+    const starLayers = stars.reduce((m, o) => m | o.layers.mask, 0);
+    this.camera.layers.mask = starLayers;
+    this.renderer.autoClear = false;
+    this.renderer.render(this.scene, this.camera);
+    const after = new Uint8Array(w * h * 4);
+    this.renderer.readRenderTargetPixels(rt, 0, 0, w, h, after);
+    this.renderer.autoClear = prevAuto;
+    this.camera.layers.mask = camMask;
+    this.renderer.setRenderTarget(prevTarget);
+    this.scene.background = bg;
+    rt.dispose();
+    let starPx = 0;
+    let underMesh = 0;
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        const i = (y * w + x) * 4;
+        const dl = after[i] + after[i + 1] + after[i + 2] - (before[i] + before[i + 1] + before[i + 2]);
+        if (dl <= 9) continue;
+        starPx += 1;
+        const k = (h - 1 - y) * w + x; // mask rows top-first
+        if (bits[k >> 3] & (1 << (k & 7))) underMesh += 1;
+      }
+    }
+    return { name, w, h, maskPx: mask.covered, starPx, underMesh };
+  }
+
+  /** DEV/Pass Q — grass blade instances: geometry, transforms, world heights vs the ground. */
+  debugGrassBlades() {
+    const root = this.vignettes?.[0]?.instance?.grassRoot;
+    if (!root) return null;
+    root.updateMatrixWorld(true);
+    const engine = this.vignettes?.[0]?.instance?.grassEngine;
+    const out = { restStats: engine?._restStats ?? null, restActive: engine?._restActive ?? null, info: { ...this.renderer.info.render }, draw: [this.post?.drawWidth, this.post?.drawHeight] };
+    root.traverse((o) => {
+      if (!o.isMesh) return;
+      const g = o.geometry;
+      if (!g.boundingBox) g.computeBoundingBox();
+      const row = { count: o.count ?? null, verts: g.attributes.position?.count, index: g.index?.count ?? null, bbox: [g.boundingBox.min.toArray().map((v) => +v.toFixed(3)), g.boundingBox.max.toArray().map((v) => +v.toFixed(3))], drawRange: [g.drawRange.start, g.drawRange.count], instanceCountAttr: g.instanceCount ?? null };
+      if (o.isInstancedMesh) {
+        const m = new THREE.Matrix4();
+        const p = new THREE.Vector3();
+        const q = new THREE.Quaternion();
+        const sc = new THREE.Vector3();
+        row.samples = [];
+        for (const i of [0, 1, Math.floor(o.count / 2), o.count - 1]) {
+          o.getMatrixAt(i, m);
+          m.premultiply(o.matrixWorld).decompose(p, q, sc);
+          const tip = p.clone().add(new THREE.Vector3(0, (g.boundingBox.max.y || 0.5) * sc.y, 0)).project(this.camera);
+          const base = p.clone().project(this.camera);
+          const dw = this.post?.drawWidth ?? 1;
+          const dh = this.post?.drawHeight ?? 1;
+          row.samples.push({ i, worldPos: p.toArray().map((v) => +v.toFixed(3)), scale: sc.toArray().map((v) => +v.toFixed(3)), screen: [Math.round((base.x * 0.5 + 0.5) * dw), Math.round((0.5 - base.y * 0.5) * dh)], heightPx: Math.round(Math.hypot((tip.x - base.x) * dw * 0.5, (tip.y - base.y) * dh * 0.5)), ndcZ: +base.z.toFixed(3) });
+        }
+      } else {
+        const b = new THREE.Box3().setFromObject(o);
+        row.worldBox = [b.min.toArray().map((v) => +v.toFixed(3)), b.max.toArray().map((v) => +v.toFixed(3))];
+      }
+      out[o.name] = row;
+    });
+    return out;
+  }
+
+  /** DEV/Pass Q Q1 — is Bust's lantern GLB, the grass, and the star field drawn the way it should be? */
+  debugBustDraw() {
+    const camMask = this.camera.layers.mask;
+    const worldVisible = (o) => {
+      for (let p = o; p; p = p.parent) if (!p.visible) return false;
+      return true;
+    };
+    const meshRows = (root) => {
+      const out = [];
+      root?.traverse((o) => {
+        if (!o.isMesh && !o.isPoints) return;
+        const m = [].concat(o.material)[0];
+        out.push({ name: o.name, type: o.isInstancedMesh ? `Instanced(${o.count})` : o.type, visible: worldVisible(o), layers: o.layers.mask, onCamera: (o.layers.mask & camMask) !== 0, opacity: m?.opacity, transparent: m?.transparent, depthWrite: m?.depthWrite, depthTest: m?.depthTest, renderOrder: o.renderOrder });
+      });
+      return out;
+    };
+    const lantern = this.neon?.entries?.[0]?.tube ?? null;
+    const grass = this.vignettes?.[0]?.instance?.grassRoot ?? null;
+    const stars = this.starField?.points ?? this.starField ?? null;
+    return { cameraLayers: camMask, lantern: meshRows(lantern), grass: meshRows(grass), stars: meshRows(stars), cursorTrail: meshRows(this.cursorStarTrail?.points ?? this.cursorStarTrail ?? null) };
+  }
+
+  _textureReport(root) {
     const gl = this.renderer.getContext();
     const q = this.chunkedTextures;
     const queued = new Set((q?.jobs ?? []).map((j) => j.texture));
@@ -4177,9 +4667,11 @@ export class StageExperience {
       const samples = [];
       if (ok && w > 0 && h > 0) {
         const px = new Uint8Array(4);
-        for (const fy of [0.2, 0.5, 0.8]) {
-          for (const fx of [0.2, 0.5, 0.8]) {
-            gl.readPixels(Math.floor(fx * w), Math.floor(fy * h), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        // Pass Q: 7×7 (was 3×3) — sparse atlases (glyphs on black) read
+        // "uniform" on a 3×3 grid that never hits a glyph.
+        for (let gy = 1; gy <= 7; gy += 1) {
+          for (let gx = 1; gx <= 7; gx += 1) {
+            gl.readPixels(Math.floor((gx / 8) * w), Math.floor((gy / 8) * h), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
             samples.push([px[0], px[1], px[2]]);
           }
         }

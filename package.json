@@ -14,7 +14,7 @@
     "test:sidekick": "node scripts/sidekick-keypad-stress.mjs",
     "test:gate": "node scripts/stage-load-gate-stress.mjs",
     "test:motion": "npm run test:cursor && npm run test:scroll && npm run test:parallax && npm run test:sidekick && npm run test:gate",
-    "test:smoke": "node scripts/stage-canvas-smoke.mjs"
+    "test:smoke": "node scripts/stage-canvas-smoke.mjs && node scripts/pass-q-check.mjs"
   },
   "devDependencies": {
     "playwright": "^1.54.2",
