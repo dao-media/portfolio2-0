@@ -6,6 +6,7 @@ import { SidekickSmsScreen } from "../ui/sidekickSms/SidekickSmsScreen.js";
 import { PixelBudgetTuner } from "../ui/PixelBudgetTuner.js";
 import { GroundFogTuner } from "../ui/GroundFogTuner.js";
 import { SkyParallaxTuner } from "../ui/SkyParallaxTuner.js";
+import { EnvLightTuner } from "../ui/EnvLightTuner.js";
 import { REST_PIXEL_BUDGET_MP } from "../scene/stage/constants.js";
 import { DUO_MAIL_ASPECT } from "../scene/duo/duoConstants.js";
 
@@ -226,7 +227,9 @@ export function startStageHost(canvas, options = {}) {
     return {
       width: Math.max(1, Math.round(rect.width)),
       height: Math.max(1, Math.round(rect.height)),
-      dpr: Math.min(window.devicePixelRatio || 1, 1.75)
+      dpr: Math.min(window.devicePixelRatio || 1, 1.75),
+      // Pass S S3: the uncapped ratio, for the per-stop native rest.
+      deviceDpr: window.devicePixelRatio || 1
     };
   }
 
@@ -936,6 +939,18 @@ export function startStageHost(canvas, options = {}) {
   new GroundFogTuner({
     onChange: (params) => worker.postMessage({ type: "groundFog", params }),
     onDropChange: (params) => worker.postMessage({ type: "sidekickDrop", params })
+  });
+  // Pass S S5 — Shift+E env / ambient / hemi / exposure (was never wired).
+  // The host keeps the last params it sent; the stage starts at the same
+  // defaults (envLightConfig.js), so the panel opens in sync.
+  let envLightParams = null;
+  new EnvLightTuner({
+    button: false,
+    apply: (params) => {
+      envLightParams = { ...params };
+      worker.postMessage({ type: "envLight", params });
+    },
+    read: () => envLightParams
   });
   // Pass Q Q3 — Shift+S.
   new SkyParallaxTuner({ onChange: (radius) => worker.postMessage({ type: "skyParallax", radius }) });

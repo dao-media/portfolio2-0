@@ -79,6 +79,9 @@ import {
   SKY_BG,
   REST_DPR,
   REST_PIXEL_BUDGET_MP,
+  REST_NATIVE_STOPS,
+  REST_NATIVE_DPR_CAP,
+  STOP_FILM_LOOK,
   FLOOR_DROP_MS,
   FLOOR_FRAME_MS,
   FLOOR_MIN_MP,
@@ -470,10 +473,12 @@ export class StageExperience {
       this.reducedMotion = Boolean(options.reducedMotion);
       this.isCoarse = Boolean(options.isCoarse);
       this._fullPixelRatio = Math.min(options.dpr || 1, this.isCoarse ? 1.5 : 1.75);
+      this._deviceDpr = options.deviceDpr || options.dpr || 1;
     } else {
       this.reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       this.isCoarse = window.matchMedia("(pointer: coarse)").matches;
       this._fullPixelRatio = Math.min(window.devicePixelRatio || 1, this.isCoarse ? 1.5 : 1.75);
+      this._deviceDpr = window.devicePixelRatio || 1;
     }
     this._renderScale = readWorkRenderScale(this._inWorker ? this._search : undefined);
     this.pixelRatio = this._fullPixelRatio * this._renderScale;
@@ -2325,6 +2330,9 @@ export class StageExperience {
     const cursorAt = [];
     const events = [];
     const nearScene = [];
+    const sceneOverlap = [];
+    let sceneMaskRt = null;
+    const maskBuf = new Uint8Array(11 * 11 * 4);
     let W = canvas.width;
     let H = canvas.height;
     const sizes = new Set();
@@ -2395,6 +2403,34 @@ export class StageExperience {
           +(this.starField?.material?.uniforms?.uPixelRatio?.value ?? 0).toFixed(3)
         ]);
         const unit = (W0 / W) * (W0 / W);
+        // Pass S S5: scene coverage this frame — every mesh except the sky
+        // layers, drawn white into a canvas-size mask — so a star whose patch
+        // touches geometry on any frame can be excluded.
+        if (opts.sceneMask !== false) {
+          sceneMaskRt ??= new THREE.WebGLRenderTarget(W, H, { depthBuffer: true });
+          if (sceneMaskRt.width !== W || sceneMaskRt.height !== H) sceneMaskRt.setSize(W, H);
+          const skyObjs = [this.starField, this.cursorStarTrail, this.flightStarStreak].map((o) => o?.points ?? o).filter((o) => o?.isObject3D);
+          const vis = skyObjs.map((o) => o.visible);
+          for (const o of skyObjs) o.visible = false;
+          const bg = this.scene.background;
+          const ov = this.scene.overrideMaterial;
+          const prevTarget = this.renderer.getRenderTarget();
+          this.scene.background = null;
+          this.scene.overrideMaterial = (this._sceneMaskMat ??= new THREE.MeshBasicMaterial({ color: 0xffffff }));
+          const prevClear = this.renderer.getClearColor(new THREE.Color());
+          const prevAlpha = this.renderer.getClearAlpha();
+          this.renderer.setRenderTarget(sceneMaskRt);
+          this.renderer.setClearColor(0x000000, 1);
+          this.renderer.clear();
+          this.renderer.render(this.scene, cam);
+          this.renderer.setClearColor(prevClear, prevAlpha);
+          this.renderer.setRenderTarget(prevTarget);
+          this.scene.overrideMaterial = ov;
+          this.scene.background = bg;
+          skyObjs.forEach((o, k) => {
+            o.visible = vis[k];
+          });
+        }
         for (let s = 0; s < picked.length; s += 1) {
           if (!project(picked[s].i, p)) {
             series[s].push(null);
@@ -2410,6 +2446,15 @@ export class StageExperience {
           if (rx < 0 || ry < 0 || rx + 2 * R >= W || ry + 2 * R >= H) {
             series[s].push(null);
             continue;
+          }
+          if (sceneMaskRt && !sceneOverlap[s]) {
+            this.renderer.readRenderTargetPixels(sceneMaskRt, rx, ry, 2 * R + 1, 2 * R + 1, maskBuf);
+            for (let k = 0; k < maskBuf.length; k += 4) {
+              if (maskBuf[k] > 8) {
+                sceneOverlap[s] = true;
+                break;
+              }
+            }
           }
           gl.readPixels(rx, ry, 2 * R + 1, 2 * R + 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
           // Pass R: on the first frame, tag stars with scene content (geometry
@@ -2480,6 +2525,7 @@ export class StageExperience {
         }
         if (performance.now() < deadline) return;
         this._starTrackHook = null;
+        sceneMaskRt?.dispose();
         const rows = picked.map((c, s) => {
           const vals = series[s].filter((x) => x != null);
           if (!vals.length) return { star: c.i, frames: 0 };
@@ -2508,6 +2554,7 @@ export class StageExperience {
             // apart from flicker.
             px: [Math.round(c.x), Math.round(H0 - c.y)],
             nearScene: nearScene[s] ?? null,
+            sceneOverlap: Boolean(sceneOverlap[s]),
             events: events[s] ?? [],
             ...(maxJump > 0.15 ? { outlier: series[s].map((x, k) => [x == null ? null : Math.round(x), ...(cursorAt[k] ?? [])]) } : {})
           };
@@ -3418,6 +3465,41 @@ export class StageExperience {
    * `window.__stageDebug("debugMeasureFps", 5)`.
    * @param {number} seconds
    */
+  /**
+   * DEV — Pass S S3: idle frame stats over `seconds` (rAF intervals: p50 /
+   * p95 / > 33 / > 50 ms) plus, once a second, the composer draw size, the
+   * governor floor notch, the rest stop and the native rest ratio — so a
+   * floor drop at idle is reported, not inferred.
+   */
+  debugIdleStats(seconds = 60) {
+    return new Promise((resolve) => {
+      const iv = [];
+      const samples = [];
+      let last = performance.now();
+      let nextSample = last;
+      const deadline = last + seconds * 1000;
+      const tick = () => {
+        const now = performance.now();
+        iv.push(now - last);
+        last = now;
+        if (now >= nextSample) {
+          nextSample = now + 1000;
+          samples.push([this.post?.drawWidth ?? 0, this.post?.drawHeight ?? 0, this._floorMp ?? null, this._restStop ?? null, this._restNativeRatio() ?? null]);
+        }
+        if (now < deadline) {
+          requestAnimationFrame(tick);
+          return;
+        }
+        const s = [...iv].sort((a, b) => a - b);
+        const q = (p) => +s[Math.min(s.length - 1, Math.floor(p * s.length))].toFixed(2);
+        const sizes = {};
+        for (const r of samples) sizes[`${r[0]}x${r[1]} floor=${r[2]} rest=${r[3]} native=${r[4]}`] = (sizes[`${r[0]}x${r[1]} floor=${r[2]} rest=${r[3]} native=${r[4]}`] ?? 0) + 1;
+        resolve({ frames: iv.length, p50: q(0.5), p95: q(0.95), over33: iv.filter((x) => x > 33).length, over50: iv.filter((x) => x > 50).length, max: +s[s.length - 1].toFixed(1), states: sizes });
+      };
+      requestAnimationFrame(tick);
+    });
+  }
+
   debugMeasureFps(seconds = 5) {
     return new Promise((resolve) => {
       const intervals = [];
@@ -3476,9 +3558,66 @@ export class StageExperience {
    */
   _pixelRatioForBudget(cssW, cssH) {
     const area = Math.max(1, cssW * cssH);
-    const fromBudget = Math.sqrt((this._effectiveBudgetMp() * 1e6) / area);
-    const deviceCap = this._fullPixelRatio * (this._renderScale || 1);
+    const native = this._restNativeRatio();
+    // Pass S S3: a native rest stop has no megapixel budget — only the
+    // governor's floor notch (when set) still caps it.
+    const budgetMp = native ? (this._floorMp ?? Infinity) : this._effectiveBudgetMp();
+    const fromBudget = Math.sqrt((budgetMp * 1e6) / area);
+    const deviceCap = native ?? this._fullPixelRatio * (this._renderScale || 1);
     return Math.max(0.2, Math.min(deviceCap, fromBudget));
+  }
+
+  /**
+   * Pass S S3 — the device-native ratio (≤ REST_NATIVE_DPR_CAP) while a
+   * REST_NATIVE_STOPS stop is settled in rest mode; null otherwise. Set only
+   * by `_tickRestDpr`, so it switches on after settle + fade-in and off at
+   * the same point the rest budget does.
+   */
+  _restNativeRatio() {
+    if (!this._restDprActive || this._blackHoleActive || this.isCoarse) return null;
+    // DEV A/B: `?restnative=0` turns the per-stop native rest off.
+    this._restNativeOff ??= /[?&]restnative=0\b/.test(this._inWorker ? this._search || "" : typeof window !== "undefined" ? window.location.search : "");
+    if (this._restNativeOff) return null;
+    if (!REST_NATIVE_STOPS.includes(this._restStop)) return null;
+    return Math.min(this._deviceDpr || 1, REST_NATIVE_DPR_CAP) * (this._renderScale || 1);
+  }
+
+  /** DEV — Pass S S2: the film look applied this frame (post uniforms). */
+  debugStopFilm() {
+    const p = this.post;
+    return { grain: +(p?.displayGrain?.uniforms?.get("uAmount")?.value ?? 0).toFixed(4), halation: +(p?.halation?.uniforms?.get("uIntensity")?.value ?? 0).toFixed(4), study: Boolean(p?._filmLook) };
+  }
+
+  /** DEV — Pass S S2: per-frame [ms since start, grain, halation] for `seconds`. */
+  debugStopFilmTrace(seconds = 4) {
+    return new Promise((resolve) => {
+      const rows = [];
+      const t0 = performance.now();
+      const tick = () => {
+        const f = this.debugStopFilm();
+        rows.push([Math.round(performance.now() - t0), f.grain, f.halation]);
+        if (performance.now() - t0 < seconds * 1000) requestAnimationFrame(tick);
+        else resolve(rows);
+      };
+      requestAnimationFrame(tick);
+    });
+  }
+
+  /** Pass S S2 — fade-weighted film look across stops (STOP_FILM_LOOK). */
+  _stopFilmFrame() {
+    const out = (this._stopFilmOut ??= { grain: 0, halation: 0 });
+    out.grain = 0;
+    out.halation = 0;
+    if (this._blackHoleActive || !this.neon) return out;
+    // DEV A/B: `?stopfilm=0` turns the shipped per-stop film look off.
+    this._stopFilmOff ??= /[?&]stopfilm=0\b/.test(this._inWorker ? this._search || "" : typeof window !== "undefined" ? window.location.search : "");
+    if (this._stopFilmOff) return out;
+    for (const [k, look] of Object.entries(STOP_FILM_LOOK)) {
+      const f = this.neon.getStopFade(Number(k));
+      out.grain += f * look.grain;
+      out.halation += f * look.halation;
+    }
+    return out;
   }
 
   _applyRenderScale() {
@@ -3500,7 +3639,8 @@ export class StageExperience {
     // Canvas stays at the sequence cap. The floor walks composer buffer
     // sizes that were allocated during warm; a swap does not call setSize
     // on a live frame.
-    const canvasRatio = sequenceFull;
+    const native = this._restNativeRatio();
+    const canvasRatio = native ? Math.max(sequenceFull, native) : sequenceFull;
     const canvasChanged =
       Math.abs(canvasRatio - (this.renderer.getPixelRatio?.() || 0)) > 0.002;
     let dw = Math.max(1, Math.round(w * this.pixelRatio));
@@ -5130,6 +5270,232 @@ export class StageExperience {
   }
 
   /**
+   * DEV — Pass S: statistics of one texture slot of the first mesh whose
+   * path ends with `pathEnd` in `stop` — drawn into a `size`² target from
+   * mip 0 (so chunk-owned GL textures read too), per-channel mean / std /
+   * p05 / p95 (0..1) plus a coarse 8×8 grid of channel `ch` means.
+   */
+  debugTexStats(stop, pathEnd, slot = "roughnessMap", size = 128, ch = 1) {
+    const root = this.vignettes?.[stop]?.group;
+    let mat = null;
+    root?.traverse((o) => {
+      if (mat || !o.isMesh) return;
+      const parts = [];
+      for (let p = o; p && p !== root; p = p.parent) parts.push(p.name || p.type);
+      if (parts.reverse().join("/").endsWith(pathEnd)) mat = Array.isArray(o.material) ? o.material[0] : o.material;
+    });
+    const tex = mat?.[slot];
+    if (!tex) return { error: `no ${slot} on ${pathEnd}` };
+    const rt = new THREE.WebGLRenderTarget(size, size, { depthBuffer: false });
+    const q = new THREE.Mesh(
+      new THREE.PlaneGeometry(2, 2),
+      new THREE.ShaderMaterial({
+        uniforms: { t: { value: tex } },
+        vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }",
+        fragmentShader: "uniform sampler2D t; varying vec2 vUv; void main(){ gl_FragColor = texture2D(t, vec2(vUv.x, 1.0 - vUv.y)); }",
+        depthTest: false,
+        depthWrite: false,
+        toneMapped: false
+      })
+    );
+    const sc = new THREE.Scene();
+    sc.add(q);
+    const prev = this.renderer.getRenderTarget();
+    this.renderer.setRenderTarget(rt);
+    this.renderer.render(sc, new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1));
+    const buf = new Uint8Array(size * size * 4);
+    this.renderer.readRenderTargetPixels(rt, 0, 0, size, size, buf);
+    this.renderer.setRenderTarget(prev);
+    rt.dispose();
+    q.geometry.dispose();
+    q.material.dispose();
+    const out = { slot, colorSpace: tex.colorSpace, channels: [] };
+    for (let c = 0; c < 4; c += 1) {
+      const v = [];
+      for (let i = c; i < buf.length; i += 4) v.push(buf[i] / 255);
+      v.sort((a, b) => a - b);
+      const mean = v.reduce((a, b) => a + b, 0) / v.length;
+      const std = Math.sqrt(v.reduce((a, b) => a + (b - mean) ** 2, 0) / v.length);
+      out.channels.push({ mean: +mean.toFixed(3), std: +std.toFixed(3), p05: +v[Math.floor(v.length * 0.05)].toFixed(3), p95: +v[Math.floor(v.length * 0.95)].toFixed(3) });
+    }
+    const g = [];
+    const cell = size / 8;
+    for (let gy = 0; gy < 8; gy += 1) {
+      const row = [];
+      for (let gx = 0; gx < 8; gx += 1) {
+        let s = 0;
+        for (let y = 0; y < cell; y += 1) for (let x = 0; x < cell; x += 1) s += buf[((gy * cell + y) * size + gx * cell + x) * 4 + ch];
+        row.push(Math.round(s / (cell * cell)));
+      }
+      g.push(row.join(" "));
+    }
+    out.grid = g;
+    return out;
+  }
+
+  /**
+   * DEV — Pass S S1: Bust metal variants (debug only; nothing ships until
+   * Dane picks). `null` restores the shipped material.
+   *   A  current (SSOT: metalness 0.12, roughness 1, maps as authored)
+   *   B  metalness 0.85, roughness 0.38, bronze F0 colour (no map multiply)
+   *   C  B + a bust-only warm reflection source (per-material envMap, a
+   *      small gradient PMREM; `envMapIntensity` from opts.env)
+   *   D  C + the GLB's roughness map, rescaled so its mean is 0.38
+   * opts: { env, bronze: "#rrggbb" (linear-ish hex), roughness, metalness }
+   */
+  debugBustMetal(variant = null, opts = {}) {
+    const root = this.vignettes?.[0]?.group;
+    let mesh = null;
+    root?.traverse((o) => {
+      if (!mesh && o.isMesh && o.name === "Mesh_0" && o.parent?.name === "bust") mesh = o;
+    });
+    const mat = mesh?.material;
+    if (!mat) return { error: "bust Mesh_0 not found" };
+    const keys = ["color", "map", "roughness", "roughnessMap", "metalness", "metalnessMap", "envMap", "envMapIntensity"];
+    this._bustSaved ??= Object.fromEntries(keys.map((k) => [k, mat[k]?.isColor ? mat[k].clone() : mat[k]]));
+    const s = this._bustSaved;
+    for (const k of keys) {
+      if (mat[k]?.isColor) mat[k].copy(s[k]);
+      else mat[k] = s[k];
+    }
+    if (variant && variant !== "A") {
+      mat.metalness = opts.metalness ?? 0.85;
+      mat.metalnessMap = null;
+      mat.roughness = opts.roughness ?? 0.38;
+      mat.roughnessMap = null;
+      // F0 tint: bronze, not the clay-grey albedo map multiplied in.
+      mat.map = null;
+      mat.color.set(opts.bronze ?? "#b9814f");
+      if (variant === "C" || variant === "D") {
+        mat.envMap = this._bustWarmEnv();
+        mat.envMapIntensity = opts.env ?? 1;
+      }
+      if (variant === "D" && s.roughnessMap) {
+        mat.roughnessMap = s.roughnessMap;
+        mat.roughness = (opts.roughness ?? 0.38) / Math.max(0.05, opts.roughMapMean ?? 1);
+      }
+    }
+    mat.needsUpdate = true;
+    return { variant: variant ?? "shipped", metalness: mat.metalness, roughness: mat.roughness, color: `#${mat.color.getHexString()}`, map: Boolean(mat.map), roughnessMap: Boolean(mat.roughnessMap), envMap: mat.envMap?.name ?? null, envMapIntensity: mat.envMapIntensity };
+  }
+
+  /**
+   * Pass S S1 — a small warm gradient environment for the bust only: amber
+   * (lantern hue) toward the lantern, a dim warm fill overhead, near black
+   * below and behind, so a metal bust has something to reflect without
+   * lifting the dark stage. PMREM, built once.
+   */
+  _bustWarmEnv() {
+    if (this._bustEnv) return this._bustEnv;
+    const bust = this.vignettes?.[0]?.group;
+    const lantern = this.neon?.entries?.[0]?.tube;
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    bust?.getWorldPosition(a);
+    lantern?.getWorldPosition(b);
+    const key = b.sub(a).setY(0.4).normalize();
+    const sc = new THREE.Scene();
+    const sky = new THREE.Mesh(
+      new THREE.SphereGeometry(10, 48, 24),
+      new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        depthWrite: false,
+        uniforms: { uKey: { value: key }, uWarm: { value: new THREE.Color(0xffa45a) } },
+        vertexShader: "varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+        fragmentShader: `
+          uniform vec3 uKey; uniform vec3 uWarm; varying vec3 vDir;
+          void main(){
+            vec3 d = normalize(vDir);
+            float k = pow(max(dot(d, uKey), 0.0), 3.0);
+            float up = smoothstep(-0.1, 0.8, d.y);
+            vec3 c = uWarm * (1.6 * k + 0.12 * up) + vec3(0.004);
+            gl_FragColor = vec4(c, 1.0);
+          }`
+      })
+    );
+    sc.add(sky);
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this._bustEnv = pmrem.fromScene(sc, 0.02, 0.1, 20).texture;
+    this._bustEnv.name = "bust-warm-env";
+    pmrem.dispose();
+    sky.geometry.dispose();
+    sky.material.dispose();
+    return this._bustEnv;
+  }
+
+  /**
+   * DEV — Pass S S4: the Archaeology globe's gap: globe bottom (world y)
+   * to the first surface straight below it (raycast against stop 3 + the
+   * stage floor, excluding the globe and its halo / pool).
+   */
+  debugGlobeGap() {
+    const tube = this.neon?.entries?.[3]?.tube;
+    let sphere = null;
+    tube?.traverse((o) => {
+      if (!sphere && o.isMesh && o.geometry?.parameters?.radius && !o.material?.isShaderMaterial) sphere = o;
+    });
+    if (!sphere) return { error: "globe sphere not found" };
+    sphere.updateWorldMatrix(true, false);
+    const c = sphere.getWorldPosition(new THREE.Vector3());
+    const r = sphere.geometry.parameters.radius * sphere.getWorldScale(new THREE.Vector3()).y;
+    const bottom = c.y - r;
+    const ray = new THREE.Raycaster(new THREE.Vector3(c.x, bottom - 1e-3, c.z), new THREE.Vector3(0, -1, 0));
+    ray.layers.enableAll();
+    const skip = new Set();
+    tube.traverse((o) => skip.add(o));
+    const targets = [];
+    this.scene.traverse((o) => {
+      if (o.isMesh && !skip.has(o) && !/glow|pool|cone|shadow|fog|halo/i.test(o.name)) targets.push(o);
+    });
+    const hit = ray.intersectObjects(targets, false)[0] ?? null;
+    return { centerY: +c.y.toFixed(4), radius: +r.toFixed(4), bottomY: +bottom.toFixed(4), surface: hit ? { name: hit.object.name, y: +hit.point.y.toFixed(4) } : null, gap: hit ? +(bottom - hit.point.y).toFixed(4) : null, light: this.neon?.stopLights?.[3]?.light ? { distance: this.neon.stopLights[3].light.distance, decay: this.neon.stopLights[3].light.decay, y: +this.neon.stopLights[3].light.getWorldPosition(new THREE.Vector3()).y.toFixed(3) } : null };
+  }
+
+  /** DEV — Pass S S4: world positions of a stop's prop roots (direct children of its group, recursively one level into content groups). */
+  debugPropRoots(stop = 3) {
+    const g = this.vignettes?.[stop]?.group;
+    const out = [];
+    const v = new THREE.Vector3();
+    g?.traverse((o) => {
+      if (o === g || !/-root$|^neon-tube$|^neon-floor-glow$|shelving/i.test(o.name)) return;
+      o.getWorldPosition(v);
+      out.push([o.name, +v.x.toFixed(4), +v.y.toFixed(4), +v.z.toFixed(4)]);
+    });
+    return out;
+  }
+
+  /** DEV — Pass S S4: the globe sphere's screen bounds (CSS px) and whether it is fully in frame. */
+  debugGlobeOnScreen() {
+    const tube = this.neon?.entries?.[3]?.tube;
+    let sphere = null;
+    tube?.traverse((o) => {
+      if (!sphere && o.isMesh && o.geometry?.parameters?.radius && !o.material?.isShaderMaterial) sphere = o;
+    });
+    if (!sphere) return null;
+    const { w, h } = this._viewportCssSize();
+    const c = sphere.getWorldPosition(new THREE.Vector3());
+    const r = sphere.geometry.parameters.radius;
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    const p = new THREE.Vector3();
+    for (let i = 0; i < 26; i += 1) {
+      const t = (i / 26) * Math.PI * 2;
+      for (const [dx, dy, dz] of [[Math.cos(t), Math.sin(t), 0], [Math.cos(t), 0, Math.sin(t)], [0, Math.cos(t), Math.sin(t)]]) {
+        p.set(c.x + dx * r, c.y + dy * r, c.z + dz * r).project(this.camera);
+        const sx = (p.x * 0.5 + 0.5) * w;
+        const sy = (0.5 - p.y * 0.5) * h;
+        x0 = Math.min(x0, sx);
+        x1 = Math.max(x1, sx);
+        y0 = Math.min(y0, sy);
+        y1 = Math.max(y1, sy);
+      }
+    }
+    return { box: [Math.round(x0), Math.round(y0), Math.round(x1), Math.round(y1)], view: [w, h], inFrame: x0 >= 0 && y0 >= 0 && x1 <= w && y1 <= h };
+  }
+
+  /**
    * DEV — Pass R R2: per-mesh material + lighting dump of one stop
    * (`materialDump.js`, the same module an old checkout imports).
    * `window.__stageDebug("debugMaterialDump", 1)`.
@@ -6238,12 +6604,14 @@ export class StageExperience {
       if ((this.neon?.getStopFadeRaw?.(index) ?? 1) < 1) return;
       this._restDprWait = false;
       this._restDprActive = true;
+      this._restStop = index;
       this._applyRenderScale();
       return;
     }
     this._restDprWait = false;
     if (this._restDprActive && !this._stopFadeRamping()) {
       this._restDprActive = false;
+      this._restStop = null;
       this._applyRenderScale();
     }
   }
@@ -8172,7 +8540,8 @@ export class StageExperience {
     return event;
   }
 
-  handleHostResize({ width, height, dpr }) {
+  handleHostResize({ width, height, dpr, deviceDpr }) {
+    if (Number.isFinite(deviceDpr) && deviceDpr > 0) this._deviceDpr = deviceDpr;
     this._cssWidth = width;
     this._cssHeight = height;
     if (Number.isFinite(dpr) && dpr > 0) {
@@ -10513,6 +10882,7 @@ export class StageExperience {
       }
       this._flight?.beginGpuTimer();
       const jittered = this._study ? this._studyPreRender() : false;
+      this.post.setStopFilm(this._stopFilmFrame());
       this.post.render(this.scene, this.camera, t, {
         grainStrength: this._postGrainStrength
       });

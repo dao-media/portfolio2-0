@@ -149,10 +149,22 @@ export class PostPass {
     this.halation = new HalationEffect({ texture: this.halBloom.texture });
     this.displayGrain = new DisplayGrainEffect();
     this._filmLook = 0;
+    // Pass S S2 — shipped per-stop film look: halation + display grain stay
+    // in the last pass permanently (no recompile across a hop); their
+    // strengths are set per frame from the stop fades (setStopFilm).
+    this.stopFilm = { grain: 0, halation: 0 };
+    const halUpdate = this.halBloom.update.bind(this.halBloom);
+    this.halBloom.update = (renderer, inputBuffer, deltaTime) => {
+      // The blur source costs a half-res bloom chain; skip it while nothing
+      // reads it (its texture keeps the last result, at intensity 0).
+      if (this._filmLook || this.stopFilm.halation > 0) halUpdate(renderer, inputBuffer, deltaTime);
+    };
     this._studyTone = null;
     this.studyExposure = new ExposureEffect();
     this._toneMaps = {};
 
+    this.setStudyLook();
+    this.setStopFilm(this.stopFilm);
     this.setSize(options.width || 1, options.height || 1);
     this._syncDepthBlit();
     installComposerSizePool(this.renderer, this.composer);
@@ -174,13 +186,26 @@ export class PostPass {
       this._toneMaps[this._studyTone] ??= makeToneMap(this._studyTone);
       effects.push(this.studyExposure, this._toneMaps[this._studyTone]);
     }
+    this.halation.uniforms.get("tHalation").value = this.halBloom.texture;
     if (this._filmLook) {
       this.displayGrain.uniforms.get("uAmount").value = this._filmLook.grain;
       this.halation.uniforms.get("uIntensity").value = this._filmLook.halation;
-      this.halation.uniforms.get("tHalation").value = this.halBloom.texture;
       effects.push(this.halBloom, this.halation, this.displayGrain);
-    } else effects.push(this.grainEffect);
+    } else effects.push(this.halBloom, this.halation, this.displayGrain, this.grainEffect);
     this.grainPass.setEffects(effects);
+  }
+
+  /**
+   * Pass S S2 — this frame's shipped film look (fade-weighted per stop).
+   * A DEV study look (`setStudyLook({ film })`) overrides it.
+   * @param {{ grain: number, halation: number }} look
+   */
+  setStopFilm(look) {
+    this.stopFilm.grain = Math.max(0, look?.grain ?? 0);
+    this.stopFilm.halation = Math.max(0, look?.halation ?? 0);
+    if (this._filmLook) return;
+    this.displayGrain.uniforms.get("uAmount").value = this.stopFilm.grain;
+    this.halation.uniforms.get("uIntensity").value = this.stopFilm.halation;
   }
 
   /** Back-compat for the P4 switch. */
@@ -380,7 +405,7 @@ export class PostPass {
       this.volumetricPass.ensureSizeFromRenderer?.(this.renderer);
     }
     this.grainEffect.uniforms.get("uTime").value = time;
-    if (this._filmLook) this.displayGrain.uniforms.get("uTime").value = time;
+    this.displayGrain.uniforms.get("uTime").value = time;
     this.grainEffect.uniforms.get("uGrain").value = this.grain * grainStrength;
     this.composer.render();
   }

@@ -26,6 +26,21 @@ export const REST_DPR = 0.85;
  * a small window can still run at the device cap. Shift+P dials this live.
  */
 export const REST_PIXEL_BUDGET_MP = 2.3;
+/**
+ * Pass S S3 — stops whose settled rest draws at the device's native ratio
+ * (Dane's pick: Desktop, P1 "native"), capped at REST_NATIVE_DPR_CAP. Motion,
+ * the governor floor and every other stop's rest budget are unchanged.
+ */
+export const REST_NATIVE_STOPS = Object.freeze([1]);
+export const REST_NATIVE_DPR_CAP = 2;
+/**
+ * Pass S S2 — per-stop film look (Dane's pick: Bust = Pass P P4 "medium",
+ * clip frame f0018): display-resolution grain amount and halation intensity,
+ * weighted by each stop's fade so a hop crossfades. Stops not listed: 0.
+ * Halation source: threshold 0.35, smoothing 0.25, half res, HUGE kernel,
+ * tint (1.0, 0.32, 0.12) — filmLookStudy.js makeHalationBloom / HalationEffect.
+ */
+export const STOP_FILM_LOOK = Object.freeze({ 0: Object.freeze({ grain: 0.05, halation: 0.35 }) });
 /** A frame at or above this is already through the 24 fps floor. */
 export const FLOOR_FRAME_MS = 42;
 /** Drop one megapixel notch on the next frame when a frame reaches this. */

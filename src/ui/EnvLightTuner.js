@@ -33,9 +33,20 @@ export class EnvLightTuner {
   /** @type {Record<string, HTMLOutputElement>} */
   _outputMap = {};
 
-  constructor() {
+  /**
+   * @param {{
+   *   apply?: (params: Record<string, number>) => Record<string, number> | void,
+   *   read?: () => Record<string, number> | null,
+   *   button?: boolean
+   * }} [options] `apply` / `read` reach the stage (default: the main-thread
+   *   `window.__stage`; the worker host passes a postMessage bridge). `button:
+   *   false` skips the on-page toggle (Shift+E only, like the other tuners).
+   */
+  constructor(options = {}) {
+    this._apply = options.apply ?? ((p) => window.__stage?.setEnvLightParams?.(p));
+    this._read = options.read ?? (() => window.__stage?.getEnvLightParams?.());
     this._injectStyles();
-    this._buildToggleBtn();
+    if (options.button !== false) this._buildToggleBtn();
     this._buildPanel();
     this._bindKeys();
     window.__envLightTuner = this;
@@ -84,7 +95,7 @@ export class EnvLightTuner {
   }
 
   _pushToStage() {
-    const applied = window.__stage?.setEnvLightParams?.(this._params);
+    const applied = this._apply(this._params);
     const row = applied ?? this._params;
     console.log(
       "[EnvLightTuner] environmentIntensity=%s ambientIntensity=%s hemiIntensity=%s exposure=%s",
@@ -244,18 +255,18 @@ export class EnvLightTuner {
   }
 
   open() {
-    const live = window.__stage?.getEnvLightParams?.();
+    const live = this._read();
     if (live) this._params = { ...createEnvLightParams(), ...live };
     this._syncSlidersToParams();
     this._open = true;
     this._panel.hidden = false;
-    this._toggleBtn.classList.add("is-active");
+    this._toggleBtn?.classList.add("is-active");
   }
 
   close() {
     this._open = false;
     this._panel.hidden = true;
-    this._toggleBtn.classList.remove("is-active");
+    this._toggleBtn?.classList.remove("is-active");
   }
 
   _bindKeys() {

@@ -41,10 +41,11 @@ for (const [name, r] of [["still", still], ["parallax", parallax], ["hop", hop]]
   const rows = r?.stars || [];
   const worst = Math.max(...rows.map((s) => s.maxFrameJumpPct ?? 0));
   console.log(`${name}: ${rows.length} stars, worst frame jump ${worst}% buffers ${JSON.stringify(r?.bufferSizes)}`);
-  // Pass R: stars with scene content within ±20 px read it as it slides past.
-  const clean = rows.filter((s) => s.nearScene === false);
+  // Pass S: "clean" = the star's 11×11 patch never touched scene geometry
+  // on any frame (per-frame scene mask in debugStarTrack).
+  const clean = rows.filter((s) => s.sceneOverlap === false);
   const cleanWorst = Math.max(0, ...clean.map((s) => s.maxFrameJumpPct ?? 0));
-  console.log(`${name}: clean ${clean.length} stars, worst ${cleanWorst}%; near scene ${rows.length - clean.length}, outliers >15%: clean ${clean.filter((s) => s.maxFrameJumpPct > 15).length} / near ${rows.filter((s) => s.nearScene !== false && s.maxFrameJumpPct > 15).length}`);
+  console.log(`${name}: clean ${clean.length} stars, worst ${cleanWorst}%; over scene ${rows.length - clean.length}, outliers >15%: clean ${clean.filter((s) => s.maxFrameJumpPct > 15).length} / over scene ${rows.filter((s) => s.sceneOverlap !== false && s.maxFrameJumpPct > 15).length}`);
   for (const s of rows) console.log(`  #${s.star} mag ${s.mag} frames ${s.frames} min ${s.minPctOfMean}% max ${s.maxPctOfMean}% jump ${s.maxFrameJumpPct}% drift ${s.driftPx}px`);
 }
 await browser.close();

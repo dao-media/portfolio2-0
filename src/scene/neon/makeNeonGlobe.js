@@ -21,8 +21,12 @@ export const GLOBE_URL = "/assets/models/globe/runtime/earth-day.jpg";
 export const GLOBE = Object.freeze({
   /** Globe radius (m) — 3.2 m across; 0.5 m clear of the shelf's side (shelf AABB measured). */
   radius: 1.6,
-  /** Centre height above the floor (m): floats ~0.25 m off the floor. */
-  centerY: 1.85,
+  /**
+   * Centre height above the floor (m). Pass S S4 (Dane: 2–3× the gap): the
+   * globe bottom was 0.246 m above the stage floor apron; now 2.5× that,
+   * 0.616 m (centre 1.85 → 2.22). The stop light sits at this centre.
+   */
+  centerY: 2.22,
   /** Light tint: cool daylight white (no clash with Bust's amber lantern next on the ring). */
   light: 0xe8f0ff,
   /** Day-map emissive at full stop fade — just under the bloom threshold (1.0), so white clouds glow without washing out. */

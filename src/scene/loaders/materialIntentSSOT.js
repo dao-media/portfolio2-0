@@ -70,6 +70,22 @@ export const METAL_ALLOWLIST = {
 };
 
 /**
+ * Pass S S5 — meshes that are real metal although their material is not:
+ * Sidekick's rivets and magnet share `lambert1` (no metallicFactor, so the
+ * rule below zeroes it) with non-metal parts like `swivelPart`. Matched by
+ * mesh name; each gets its own clone of the material at these values, so
+ * the shared material keeps the generic rule. Same values as the chassis
+ * allowlist metals.
+ * @type {Record<string, MaterialIntentEntry>}
+ */
+export const METAL_MESHES = {
+  magnet: { metalness: 1, roughness: 0.65 },
+  rivet: { metalness: 1, roughness: 0.65 },
+  rivet1: { metalness: 1, roughness: 0.65 }
+};
+const METAL_MESH_GLBS = ["/models/sidekick/"];
+
+/**
  * @param {import("three/examples/jsm/loaders/GLTFLoader.js").GLTF} gltf
  * @param {string} [url] Source URL — gates which GLBs this rule ever touches.
  */
@@ -109,5 +125,24 @@ export function applyMaterialIntentSSOT(gltf, url) {
         mat.needsUpdate = true;
       }
     }
+  });
+
+  if (typeof url === "string" && !METAL_MESH_GLBS.some((frag) => url.includes(frag))) return;
+  const clones = new Map();
+  scene.traverse((obj) => {
+    const want = obj.isMesh && !Array.isArray(obj.material) ? METAL_MESHES[obj.name] : null;
+    // Idempotent: the loader can run this rule twice on one GLB.
+    if (!want || !obj.material || obj.material.userData?.metalMesh) return;
+    const key = `${obj.material.uuid}|${want.metalness}|${want.roughness}`;
+    let mat = clones.get(key);
+    if (!mat) {
+      mat = obj.material.clone();
+      mat.name = `${obj.material.name || "material"}-metal`;
+      mat.userData = { ...mat.userData, metalMesh: true };
+      mat.metalness = want.metalness;
+      if (typeof want.roughness === "number") mat.roughness = want.roughness;
+      clones.set(key, mat);
+    }
+    obj.material = mat;
   });
 }

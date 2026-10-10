@@ -18,6 +18,7 @@ self.onmessage = (event) => {
         width: msg.width,
         height: msg.height,
         dpr: msg.dpr,
+        deviceDpr: msg.deviceDpr,
         reducedMotion: msg.reducedMotion,
         isCoarse: msg.isCoarse,
         search: msg.search || "",
@@ -69,6 +70,7 @@ self.onmessage = (event) => {
   else if (msg.type === "groundFog") stage.setGroundFogParams(msg.params);
   else if (msg.type === "sidekickDrop") stage.setSidekickDropShadow(msg.params);
   else if (msg.type === "skyParallax") stage.setSkyParallaxRadius(msg.radius);
+  else if (msg.type === "envLight") stage.setEnvLightParams(msg.params);
   else if (msg.type === "floorReset") stage.resetFloorStats();
   else if (msg.type === "debugCall") {
     Promise.resolve()
