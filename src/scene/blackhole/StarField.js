@@ -3,16 +3,45 @@ import { BLACK_HOLE_CENTER } from "../camera/BlackHoleCameraSequence.js";
 import { blackHoleLensFromCamera, SKY_HORIZON_HIGH, SKY_HORIZON_LOW } from "./MilkyWayNebulaShader.js";
 
 /**
- * One far sky, shared by the vignette ring and the black-hole flight. Stars
- * are at infinity: the vertex shader transforms each star's fixed world
- * direction by the camera's rotation only (never its position), so the sky
- * has zero parallax under any translation — drop, hop, zoom, or cursor
- * shear, exactly like real stars that far away. The same object, the same
- * draw, with no ring/flight branch to fall out of sync at the handoff. Made
+ * One far sky, shared by the vignette ring and the black-hole flight. Made
  * of real star points only; there is no dome, gradient, or haze layer
  * behind them (see MilkyWayNebulaShader.js and NebulaCloudCluster.js's
  * removal for what used to paint that band).
+ *
+ * Pass Q Q3 — the sky is anchored to the arena at a finite radius. Each
+ * star sits at `anchor + dir · R` (R = SKY_PARALLAX_RADIUS), so camera
+ * translation (drop, hop, zoom) gives a small, real parallax. In the shader
+ * that is `normalize(dir + invR · (anchor − cam))`; invR = 0 is the old
+ * sky at infinity, exactly. The black-hole flight stays rotation-only
+ * (invR = 0; FlightStarStreak owns flight parallax). At the handoff the
+ * anchor starts ON the camera (identical to infinity, so no jump) and
+ * moves to the arena centre in proportion to the camera's travel from its
+ * handoff pose to its rest pose — a still camera never moves the sky, and
+ * there is no height-synced sky rotation (`introSkyDropPitch` stays dead).
+ * Lensing (angle to the hole) and the horizon fade (star elevation) still
+ * use the star's own direction. Shift+S: live R slider.
  */
+
+/** Pass Q Q3 — arena-anchored sky radius presets, metres (drift over the drop at Dane's window, 1837×1222: see README §9). */
+export const SKY_PARALLAX_PRESETS = Object.freeze({ subtle: 1000, medium: 400, strong: 160 });
+/** Live default — "subtle" until Dane picks. */
+export const SKY_PARALLAX_RADIUS = SKY_PARALLAX_PRESETS.subtle;
+/** Where the sky is anchored: the ring centre (CameraRig `center`). */
+export const SKY_ARENA_CENTER = Object.freeze(new THREE.Vector3(0, 0, 0));
+
+/**
+ * CPU mirror of the shader's projection (probes use it): the world direction
+ * a star of direction `dir` is drawn at from `camPos`.
+ * @param {THREE.Vector3} out
+ * @param {THREE.Vector3} dir unit star direction
+ * @param {number} invR 1 / R (0 = at infinity)
+ * @param {THREE.Vector3} anchor
+ * @param {THREE.Vector3} camPos
+ */
+export function skyWorldDir(out, dir, invR, anchor, camPos) {
+  // Component-wise so `out` may be `dir`.
+  return out.set(dir.x + invR * (anchor.x - camPos.x), dir.y + invR * (anchor.y - camPos.y), dir.z + invR * (anchor.z - camPos.z)).normalize();
+}
 
 /** Historical shell radius — stars are now rendered at infinity (rotation-only projection, no draw distance), so this no longer feeds the shader. Kept as a labeled constant for debugStarFieldGeometry's diagnostic output. */
 export const STAR_FIELD_RADIUS = 170;
@@ -68,6 +97,8 @@ const StarFieldShader = {
   uniforms: {
     uTime: { value: 0 },
     uCameraPos: { value: new THREE.Vector3() },
+    uSkyAnchor: { value: new THREE.Vector3() },
+    uSkyInvR: { value: 0 },
     uBlackHolePos: { value: BLACK_HOLE_CENTER.clone() },
     uLensInner: { value: 0 },
     uLensOuter: { value: 0 },
@@ -85,6 +116,8 @@ const StarFieldShader = {
   },
   vertexShader: /* glsl */ `
     uniform vec3 uCameraPos;
+    uniform vec3 uSkyAnchor;
+    uniform float uSkyInvR;
     uniform vec3 uBlackHolePos;
     uniform float uLensInner;
     uniform float uLensOuter;
@@ -118,8 +151,8 @@ const StarFieldShader = {
       vColor = aColor;
       vPhase = aPhase;
       vMag = aBright;
-      // Star direction is fixed in world space — these stars are at
-      // infinity, so only the direction is ever meaningful.
+      // Star direction, fixed in world space. Lensing and the horizon fade
+      // read it; where the star is drawn also depends on the anchor below.
       vec3 skyDir = normalize(position);
       vElev = skyDir.y;
 
@@ -149,10 +182,10 @@ const StarFieldShader = {
         }
       }
 
-      // Rotation-only projection: transform the direction by the camera's
-      // rotation alone (never its position), so this field has zero
-      // parallax under any translation — drop, hop, zoom, or cursor shear.
-      vec3 viewDir = mat3(viewMatrix) * skyDir;
+      // Arena-anchored at radius R (point = anchor + dir · R), seen from the
+      // camera: invR = 0 is the rotation-only sky at infinity.
+      vec3 drawDir = normalize(skyDir + uSkyInvR * (uSkyAnchor - uCameraPos));
+      vec3 viewDir = mat3(viewMatrix) * drawDir;
       // Twinkle: a slow, per-star, never-zero brightness wobble — each star
       // has its own random rate (aFreq, 0.2-0.8 Hz) and phase, so the field
       // doesn't pulse in unison. uTwinkleAmount = 0 disables it outright.
@@ -409,7 +442,8 @@ export const DEFAULT_TUNING = {
  * @param {{
  *   horizonFadeOn?: boolean,
  *   lensActive?: boolean,
- *   pixelRatio?: number
+ *   pixelRatio?: number,
+ *   parallax?: { radius: number, handoffPos: THREE.Vector3 | null, travel: number } | null
  * }} [opts]
  */
 export function updateStarField(field, camera, time, dt, opts = {}) {
@@ -436,4 +470,26 @@ export function updateStarField(field, camera, time, dt, opts = {}) {
   uniforms.uLensInner.value = lens ? lens.innerAngular : 0;
   uniforms.uLensOuter.value = lens ? lens.outerAngular : 0;
   uniforms.uLensStrength.value = lens ? lens.strength : 0;
+  skyParallaxUniforms(uniforms, opts.parallax);
+}
+
+/**
+ * Pass Q Q3 — the finite-R anchor for this frame (shared by StarField and
+ * the cursor trail's reveal field). `travel` is the camera's 0..1 travel
+ * from its handoff pose to its rest pose; null / radius ≤ 0 = at infinity.
+ * @param {Record<string, THREE.IUniform>} uniforms
+ * @param {{ radius: number, handoffPos: THREE.Vector3 | null, travel: number } | null | undefined} parallax
+ */
+export function skyParallaxUniforms(uniforms, parallax) {
+  if (!uniforms.uSkyInvR) return;
+  const r = parallax?.radius;
+  if (!parallax || !(r > 0) || !Number.isFinite(r)) {
+    uniforms.uSkyInvR.value = 0;
+    return;
+  }
+  uniforms.uSkyInvR.value = 1 / r;
+  const b = Math.min(1, Math.max(0, parallax.travel ?? 1));
+  const a = uniforms.uSkyAnchor.value;
+  if (parallax.handoffPos) a.copy(parallax.handoffPos).lerp(SKY_ARENA_CENTER, b);
+  else a.copy(SKY_ARENA_CENTER);
 }

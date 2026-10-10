@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { skyParallaxUniforms } from "./StarField.js";
 import { BLACK_HOLE_CENTER } from "../camera/BlackHoleCameraSequence.js";
 import { blackHoleLensFromCamera, SKY_HORIZON_HIGH } from "./MilkyWayNebulaShader.js";
 import {
@@ -20,11 +21,9 @@ import {
  * flight. Do not add the far-sky field back here; wire it through
  * StarField.js instead.
  *
- * Stars here are at infinity: the vertex shader transforms each star's
- * fixed world DIRECTION by the camera's rotation only (mat3(viewMatrix)),
- * never by camera position. A real star that far away does not visibly
- * move under a translation as small as a camera drop, hop, zoom, or cursor
- * shear — only the camera's own rotation changes where it sits on screen.
+ * Stars here use StarField.js's projection (Pass Q Q3): a fixed world
+ * direction, drawn at `anchor + dir · R` — rotation-only at infinity while
+ * invR = 0 (the flight, where this trail lives), arena-anchored otherwise.
  */
 
 /** Distant shell radius the reveal-trail's directions are generated on, meters — direction only, not a draw distance (see the rotation-only projection below). */
@@ -45,6 +44,8 @@ const StarfieldShader = {
   uniforms: {
     uTime: { value: 0 },
     uCameraPos: { value: new THREE.Vector3() },
+    uSkyAnchor: { value: new THREE.Vector3() },
+    uSkyInvR: { value: 0 },
     uBlackHolePos: { value: BLACK_HOLE_CENTER.clone() },
     uLensInner: { value: 0 },
     uLensOuter: { value: 0 },
@@ -66,6 +67,8 @@ const StarfieldShader = {
   vertexShader: /* glsl */ `
     uniform float uTime;
     uniform vec3 uCameraPos;
+    uniform vec3 uSkyAnchor;
+    uniform float uSkyInvR;
     uniform vec3 uBlackHolePos;
     uniform float uLensInner;
     uniform float uLensOuter;
@@ -127,10 +130,9 @@ const StarfieldShader = {
         }
       }
 
-      // Rotation-only projection: transform the direction by the camera's
-      // rotation alone (never its position), so this field has zero
-      // parallax under any translation — drop, hop, zoom, or cursor shear.
-      vec3 viewDir = mat3(viewMatrix) * skyDir;
+      // Same arena-anchored projection as StarField.js (invR = 0: at
+      // infinity), so the reveal stars move with the sky.
+      vec3 viewDir = mat3(viewMatrix) * normalize(skyDir + uSkyInvR * (uSkyAnchor - uCameraPos));
       vBright = 1.0 + uTwinkleAmount * sin(uTime * aFreq * uTwinkleSpeed * 6.28318 + aPhase);
       // Same anti-pop treatment as StarField.js: never render sub-pixel,
       // scale alpha down instead so small stars stay small and dim without
@@ -294,7 +296,7 @@ export function createRevealStarfield(starCount = 24000) {
  * @param {THREE.Points} starfield
  * @param {THREE.Camera} camera
  * @param {number} time
- * @param {{ lensActive?: boolean, horizonFade?: boolean, pixelRatio?: number }} [opts]
+ * @param {{ lensActive?: boolean, horizonFade?: boolean, pixelRatio?: number, parallax?: Parameters<typeof skyParallaxUniforms>[1] }} [opts]
  */
 export function updateStarfield(starfield, camera, time, opts = {}) {
   const uniforms = starfield?.material?.uniforms;
@@ -313,4 +315,5 @@ export function updateStarfield(starfield, camera, time, opts = {}) {
   if (Number.isFinite(opts.pixelRatio)) {
     uniforms.uPixelRatio.value = opts.pixelRatio;
   }
+  skyParallaxUniforms(uniforms, opts.parallax);
 }

@@ -1,7 +1,7 @@
 /**
  * Pass J item 5 — track 20 ring stars for 10 s still, then 10 s during slow
  * cursor parallax, at the user's window size. Writes tmp/pass-j/<label>/stars.json.
- * Usage: node scripts/pass-j-stars.mjs <label> [--port 5190] [--stop 1]
+ * Usage: node scripts/pass-j-stars.mjs <label> [--port 5190] [--stop 1] [--sky R]
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { bootStage, W, H } from "./passj-lib.mjs";
@@ -13,6 +13,8 @@ const OUT = `tmp/pass-j/${label}`;
 mkdirSync(OUT, { recursive: true });
 
 const { browser, page, dbg, sleep, hopTo } = await bootStage({ port: opt("port", 5190) });
+// Pass Q Q3 — optional sky radius (0 = at infinity); default = SKY_PARALLAX_RADIUS.
+if (args.includes("--sky")) await dbg("setSkyParallaxRadius", opt("sky", 0));
 await hopTo(opt("stop", 1));
 await page.mouse.move(W / 2, H / 2);
 await sleep(3000);

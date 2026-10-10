@@ -80,7 +80,8 @@ function seedRevealField(trail, camera) {
  *   timeWindow?: number,
  *   headRadius?: number,
  *   taperExponent?: number,
- *   maxLength?: number
+ *   maxLength?: number,
+ *   parallax?: { radius: number, handoffPos: THREE.Vector3 | null, travel: number } | null
  * }} [opts]
  */
 export function updateCursorStarTrail(trail, camera, dt, opts = {}) {
@@ -142,7 +143,8 @@ export function updateCursorStarTrail(trail, camera, dt, opts = {}) {
   updateStarfield(trail, camera, opts.time ?? 0, {
     lensActive: true,
     horizonFade: false,
-    pixelRatio
+    pixelRatio,
+    parallax: opts.parallax
   });
 
   uniforms.uViewport.value.set(opts.width || 1, opts.height || 1);

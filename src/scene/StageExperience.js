@@ -31,7 +31,7 @@ import { LiveStageEnvironment } from "./stage/LiveStageEnvironment.js";
 import { buildStageStudioRoom } from "./stage/StageStudioRoom.js";
 import { buildStageFloor } from "./stage/StageFloor.js";
 import { createCursorStarTrail, updateCursorStarTrail } from "./blackhole/CursorStarTrail.js";
-import { createStarField, rebuildStarField, updateStarField, STAR_FIELD_RADIUS } from "./blackhole/StarField.js";
+import { createStarField, rebuildStarField, updateStarField, skyWorldDir, STAR_FIELD_RADIUS, SKY_PARALLAX_RADIUS } from "./blackhole/StarField.js";
 import { createFlightStarStreak, updateFlightStarStreak, STREAK_SPAWN_AHEAD } from "./blackhole/FlightStarStreak.js";
 import {
   loadWetFloorTextures,
@@ -660,6 +660,8 @@ export class StageExperience {
     this._introSpringArmed = this.reducedMotion;
     /** Black-hole approach/spiral owns the camera until the aerial handoff. */
     this._blackHoleActive = false;
+    /** Pass Q Q3 — arena-anchored sky: radius (Shift+S), handoff pose, travel to rest (0..1). */
+    this._skyParallax = { radius: SKY_PARALLAX_RADIUS, handoffPos: null, restPos: null, travel: 1, armed: false };
     this.blackHoleSeq = null;
     this.blackHole = null;
     this._introHoldStartedAt = 0;
@@ -2318,14 +2320,21 @@ export class StageExperience {
     cam.updateMatrixWorld(true);
     const canvas = this.renderer.domElement;
     const W0 = canvas.width;
+    const H0 = canvas.height;
+    const cursorAt = [];
     let W = canvas.width;
     let H = canvas.height;
     const sizes = new Set();
     const frameInfo = [];
     const v = new THREE.Vector3();
     const v4 = new THREE.Vector4();
+    const su = field.material.uniforms;
+    const camPos = new THREE.Vector3();
     const project = (i, out) => {
-      v.fromBufferAttribute(pos, i).normalize().transformDirection(cam.matrixWorldInverse);
+      v.fromBufferAttribute(pos, i).normalize();
+      // Same projection as the shader (Pass Q Q3: finite-R anchor).
+      skyWorldDir(v, v, su.uSkyInvR?.value ?? 0, su.uSkyAnchor?.value ?? camPos, cam.getWorldPosition(camPos));
+      v.transformDirection(cam.matrixWorldInverse);
       v4.set(v.x, v.y, v.z, 1).applyMatrix4(cam.projectionMatrix);
       if (v4.w <= 0) return false;
       out.x = ((v4.x / v4.w) * 0.5 + 0.5) * W;
@@ -2375,6 +2384,8 @@ export class StageExperience {
         W = canvas.width;
         H = canvas.height;
         sizes.add(`${W}x${H}`);
+        const cp = this.waterCursor?._pos;
+        cursorAt.push(cp ? [Math.round(cp.x), Math.round(cp.y)] : []);
         frameInfo.push([
           +(this.renderer.getPixelRatio?.() ?? 0).toFixed(3),
           this.post?.drawWidth ?? 0,
@@ -2437,7 +2448,12 @@ export class StageExperience {
             minPctOfMean: mean > 0 ? +((Math.min(...vals) / mean) * 100).toFixed(1) : null,
             maxPctOfMean: mean > 0 ? +((Math.max(...vals) / mean) * 100).toFixed(1) : null,
             maxFrameJumpPct: +(maxJump * 100).toFixed(1),
-            driftPx: +Math.hypot(track[s].x1 - track[s].x0, track[s].y1 - track[s].y0).toFixed(2)
+            driftPx: +Math.hypot(track[s].x1 - track[s].x0, track[s].y1 - track[s].y0).toFixed(2),
+            // Pass Q: start position (device px, top-down) and, for outliers,
+            // the series with the cursor (CSS px) so occlusion can be told
+            // apart from flicker.
+            px: [Math.round(c.x), Math.round(H0 - c.y)],
+            ...(maxJump > 0.15 ? { outlier: series[s].map((x, k) => [x == null ? null : Math.round(x), ...(cursorAt[k] ?? [])]) } : {})
           };
         });
         resolve({
@@ -8890,6 +8906,17 @@ export class StageExperience {
     s.isSettled = false;
     rig._introActive = true;
     rig.poseSuspended = false;
+    // Pass Q Q3 — the sky anchor starts on the camera at its apex pose (the
+    // first ring frame captures it) and reaches the arena centre at rest.
+    const sky = this._skyParallax;
+    sky.armed = true;
+    sky.handoffPos = null;
+    sky.travel = 0;
+    sky.restPos = new THREE.Vector3(
+      rig.center[0] + rig.restRadius * Math.sin(s.theta),
+      CAMERA_REST_HEIGHT,
+      rig.center[2] + rig.restRadius * Math.cos(s.theta)
+    );
     const remaining = this._holdWorkRemaining();
     if (bustReady && !remaining.done && GAP_HOLD_MAX_MS > 0) {
       // Pass M — finish the hold's work behind the black gap.
@@ -9575,8 +9602,143 @@ export class StageExperience {
       height: h,
       pixelRatio: this.renderer?.getPixelRatio?.() ?? this.pixelRatio ?? 1,
       presence: cursor?.uniforms?.uPresence?.value ?? 0,
-      time
+      time,
+      parallax: this._skyParallaxFrame()
     });
+  }
+
+  /**
+   * Pass Q Q3 — this frame's sky anchor (null = at infinity: the flight).
+   * After the handoff the anchor moves from the camera's apex pose to the
+   * arena centre in proportion to the camera's travel toward its rest pose
+   * (monotonic), so a still camera never moves the sky and the anchor is
+   * fully on the arena by the landing. Called after the rig update.
+   */
+  _tickSkyParallax() {
+    const sky = this._skyParallax;
+    if (this._blackHoleActive) {
+      sky.armed = false;
+      sky.handoffPos = null;
+      sky.travel = 0;
+      return null;
+    }
+    if (sky.armed && !sky.handoffPos) sky.handoffPos = this.camera.position.clone();
+    if (sky.handoffPos && sky.travel < 1) {
+      const span = sky.restPos ? sky.handoffPos.distanceTo(sky.restPos) : 0;
+      const moved = this.camera.position.distanceTo(sky.handoffPos);
+      sky.travel = span > 1e-3 ? Math.max(sky.travel, Math.min(1, moved / span)) : 1;
+    }
+    return this._skyParallaxFrame();
+  }
+
+  /** The anchor state the star shaders read (StarField.skyParallaxUniforms). */
+  _skyParallaxFrame() {
+    const sky = this._skyParallax;
+    if (this._blackHoleActive) return null;
+    return { radius: sky.radius, handoffPos: sky.handoffPos, travel: sky.handoffPos ? sky.travel : 1 };
+  }
+
+  /**
+   * DEV — Pass Q Q3: arm a per-frame trace of the sky's extra parallax
+   * (finite-R vs infinity screen offset, CSS px, mean over the 1500 brightest
+   * upper-sky stars that are on screen) with travel and flight state; `debugSkyTrace(false)`
+   * stops and returns it. Proves the handoff starts at 0 offset and grows
+   * only in small steps.
+   */
+  debugSkyTrace(on = true) {
+    if (!on) {
+      const rows = this._skyTraceRows ?? [];
+      this._skyTraceRows = null;
+      let maxStep = 0;
+      for (let i = 1; i < rows.length; i += 1) if (!rows[i].flight && !rows[i - 1].flight) maxStep = Math.max(maxStep, Math.abs(rows[i].off - rows[i - 1].off));
+      const firstRing = rows.find((r) => !r.flight) ?? null;
+      return { frames: rows.length, firstRing, maxStepPx: +maxStep.toFixed(2), last: rows.at(-1) ?? null, rows };
+    }
+    const pos = this.starField.geometry.getAttribute("position");
+    const bright = this.starField.geometry.getAttribute("aBright");
+    const ids = [];
+    for (let i = 0; i < pos.count; i += 1) if (pos.getY(i) / Math.hypot(pos.getX(i), pos.getY(i), pos.getZ(i)) > 0.12) ids.push(i);
+    ids.sort((x, y) => bright.getX(y) - bright.getX(x));
+    this._skyTraceIds = ids.slice(0, 1500);
+    this._skyTraceRows = [];
+    return { armed: this._skyTraceIds.length };
+  }
+
+  _skyTraceFrame() {
+    const cam = this.camera;
+    const su = this.starField.material.uniforms;
+    const pos = this.starField.geometry.getAttribute("position");
+    const { w, h } = this._viewportCssSize();
+    const d = new THREE.Vector3();
+    const f = new THREE.Vector3();
+    const camPos = cam.getWorldPosition(new THREE.Vector3());
+    // In front of the camera and on screen, else null.
+    const scr = (v) => {
+      v.transformDirection(cam.matrixWorldInverse);
+      if (v.z > -0.05) return null;
+      v.applyMatrix4(cam.projectionMatrix);
+      if (Math.abs(v.x) > 1.1 || Math.abs(v.y) > 1.1) return null;
+      return [v.x * 0.5 * w, v.y * 0.5 * h];
+    };
+    let sum = 0;
+    let n = 0;
+    for (const i of this._skyTraceIds) {
+      d.fromBufferAttribute(pos, i).normalize();
+      skyWorldDir(f, d, su.uSkyInvR.value, su.uSkyAnchor.value, camPos);
+      const a = scr(d.clone());
+      const b = scr(f);
+      if (!a || !b) continue;
+      sum += Math.hypot(b[0] - a[0], b[1] - a[1]);
+      n += 1;
+    }
+    this._skyTraceRows.push({ t: Math.round(performance.now()), flight: Boolean(this._blackHoleActive), travel: +this._skyParallax.travel.toFixed(4), y: +camPos.y.toFixed(3), n, off: +(sum / Math.max(1, n)).toFixed(3) });
+  }
+
+  /** Pass Q Q3 — Shift+S slider: sky radius in metres (Infinity / ≤ 0 = rotation-only). */
+  setSkyParallaxRadius(radius) {
+    const r = Number(radius);
+    this._skyParallax.radius = r > 0 ? r : Infinity;
+    return { radius: this._skyParallax.radius, travel: this._skyParallax.travel };
+  }
+
+  /**
+   * DEV — Pass Q Q3: per-star screen offset of the finite-R sky vs the sky
+   * at infinity at the current pose (CSS px), for the visible upper sky.
+   * Over the drop the camera does not rotate and the anchor goes from the
+   * camera to the arena, so this is the drift over the drop.
+   * `window.__stageDebug("debugSkyDrift", 1000)`.
+   */
+  debugSkyDrift(radius = this._skyParallax.radius) {
+    const pos = this.starField?.geometry?.getAttribute?.("position");
+    if (!pos) return null;
+    const cam = this.camera;
+    cam.updateMatrixWorld(true);
+    const { w, h } = this._viewportCssSize();
+    const d = new THREE.Vector3();
+    const v = new THREE.Vector3();
+    const proj = (dir) => {
+      v.copy(dir).transformDirection(cam.matrixWorldInverse).applyMatrix4(cam.projectionMatrix);
+      return [(v.x * 0.5 + 0.5) * w, (0.5 - v.y * 0.5) * h];
+    };
+    const camPos = cam.getWorldPosition(new THREE.Vector3());
+    const anchor = new THREE.Vector3(0, 0, 0);
+    const out = [];
+    const f = new THREE.Vector3();
+    const fv = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i += 1) {
+      d.fromBufferAttribute(pos, i).normalize();
+      if (d.y < 0.12) continue;
+      skyWorldDir(f, d, 1 / radius, anchor, camPos);
+      if (fv.copy(f).transformDirection(cam.matrixWorldInverse).z >= 0) continue;
+      const [x0, y0] = proj(d);
+      const [x1, y1] = proj(f);
+      if (x1 < 0 || x1 > w || y1 < 0 || y1 > h) continue;
+      out.push([Math.hypot(x1 - x0, y1 - y0), x1 - x0, y1 - y0]);
+    }
+    out.sort((a, b) => a[0] - b[0]);
+    const q = (p) => +(out[Math.min(out.length - 1, Math.floor(p * out.length))]?.[0] ?? 0).toFixed(1);
+    const mean = (k) => +(out.reduce((a, r) => a + r[k], 0) / Math.max(1, out.length)).toFixed(1);
+    return { radius, view: [w, h], stars: out.length, medianPx: q(0.5), p95Px: q(0.95), maxPx: q(0.999), meanDx: mean(1), meanDy: mean(2) };
   }
 
   /** CSS viewport size — prefer documentElement so panel chrome doesn’t desync canvas. */
@@ -9853,7 +10015,8 @@ export class StageExperience {
       // uPixelRatio is set right before post.render (composer draw size).
       updateStarField(this.starField, this.camera, t, dt, {
         horizonFadeOn: !this._blackHoleActive,
-        lensActive: this._blackHoleActive
+        lensActive: this._blackHoleActive,
+        parallax: this._tickSkyParallax()
       });
     }
     if (this.flightStarStreak && this._gapHold) {
@@ -10203,6 +10366,7 @@ export class StageExperience {
       this._preDismissClean = clean ? (this._preDismissClean ?? 0) + 1 : 0;
     }
     if (this._starTrackHook && !this._skipBeauty) this._starTrackHook();
+    if (this._skyTraceRows) this._skyTraceFrame();
     if (this._pendingFrameReadback && !this._skipBeauty) {
       const { x, y, w, h, resolve } = this._pendingFrameReadback;
       this._pendingFrameReadback = null;
