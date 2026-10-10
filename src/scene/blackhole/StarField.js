@@ -24,8 +24,8 @@ import { blackHoleLensFromCamera, SKY_HORIZON_HIGH, SKY_HORIZON_LOW } from "./Mi
 
 /** Pass Q Q3 — arena-anchored sky radius presets, metres (drift over the drop at Dane's window, 1837×1222: see README §9). */
 export const SKY_PARALLAX_PRESETS = Object.freeze({ subtle: 1000, medium: 400, strong: 160 });
-/** Live default — "subtle" until Dane picks. */
-export const SKY_PARALLAX_RADIUS = SKY_PARALLAX_PRESETS.subtle;
+/** Live default — "medium" (Dane's pick, Pass R). */
+export const SKY_PARALLAX_RADIUS = SKY_PARALLAX_PRESETS.medium;
 /** Where the sky is anchored: the ring centre (CameraRig `center`). */
 export const SKY_ARENA_CENTER = Object.freeze(new THREE.Vector3(0, 0, 0));
 

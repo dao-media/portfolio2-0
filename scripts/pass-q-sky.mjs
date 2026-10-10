@@ -6,6 +6,7 @@
  *   --clip <subtle|medium|strong|R>: 14 s clip from the Enter click (drop)
  *     through one hop to Desktop, with the radius set before the click.
  *   --trace <preset>: per-frame extra-parallax offset across the handoff.
+ *   --measure <preset>: drop / full cursor parallax / one hop drift (median, p95).
  * Usage: node scripts/pass-q-sky.mjs --drift | --clip subtle | --trace strong [--port 5179]
  */
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -58,6 +59,51 @@ if (args.includes("--trace")) {
   const ring = tr.rows.filter((r) => !r.flight);
   console.log(name, "frames", tr.frames, "first ring frame", JSON.stringify(tr.firstRing), "max step px", tr.maxStepPx, "final", JSON.stringify(tr.last));
   for (const k of [0, 0.25, 0.5, 0.75, 1]) { const r = ring.find((x) => x.travel >= k); if (r) console.log(" travel>=", k, "off px", r.off, "y", r.y); }
+  process.exit(0);
+}
+
+if (args.includes("--measure")) {
+  // Pass R — one session at one radius: drop (click → settled, incl. the
+  // handoff trace), full cursor parallax at Bust rest, then one hop.
+  const name = args[args.indexOf("--measure") + 1] ?? "medium";
+  const radius = SKY_PARALLAX_PRESETS[name] ?? Number(name);
+  const { browser, dbg, sleep, page, waitSettled } = await bootStage({
+    port,
+    holdMs: 250,
+    profileDir: resolve("tmp/pass-q/chrome-profile-check"),
+    beforeClick: async (d) => {
+      await d("setSkyParallaxRadius", radius);
+      await d("debugSkyTrace", true);
+    }
+  });
+  await waitSettled();
+  await sleep(1500);
+  const drop = await dbg("debugSkyTrace", false);
+  // Full cursor parallax: sweep the window's extremes (corners + edges), 8 s.
+  await page.mouse.move(W / 2, H / 2);
+  await sleep(1500);
+  await dbg("debugSkyTrace", true);
+  const t0 = Date.now();
+  while (Date.now() - t0 < 8000) {
+    const a = ((Date.now() - t0) / 4000) * Math.PI * 2;
+    await page.mouse.move(W / 2 + Math.cos(a) * W * 0.49, H / 2 + Math.sin(a * 2) * H * 0.49);
+    await sleep(16);
+  }
+  await page.mouse.move(W / 2, H / 2);
+  await sleep(1500);
+  const cursor = await dbg("debugSkyTrace", false);
+  await dbg("debugSkyTrace", true);
+  await dbg("advance", 1);
+  await sleep(1000);
+  await waitSettled();
+  await sleep(1000);
+  const hop = await dbg("debugSkyTrace", false);
+  await browser.close();
+  const strip = (r) => ({ frames: r.frames, firstRing: r.firstRing, maxStepPx: r.maxStepPx, drift: r.drift, last: r.last });
+  const out = { radius, drop: strip(drop), cursor: strip(cursor), hop: strip(hop) };
+  writeFileSync(`${OUT}/measure-${name}.json`, JSON.stringify(out, null, 1));
+  console.log("handoff first ring frame", JSON.stringify(drop.firstRing), "max step px", drop.maxStepPx);
+  for (const k of ["drop", "cursor", "hop"]) console.log(k, JSON.stringify(out[k].drift), "max step", out[k].maxStepPx);
   process.exit(0);
 }
 

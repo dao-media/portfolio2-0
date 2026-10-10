@@ -2311,7 +2311,7 @@ export class StageExperience {
    * the per-frame readPixels stall is the probe's own cost.
    * `window.__stageDebug("debugStarTrack", 10, 20)`.
    */
-  debugStarTrack(seconds = 10, count = 20) {
+  debugStarTrack(seconds = 10, count = 20, opts = {}) {
     const field = this.starField;
     const pos = field?.geometry?.getAttribute?.("position");
     const bright = field?.geometry?.getAttribute?.("aBright");
@@ -2322,6 +2322,8 @@ export class StageExperience {
     const W0 = canvas.width;
     const H0 = canvas.height;
     const cursorAt = [];
+    const events = [];
+    const nearScene = [];
     let W = canvas.width;
     let H = canvas.height;
     const sizes = new Set();
@@ -2409,6 +2411,28 @@ export class StageExperience {
             continue;
           }
           gl.readPixels(rx, ry, 2 * R + 1, 2 * R + 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+          // Pass R: on the first frame, tag stars with scene content (geometry
+          // edge, neon glow) within ±20 px but outside the star's own core —
+          // their patch reads that content as it slides past under parallax.
+          if (nearScene[s] == null) {
+            const WR = 20;
+            const cx = Math.round(p.x);
+            const cy = Math.round(p.y);
+            if (cx - WR < 0 || cy - WR < 0 || cx + WR >= W || cy + WR >= H) nearScene[s] = true;
+            else {
+              const wb = new Uint8Array((2 * WR + 1) * (2 * WR + 1) * 4);
+              gl.readPixels(cx - WR, cy - WR, 2 * WR + 1, 2 * WR + 1, gl.RGBA, gl.UNSIGNED_BYTE, wb);
+              let mx = 0;
+              for (let yy = 0; yy <= 2 * WR; yy += 1) {
+                for (let xx = 0; xx <= 2 * WR; xx += 1) {
+                  if (Math.hypot(xx - WR, yy - WR) <= 6) continue;
+                  const o = (yy * (2 * WR + 1) + xx) * 4;
+                  mx = Math.max(mx, 0.299 * wb[o] + 0.587 * wb[o + 1] + 0.114 * wb[o + 2]);
+                }
+              }
+              nearScene[s] = mx > 40;
+            }
+          }
           // Background = median of the patch border ring.
           const ring = [];
           let sum = 0;
@@ -2422,7 +2446,36 @@ export class StageExperience {
           }
           ring.sort((a, b) => a - b);
           const bg = ring[ring.length >> 1];
-          series[s].push(Math.max(0, sum - bg * N) * unit);
+          const val = Math.max(0, sum - bg * N) * unit;
+          // Pass R: on a jump (and once at frame 5 as a baseline) read a
+          // 41×41 patch around the predicted centre and record where its
+          // brightest pixel is — a star off the prediction shows as an offset.
+          const prevVal = series[s].findLast?.((x) => x != null) ?? null;
+          const evs = (events[s] ??= []);
+          const jump = prevVal != null && Math.abs(val - prevVal) > 0.3 * Math.max(prevVal, val, 1) && Math.abs(val - prevVal) > 150;
+          if ((series[s].length === 5 || jump || opts.everyFrame) && (evs.length < 5 || opts.everyFrame) && rx - 15 >= 0 && ry - 15 >= 0 && rx + 2 * R + 15 < W && ry + 2 * R + 15 < H) {
+            const WR = 20;
+            const wb = new Uint8Array((2 * WR + 1) * (2 * WR + 1) * 4);
+            const cx = Math.round(p.x);
+            const cy = Math.round(p.y);
+            gl.readPixels(cx - WR, cy - WR, 2 * WR + 1, 2 * WR + 1, gl.RGBA, gl.UNSIGNED_BYTE, wb);
+            let best = -1;
+            let bx = 0;
+            let by = 0;
+            for (let yy = 0; yy <= 2 * WR; yy += 1) {
+              for (let xx = 0; xx <= 2 * WR; xx += 1) {
+                const o = (yy * (2 * WR + 1) + xx) * 4;
+                const l = 0.299 * wb[o] + 0.587 * wb[o + 1] + 0.114 * wb[o + 2];
+                if (l > best) {
+                  best = l;
+                  bx = xx - WR;
+                  by = yy - WR;
+                }
+              }
+            }
+            evs.push({ k: series[s].length, val: Math.round(val), prev: prevVal == null ? null : Math.round(prevVal), peak: Math.round(best), peakDx: bx, peakDy: -by, at: [Math.round(p.x * 100) / 100, Math.round((H - p.y) * 100) / 100], canvas: `${W}x${H}`, ...(opts.everyFrame ? { uCam: su.uCameraPos.value.toArray().map((x) => +x.toFixed(4)), cam: cam.getWorldPosition(new THREE.Vector3()).toArray().map((x) => +x.toFixed(4)) } : { patch: btoa(String.fromCharCode(...wb)) }) });
+          }
+          series[s].push(val);
         }
         if (performance.now() < deadline) return;
         this._starTrackHook = null;
@@ -2453,6 +2506,8 @@ export class StageExperience {
             // the series with the cursor (CSS px) so occlusion can be told
             // apart from flicker.
             px: [Math.round(c.x), Math.round(H0 - c.y)],
+            nearScene: nearScene[s] ?? null,
+            events: events[s] ?? [],
             ...(maxJump > 0.15 ? { outlier: series[s].map((x, k) => [x == null ? null : Math.round(x), ...(cursorAt[k] ?? [])]) } : {})
           };
         });
@@ -9640,10 +9695,14 @@ export class StageExperience {
 
   /**
    * DEV — Pass Q Q3: arm a per-frame trace of the sky's extra parallax
-   * (finite-R vs infinity screen offset, CSS px, mean over the 1500 brightest
+   * (finite-R vs infinity screen offset, CSS px, mean over the 3000 brightest
    * upper-sky stars that are on screen) with travel and flight state; `debugSkyTrace(false)`
    * stops and returns it. Proves the handoff starts at 0 offset and grows
-   * only in small steps.
+   * only in small steps. Pass R: also tracks each star's offset vector over
+   * the ring frames; `drift` is, per star seen in ≥ 10 ring frames, the
+   * largest move of its offset from its first ring frame (CSS px) — the
+   * extra on-screen motion finite R adds over this window (drop, hop, or
+   * cursor parallax), median / p95 over stars.
    */
   debugSkyTrace(on = true) {
     if (!on) {
@@ -9652,15 +9711,19 @@ export class StageExperience {
       let maxStep = 0;
       for (let i = 1; i < rows.length; i += 1) if (!rows[i].flight && !rows[i - 1].flight) maxStep = Math.max(maxStep, Math.abs(rows[i].off - rows[i - 1].off));
       const firstRing = rows.find((r) => !r.flight) ?? null;
-      return { frames: rows.length, firstRing, maxStepPx: +maxStep.toFixed(2), last: rows.at(-1) ?? null, rows };
+      const devs = [...(this._skyTraceStars?.values() ?? [])].filter((st) => st.n >= 10).map((st) => st.dev).sort((a, b) => a - b);
+      const q = (p) => +(devs[Math.min(devs.length - 1, Math.floor(p * devs.length))] ?? 0).toFixed(1);
+      this._skyTraceStars = null;
+      return { frames: rows.length, firstRing, maxStepPx: +maxStep.toFixed(2), last: rows.at(-1) ?? null, drift: { stars: devs.length, medianPx: q(0.5), p95Px: q(0.95), maxPx: q(1) }, rows };
     }
     const pos = this.starField.geometry.getAttribute("position");
     const bright = this.starField.geometry.getAttribute("aBright");
     const ids = [];
     for (let i = 0; i < pos.count; i += 1) if (pos.getY(i) / Math.hypot(pos.getX(i), pos.getY(i), pos.getZ(i)) > 0.12) ids.push(i);
     ids.sort((x, y) => bright.getX(y) - bright.getX(x));
-    this._skyTraceIds = ids.slice(0, 1500);
+    this._skyTraceIds = ids.slice(0, 3000);
     this._skyTraceRows = [];
+    this._skyTraceStars = new Map();
     return { armed: this._skyTraceIds.length };
   }
 
@@ -9688,8 +9751,17 @@ export class StageExperience {
       const a = scr(d.clone());
       const b = scr(f);
       if (!a || !b) continue;
-      sum += Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const ox = b[0] - a[0];
+      const oy = b[1] - a[1];
+      sum += Math.hypot(ox, oy);
       n += 1;
+      if (this._blackHoleActive) continue;
+      const st = this._skyTraceStars.get(i);
+      if (!st) this._skyTraceStars.set(i, { x0: ox, y0: oy, dev: 0, n: 1 });
+      else {
+        st.dev = Math.max(st.dev, Math.hypot(ox - st.x0, oy - st.y0));
+        st.n += 1;
+      }
     }
     this._skyTraceRows.push({ t: Math.round(performance.now()), flight: Boolean(this._blackHoleActive), travel: +this._skyParallax.travel.toFixed(4), y: +camPos.y.toFixed(3), n, off: +(sum / Math.max(1, n)).toFixed(3) });
   }
