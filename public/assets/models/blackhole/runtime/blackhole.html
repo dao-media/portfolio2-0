@@ -45,9 +45,8 @@
     canvas { display: block; width: 100%; height: 100%; }
   </style>
 
-  <!-- Libraries -->
+  <!-- GSAP Library -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
-  <script src="https://unpkg.com/glitch-gl@1.0.6"></script>
 </head>
 <body>
 
@@ -388,17 +387,14 @@ const blackHoleShader = Fn(() => {
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
 
-// GSAP Approach Setup
-// The disk outer radius is 14.5, so the full width is ~29 units
 function getCalculatedZDistance() {
   const vFOV = camera.fov * Math.PI / 180;
   const isMobile = window.innerWidth <= 768;
   const objectSize = 29; 
-  if (isMobile) return -(objectSize / (0.40 * 2 * Math.tan(vFOV / 2))); // 40% height constraint
-  return -(objectSize / (0.30 * 2 * Math.tan(vFOV / 2) * camera.aspect)); // 30% width constraint
+  if (isMobile) return -(objectSize / (0.40 * 2 * Math.tan(vFOV / 2))); 
+  return -(objectSize / (0.30 * 2 * Math.tan(vFOV / 2) * camera.aspect)); 
 }
 
-// Start camera far away for the approach sequence
 camera.position.set(0, -6, -150); 
 camera.lookAt(0, 0, 0);
 
@@ -409,9 +405,12 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 container.appendChild(renderer.domElement);
 
 const geometry = new THREE.SphereGeometry(100, 32, 32);
-geometry.scale(-1, 1, 1); // View from inside
+geometry.scale(-1, 1, 1); 
 const material = new THREE.MeshBasicNodeMaterial();
-material.colorNode = blackHoleShader;
+
+// FIXED HERE: Added () to invoke the shader correctly
+material.colorNode = blackHoleShader(); 
+
 const mesh = new THREE.Mesh(geometry, material);
 mesh.frustumCulled = false;
 scene.add(mesh);
@@ -424,7 +423,6 @@ let lastFrameTime = performance.now();
 
 function updateCamera() {
   uniforms.cameraPosition.value.copy(camera.position);
-  // Maintain a steady look target relative to the camera
   const direction = new THREE.Vector3(0, 0, -1);
   direction.applyQuaternion(camera.quaternion);
   const target = camera.position.clone().add(direction.multiplyScalar(10));
@@ -453,22 +451,24 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   uniforms.resolution.value.set(window.innerWidth, window.innerHeight);
   
-  // Recalculate GSAP target distance on resize
   gsap.to(camera.position, { z: getCalculatedZDistance(), duration: 0.5, ease: "power1.out", onUpdate: updateCamera });
 });
 
-// GLITCH-GL setup
+// GLITCH-GL setup via Dynamic Import (Protects against Webflow Syntax errors)
 let glitchEffect = null;
-if (typeof glitchGL !== 'undefined') {
-  glitchEffect = glitchGL({
-    target: '#splash-container',
-    effects: {
-      glitch: { enabled: false, intensity: 1.8, rgbShift: 0.05 },
-      pixelation: { enabled: false },
-      crt: { enabled: false }
-    }
-  });
-}
+import('https://unpkg.com/glitch-gl@1.0.6').then((module) => {
+  const glitchFunc = module.default || module.glitchGL || module;
+  if (typeof glitchFunc === 'function') {
+    glitchEffect = glitchFunc({
+      target: '#splash-container',
+      effects: {
+        glitch: { enabled: false, intensity: 1.8, rgbShift: 0.05 },
+        pixelation: { enabled: false },
+        crt: { enabled: false }
+      }
+    });
+  }
+}).catch(err => console.warn("Glitch-GL import blocked:", err));
 
 const triggerGlitch = () => { if(glitchEffect && !isPaused && !prefersReducedMotion) glitchEffect.updateOptions({ effects: { glitch: { enabled: true } } }); };
 const stopGlitch = () => { if(glitchEffect) glitchEffect.updateOptions({ effects: { glitch: { enabled: false } } }); };
@@ -478,7 +478,6 @@ container.addEventListener('mouseleave', stopGlitch);
 container.addEventListener('focus', triggerGlitch);
 container.addEventListener('blur', stopGlitch);
 
-// Initialize WebGPU, attach Bloom, and fire GSAP Approach sequence
 renderer.init().then(() => {
   postProcessing = new THREE.PostProcessing(renderer);
   const scenePass = pass(scene, camera);
@@ -490,10 +489,9 @@ renderer.init().then(() => {
   bloomPass.radius.value = config.bloomRadius;
   postProcessing.outputNode = scenePassColor.add(bloomPass);
   
-  // Execute the Approach Sequence!
   gsap.to(camera.position, {
-    z: getCalculatedZDistance(), // Lands exactly at 30%/40% size rule
-    y: -2, // Rests at a slight bottom-angle to see the top bias profile
+    z: getCalculatedZDistance(), 
+    y: -2, 
     duration: prefersReducedMotion ? 0 : 5.5,
     ease: "power2.out",
     onUpdate: updateCamera
